@@ -5,39 +5,18 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from pytorch_msssim import ( ssim, ms_ssim )
+import matplotlib.pyplot as plt
 
-@torch.jit.script
-def fourier(tensor, basis) -> torch.Tensor:
-  inner = torch.sum(basis[:, None, :] * tensor[None, ...], dim=-1).transpose(0, 1)
-  # TODO could see about making this 1-s**2
-  s = inner.sin()
-  c = inner.cos()
-  return torch.cat([
-    tensor, s, c,
-  ], dim=-1)
-
-def create_fourier_basis(shape, freq, n_enc_fns, device):
-  if type(freq) == list:
-    assert(len(freq) == n_enc_fns)
-    freqs = torch.tensor(freq, device=device, dtype=torch.float)\
-      .unsqueeze(-1)\
-      .expand(n_enc_fns, *shape)
-    return torch.normal(0, freqs)
-
-  return torch.normal(0, freq,
-                      size=(n_enc_fns, *shape),
-                      dtype=torch.float,
-                      device=device).requires_grad_(False)
-
-# fixed versions of fourier stuff (I think above was broken)
-def create_fourier_basis2(batch_size, features=3, freq=40, device="cuda"):
+def create_fourier_basis(batch_size, features=3, freq=40, device="cuda"):
   B = freq * torch.randn(batch_size, features, device=device).T
   out_size = batch_size * 2 + features
   return B, out_size
 @torch.jit.script
-def fourier2(x, B):
+def fourier(x, B):
   mapped = x @ B
   return torch.cat([x, mapped.sin(), mapped.cos()], dim=-1)
+
+def save_image(name, img): plt.imsave(name, img.detach().cpu().clamp(0,1).numpy())
 
 #@torch.jit.script
 def nonzero_eps(v, eps: float=1e-7):
