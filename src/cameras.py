@@ -5,19 +5,6 @@ from dataclasses import dataclass
 from .utils import rotate_vector
 import random
 
-# generates random positions on  a grid
-def generate_positions(size:int, sample_size:int, device="cuda"):
-  return torch.randint(0, size, (sample_size, 2), device=device)
-
-# generate random
-def generate_continuous(size:int, sample_size:int, device="cuda"):
-  u = random.randint(0, max(size-sample_size, 0))
-  v = random.randint(0, max(size-sample_size, 0))
-  return torch.stack(torch.meshgrid(
-    torch.arange(v, min(v+sample_size, size), device=device),
-    torch.arange(u, min(u+sample_size, size), device=device),
-  ), dim=-1).reshape(-1, 2)
-
 # General Camera interface
 @dataclass
 class Camera(nn.Module):
@@ -65,8 +52,7 @@ class NeRFCamera(Camera):
     r_d = torch.sum(
       d[..., None, :] * self.cam_to_world[..., :3, :3], dim=-1
     )
-    # normalize direction and exchange [N,B,3] -> [B,N,3]
-    r_d = F.normalize(r_d, dim=-1).permute(2,0,1,3)
+    r_d = r_d.permute(2,0,1,3)#F.normalize(r_d, dim=-1).permute(2,0,1,3)
     r_o = self.cam_to_world[..., :3, -1][:, None, None, :].expand_as(r_d)
     return torch.cat([r_o, r_d], dim=-1)
 

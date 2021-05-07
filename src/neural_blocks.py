@@ -4,14 +4,15 @@ import torch.nn.functional as F
 from .utils import (
   fourier, create_fourier_basis,
 )
+from itertools import chain
 
 class SkipConnMLP(nn.Module):
   "MLP with skip connections and fourier encoding"
   def __init__(
     self,
 
-    num_layers = 8,
-    hidden_size=64,
+    num_layers = 5,
+    hidden_size = 128,
     in_size=3,
     out=3,
 
@@ -80,19 +81,35 @@ class SkipConnMLP(nn.Module):
       x = layer(self.activation(x))
     out_size = self.out.out_features
     return self.out(self.activation(x)).reshape(batches + (out_size,))
-  # sets this MLP to always just return its own input
-  def prime_identity(
+
+
+class Upsampler(nn.Module):
+  def __init__(
     self,
-    lr=1e-4,
-    iters=50_000,
-    batches=4096,
-    device="cuda",
+    in_size: int,
+    out: int,
+
+    in_features:int = 3,
+    out_features:int = 3,
+
+    hidden_size=15,
+
+    num_layers=5,
+    activation = nn.LeakyReLU(inplace=True),
   ):
-    opt = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=0)
-    for i in range(iters):
-      opt.zero_grad()
-      x = torch.rand_like(batches, self.in_size, device=device)
-      y = self(x)
-      loss = F.mse_loss(x, y)
-      loss.backward()
-      opt.step()
+    super().__init__()
+    self.layers = nn.Sequential(
+      nn.Conv2d(in_features, hidden_size, 3, 1, 1),
+      activation,
+      *list(chain.from_iterable([
+        (nn.Conv2d(hidden_size, hidden_size, 3, 1, 1), activation)
+        for _ in range(max(num_layers-2, 0))
+      ])),
+      nn.Conv2d(hidden_size, out_features, 3, 1, 1),
+    )
+    self.out = out
+  def forward(self, x):
+    img = x.permute(0,3,1,2)
+    out = F.interpolate(img, size=(self.out, self.out), mode="bilinear", align_corners=False)
+    out = self.layers(out).permute(0,2,3,1)
+    return out.sigmoid()
