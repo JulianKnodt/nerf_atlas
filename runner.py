@@ -26,7 +26,7 @@ def arguments():
     "--render-size", help="size to render images at w/o upsampling", type=int, default=16
   )
 
-  a.add_argument("--epochs", help="number of epochs to train for", type=int, default=150_000)
+  a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
   a.add_argument("--batch-size", help="size of each training batch", type=int, default=8)
   a.add_argument(
     "--view-freq", help="frequency of viewing training values", type=int, default=1000
@@ -70,7 +70,7 @@ def render(
   size,
 
   device="cuda",
-  with_noise=1e-1,
+  with_noise=3e-2,
 ):
   batch_dims = len(cam)
 
@@ -109,7 +109,7 @@ def train(model, cam, labels, opt, args, sched=None, upsample=None):
       model, cam[idxs], (0,0), size=args.size,
     )
     ref = labels[idxs]
-    loss = F.mse_loss(out, ref)
+    loss = F.mse_loss(out, ref).sqrt()
     loss.backward()
     loss = loss.item()
     opt.step()
@@ -122,7 +122,7 @@ def test(model, cam, labels, args):
   with torch.no_grad():
     for i in range(labels.shape[0]):
       out = render(
-        model, cam[None, i], (0,0), size=args.size, crop_size=args.size, with_noise=False
+        model, cam[None, i], (0,0), size=args.size, with_noise=False,
       ).squeeze(0)
       loss = F.mse_loss(out, labels[i])
       print(loss.item())
@@ -135,8 +135,7 @@ def load_model(args):
   elif args.model == "plain":
     model = nerf.PlainNeRF(out_features=args.feature_space, device=device).to(device)
   elif args.model == "ae":
-    # TODO
-    raise NotImplementedError()
+    model = nerf.NeRFAE(out_features=args.feature_space, device=device).to(device)
   else:
     raise NotImplementedError(args.model)
 

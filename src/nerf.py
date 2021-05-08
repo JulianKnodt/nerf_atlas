@@ -6,6 +6,7 @@ import random
 from .neural_blocks import ( SkipConnMLP )
 from .utils import dir_to_elev_azim
 
+@torch.jit.script
 def cumuprod_exclusive(t):
   cp = torch.cumprod(t, dim=0)
   cp = torch.roll(cp, 1, dims=0)
@@ -13,6 +14,7 @@ def cumuprod_exclusive(t):
   return cp
 
 # perform volumetric integration of density with some other quantity
+@torch.jit.script
 def volumetric_integrate(density, other, ts):
   device=density.device
 
@@ -32,6 +34,7 @@ class TinyNeRF(nn.Module):
     self,
     steps = 32,
     out_features: int = 3,
+    final_activation: bool = True,
     device="cuda",
   ):
     super().__init__()
@@ -50,18 +53,19 @@ class TinyNeRF(nn.Module):
     self.steps = steps
     self.t_near = 2
     self.t_far = 6
+
+    self.final_act = final_activation
   def forward(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
     device = r_o.device
-    ts = torch.linspace(
-      self.t_near, self.t_far, self.steps, device=device
-    )
+    ts = torch.linspace(self.t_near, self.t_far, self.steps, device=device)
     pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
 
     vals = self.estim(pts)
 
     density = vals[..., 0]
-    feats = vals[..., 1:].sigmoid()
+    feats = vals[..., 1:]
+    if self.final_act: feats = feats.sigmoid()
 
     return volumetric_integrate(density, feats, ts)
 
@@ -142,6 +146,7 @@ class NeRFAE(nn.Module):
     self,
     latent_size: int = 0,
     intermediate_size: int = 32,
+    out_features: int = 3,
 
     encoding_size: int = 16,
 
@@ -159,21 +164,32 @@ class NeRFAE(nn.Module):
     self.encode = SkipConnMLP(
       in_size=3, out=encoding_size,
       latent_size=latent_size,
-      device=device
+      num_layers=3,
+      hidden_size=32,
+      device=device,
+      xavier_init=True,
     ).to(device)
 
     self.density = SkipConnMLP(
       in_size=encoding_size, out=1,
       latent_size=latent_size,
+      num_layers=3,
+      hidden_size=32,
+
       freqs=0,
       device=device,
+      xavier_init=True,
     ).to(device)
 
     self.rgb = SkipConnMLP(
-      in_size=2, out=3,
+      in_size=2, out=out_features,
       latent_size=encoding_size,
 
+      num_layers=3,
+      hidden_size=32,
+
       device=device,
+      xavier_init=True,
     ).to(device)
 
     self.t_near = 6
@@ -186,7 +202,7 @@ class NeRFAE(nn.Module):
     r_o, r_d = rays.split([3,3], dim=-1)
     device = r_o.device
     # time steps
-    ts = torch.linspace(self.t_near, self.t_far, self.steps, device=device)
+    ts = torch.linspace(self.t_near, self.t_far, self.steps+random.randint(0,4), device=device)
     pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims=0)
     latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
 
@@ -249,7 +265,7 @@ class DynamicNeRF(nn.Module):
     r_o, r_d = rays.split([3,3], dim=-1)
     device = r_o.device
     # time steps
-    ts = torch.linspace(self.t_near, self.t_far, self.steps, device=device)
+    ts = torch.linspace(self.t_near, self.t_far, self.steps+random.randint(0, 4),device=device)
     pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
 
     dxyz = self.delta_estim(torch.cat([pts, t], dim=-1))

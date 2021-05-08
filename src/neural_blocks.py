@@ -5,6 +5,7 @@ from .utils import (
   fourier, create_fourier_basis,
 )
 from itertools import chain
+from typing import Optional
 
 class SkipConnMLP(nn.Module):
   "MLP with skip connections and fourier encoding"
@@ -69,7 +70,7 @@ class SkipConnMLP(nn.Module):
 
     self.activation = activation
 
-  def forward(self, p, latent=None):
+  def forward(self, p, latent: Optional[torch.Tensor]=None):
     batches = p.shape[:-1]
     init = fourier(p.reshape(-1, self.in_size), self.basis_p)
     if latent is not None:
