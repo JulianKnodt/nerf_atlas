@@ -29,28 +29,22 @@ def arguments():
   a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
   a.add_argument("--batch-size", help="size of each training batch", type=int, default=8)
   a.add_argument(
-    "--view-freq", help="frequency of viewing training values", type=int, default=1000
-  )
-  a.add_argument(
     "--neural-upsample", help="add neural upsampling", default=False, action="store_true"
   )
   a. add_argument(
     "--feature-space",
     help="when using neural upsampling, what is the feature space size",
-    default=20,
+    type=int, default=16,
   )
   a.add_argument(
-    "--model", help="which model do we want to use", type=str, choices=["tiny", "plain", "ae"],
-    default="plain",
+    "--model", help="which model do we want to use", type=str,
+    choices=["tiny", "plain", "ae"], default="plain",
   )
   a.add_argument(
-    "-lr", "--learning-rate", help="learning rate", type=float,
-    default=5e-3,
+    "-lr", "--learning-rate", help="learning rate", type=float, default=5e-3,
   )
-
   a.add_argument(
-    "--valid-freq", help="how often validation images are generated", type=int,
-    default=250,
+    "--valid-freq", help="how often validation images are generated", type=int, default=500,
   )
   # TODO add more arguments here
   return a.parse_args()
@@ -97,7 +91,7 @@ def load(args, training=True):
   else:
     raise NotImplementedError(kind)
 
-def train(model, cam, labels, opt, args, sched=None, upsample=None):
+def train(model, cam, labels, opt, args, sched=None):
   t = trange(args.epochs)
   batch_size = args.batch_size
   for i in t:
@@ -106,10 +100,10 @@ def train(model, cam, labels, opt, args, sched=None, upsample=None):
     idxs = random.sample(range(len(cam)), batch_size)
 
     out = render(
-      model, cam[idxs], (0,0), size=args.size,
+      model, cam[idxs], (0,0), size=args.render_size,
     )
     ref = labels[idxs]
-    loss = F.mse_loss(out, ref).sqrt()
+    loss = F.mse_loss(out, ref)
     loss.backward()
     loss = loss.item()
     opt.step()
@@ -122,7 +116,7 @@ def test(model, cam, labels, args):
   with torch.no_grad():
     for i in range(labels.shape[0]):
       out = render(
-        model, cam[None, i], (0,0), size=args.size, with_noise=False,
+        model, cam[None, i], (0,0), size=args.render_size, with_noise=False,
       ).squeeze(0)
       loss = F.mse_loss(out, labels[i])
       print(loss.item())
@@ -149,9 +143,9 @@ def load_model(args):
       out_features=3,
     ).to(device)
     # stick a neural upsampling block afterwards
-    model = nn.Sequential(model, upsampler)
+    model = nn.Sequential(model, upsampler, nn.Sigmoid())
   else:
-    ...
+    model = nn.Sequential(model, nn.Sigmoid())
   return model
 
 # in theory this is an interesting loss function but it runs into numerical stability issues
@@ -166,14 +160,10 @@ def main():
   # for some reason AdamW doesn't seem to work here
   opt = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=0)
 
-  upsample=None
-  if args.neural_upsample:
-    upsample = Upsampler(in_size=args.render_size, out=args.size)
-
   labels, cam = load(args)
 
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-8)
-  train(model, cam, labels, opt, args, sched=sched, upsample=upsample)
+  train(model, cam, labels, opt, args, sched=sched)
 
   test_labels, test_cam = load(args, training=False)
   test(model, test_cam, test_labels, args)

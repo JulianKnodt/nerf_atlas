@@ -34,7 +34,7 @@ class TinyNeRF(nn.Module):
     self,
     steps = 32,
     out_features: int = 3,
-    final_activation: bool = True,
+
     device="cuda",
   ):
     super().__init__()
@@ -54,7 +54,6 @@ class TinyNeRF(nn.Module):
     self.t_near = 2
     self.t_far = 6
 
-    self.final_act = final_activation
   def forward(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
     device = r_o.device
@@ -65,7 +64,6 @@ class TinyNeRF(nn.Module):
 
     density = vals[..., 0]
     feats = vals[..., 1:]
-    if self.final_act: feats = feats.sigmoid()
 
     return volumetric_integrate(density, feats, ts)
 
@@ -94,7 +92,7 @@ class PlainNeRF(nn.Module):
       in_size=3, out=1 + intermediate_size,
       latent_size=latent_size,
 
-      num_layers = 3,
+      num_layers = 4,
       hidden_size = 64,
 
       device=device,
@@ -136,7 +134,7 @@ class PlainNeRF(nn.Module):
     rgb = self.second(
       elev_azim_r_d,
       torch.cat([intermediate, latent], dim=-1)
-    ).sigmoid()
+    )
 
     return volumetric_integrate(density, rgb, ts)
 
@@ -215,7 +213,7 @@ class NeRFAE(nn.Module):
     rgb = self.rgb(
       elev_azim_r_d,
       encoded,
-    ).sigmoid()
+    )
 
     return volumetric_integrate(density, rgb, ts)
 
@@ -278,6 +276,6 @@ class DynamicNeRF(nn.Module):
     rgb = self.second(
       elev_azim_r_d,
       torch.cat([intermediate, latent], dim=-1)
-    ).sigmoid()
+    )
     return volumetric_integrate(density, rgb, ts)
 

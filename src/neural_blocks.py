@@ -90,27 +90,52 @@ class Upsampler(nn.Module):
     in_size: int,
     out: int,
 
+    repeat = 5,
+
     in_features:int = 3,
     out_features:int = 3,
-
-    hidden_size=15,
 
     num_layers=5,
     activation = nn.LeakyReLU(inplace=True),
   ):
     super().__init__()
-    self.layers = nn.Sequential(
-      nn.Conv2d(in_features, hidden_size, 3, 1, 1),
-      activation,
-      *list(chain.from_iterable([
-        (nn.Conv2d(hidden_size, hidden_size, 3, 1, 1), activation)
-        for _ in range(max(num_layers-2, 0))
-      ])),
-      nn.Conv2d(hidden_size, out_features, 3, 1, 1),
-    )
-    self.out = out
+    step_size = (out - in_size)//repeat
+    self.sizes = list(range(in_size + step_size, out+step_size, step_size))
+    self.sizes = self.sizes[:repeat]
+    self.sizes[-1] = out
+
+    feat_sizes = [
+      max(out_features, in_features // (2**i))
+      for i in range(num_layers+1)
+    ]
+
+    self.base = nn.Conv2d(in_features, 3, 3, 1, 1)
+
+    self.convs = nn.ModuleList([
+      nn.Sequential(
+        nn.Conv2d(fs, nfs, 3, 1, 1),
+        nn.LeakyReLU(inplace=True)
+      )
+      for fs, nfs in zip(feat_sizes, feat_sizes[1:])
+      # Move from one feature size to the next
+    ])
+
+    self.combine = nn.ModuleList([
+      nn.Conv2d(feat_sizes, 3, 3, 1, 1)
+      for feat_sizes in feat_sizes[1:]
+    ])
+
+    self.rgb_up_kind="bicubic"
+    self.feat_up_kind="nearest"
+
   def forward(self, x):
-    img = x.permute(0,3,1,2)
-    out = F.interpolate(img, size=(self.out, self.out), mode="bilinear", align_corners=False)
-    out = self.layers(out).permute(0,2,3,1)
-    return out.sigmoid()
+    curr = x.permute(0,3,1,2)
+    upscaled = self.base(curr) # (N, H_in, W_in, 3)
+
+    for s, conv, combine in zip(self.sizes, self.convs, self.combine):
+      resized_old=F.interpolate(upscaled,size=(s,s),mode=self.rgb_up_kind,align_corners=False)
+
+      curr = conv(F.interpolate(curr, size=(s, s), mode=self.feat_up_kind))
+      upscaled = resized_old + combine(curr)
+    out = upscaled.permute(0,2,3,1)
+    return out
