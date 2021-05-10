@@ -18,8 +18,8 @@ class SkipConnMLP(nn.Module):
     out=3,
 
     skip=3,
-    freqs = 16,
-    sigma=2<<4,
+    freqs = 32,
+    sigma=2<<5,
     device="cuda",
     activation = nn.LeakyReLU(inplace=True),
 
@@ -96,6 +96,7 @@ class Upsampler(nn.Module):
     repeat:int = 3,
     in_features:int = 3,
     out_features:int = 3,
+    feat_decay: float = 1.5,
 
     activation = nn.LeakyReLU(inplace=True),
   ):
@@ -107,7 +108,7 @@ class Upsampler(nn.Module):
     assert(kernel_size % 2 == 1)
 
     feat_sizes = [
-      max(out_features, in_features // (2**i))
+      max(out_features, int(in_features // (feat_decay**i)))
       for i in range(repeat+1)
     ]
 
@@ -116,6 +117,7 @@ class Upsampler(nn.Module):
     self.convs = nn.ModuleList([
       nn.Sequential(
         nn.Conv2d(fs, nfs, kernel_size, 1, (kernel_size-1)//2),
+        nn.Dropout2d(0.1, inplace=True),
         nn.LeakyReLU(inplace=True)
       )
       for fs, nfs in zip(feat_sizes, feat_sizes[1:])

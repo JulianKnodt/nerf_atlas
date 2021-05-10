@@ -1,13 +1,14 @@
 # Global runner for all NeRF methods.
 # For convenience, we want all methods using NeRF to use this one file.
 
+import numpy as np
 import argparse
-from tqdm import trange
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.nn as nn
 import random
+from tqdm import trange
 
 import src.loaders
 import src.nerf as nerf
@@ -46,6 +47,7 @@ def arguments():
   a.add_argument(
     "--valid-freq", help="how often validation images are generated", type=int, default=500,
   )
+  a.add_argument("--seed", help="random seed to use", type=int, default=1337)
   # TODO add more arguments here
   return a.parse_args()
 
@@ -153,17 +155,25 @@ def load_model(args):
 #def all_mse_loss(ref, img, eps=1e-2):
 #  return ((ref - img).square() + eps).reciprocal().prod().log().neg()
 
+def seed(s):
+  torch.manual_seed(s)
+  random.seed(s)
+  np.random.seed(s)
+
 def main():
   args = arguments()
+  seed(args.seed)
 
   model = load_model(args)
   # for some reason AdamW doesn't seem to work here
-  opt = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=0)
+  opt = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
 
   labels, cam = load(args)
 
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-8)
   train(model, cam, labels, opt, args, sched=sched)
+
+  model.eval()
 
   test_labels, test_cam = load(args, training=False)
   test(model, test_cam, test_labels, args)
