@@ -87,15 +87,16 @@ class SkipConnMLP(nn.Module):
 class Upsampler(nn.Module):
   def __init__(
     self,
+
     in_size: int,
     out: int,
 
-    repeat = 5,
+    kernel_size:int = 3,
 
+    repeat:int = 3,
     in_features:int = 3,
     out_features:int = 3,
 
-    num_layers=5,
     activation = nn.LeakyReLU(inplace=True),
   ):
     super().__init__()
@@ -103,17 +104,18 @@ class Upsampler(nn.Module):
     self.sizes = list(range(in_size + step_size, out+step_size, step_size))
     self.sizes = self.sizes[:repeat]
     self.sizes[-1] = out
+    assert(kernel_size % 2 == 1)
 
     feat_sizes = [
       max(out_features, in_features // (2**i))
-      for i in range(num_layers+1)
+      for i in range(repeat+1)
     ]
 
-    self.base = nn.Conv2d(in_features, 3, 3, 1, 1)
+    self.base = nn.Conv2d(in_features, 3, kernel_size, 1, (kernel_size-1)//2)
 
     self.convs = nn.ModuleList([
       nn.Sequential(
-        nn.Conv2d(fs, nfs, 3, 1, 1),
+        nn.Conv2d(fs, nfs, kernel_size, 1, (kernel_size-1)//2),
         nn.LeakyReLU(inplace=True)
       )
       for fs, nfs in zip(feat_sizes, feat_sizes[1:])
@@ -121,11 +123,11 @@ class Upsampler(nn.Module):
     ])
 
     self.combine = nn.ModuleList([
-      nn.Conv2d(feat_sizes, 3, 3, 1, 1)
+      nn.Conv2d(feat_sizes, 3, kernel_size, 1, (kernel_size-1)//2)
       for feat_sizes in feat_sizes[1:]
     ])
 
-    self.rgb_up_kind="bicubic"
+    self.rgb_up_kind="bilinear"
     self.feat_up_kind="nearest"
 
   def forward(self, x):

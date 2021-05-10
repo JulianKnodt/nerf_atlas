@@ -93,7 +93,7 @@ class PlainNeRF(nn.Module):
       latent_size=latent_size,
 
       num_layers = 4,
-      hidden_size = 64,
+      hidden_size = 128,
 
       device=device,
 
@@ -121,7 +121,7 @@ class PlainNeRF(nn.Module):
     r_o, r_d = rays.split([3,3], dim=-1)
     device = r_o.device
     # time steps
-    ts = torch.linspace(self.t_near, self.t_far, self.steps, device=device)
+    ts = torch.linspace(self.t_near, self.t_far + random.random() * 0.5, self.steps + random.randint(0,5), device=device)
     pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
     latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
 
@@ -207,6 +207,7 @@ class NeRFAE(nn.Module):
     encoded = self.encode(pts)
 
     density = self.density(encoded).squeeze(-1)
+    density = density + torch.randn_like(density) * 1e-2
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
 

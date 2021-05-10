@@ -34,7 +34,7 @@ def arguments():
   a. add_argument(
     "--feature-space",
     help="when using neural upsampling, what is the feature space size",
-    type=int, default=16,
+    type=int, default=32,
   )
   a.add_argument(
     "--model", help="which model do we want to use", type=str,
@@ -64,7 +64,7 @@ def render(
   size,
 
   device="cuda",
-  with_noise=3e-2,
+  with_noise=1e-3,
 ):
   batch_dims = len(cam)
 
