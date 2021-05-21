@@ -5,15 +5,16 @@
 
 import json
 import os
-import torchvision
+
 import torch
 import torch.nn.functional as F
+import torchvision
 import numpy as np
 
 from .cameras import NeRFCamera
 from .utils import load_image
 
-def load_original(dir=".", normalize=True, training=True, size=256, device="cuda"):
+def original(dir=".", normalize=True, training=True, size=256, device="cuda"):
   kind = "train" if training else "test"
   tfs = json.load(open(dir + f"transforms_{kind}.json"))
 
@@ -34,3 +35,41 @@ def load_original(dir=".", normalize=True, training=True, size=256, device="cuda
 
   return exp_imgs, NeRFCamera(cam_to_worlds, focal)
 
+def dnerf(dir=".", normalize=True, training=True, size=256, device="cuda"):
+  kind = "train" if training else "test"
+  tfs = json.load(open(dir + f"transforms_{kind}.json"))
+  exp_imgs = []
+  cam_to_worlds = []
+  times = []
+
+  focal = tfs['camera_angle_x']
+  n_frames = len(tfs["frames"])
+  for t, frame in enumerate(tfs["frames"]):
+    img = load_image(os.path.join(dir, frame['file_path'] + '.png'), resize=(size, size))
+    exp_imgs.append(img[..., :3])
+    tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
+    if normalize:
+      tf_mat[:3, 3] = F.normalize(tf_mat[:3, 3], dim=-1)
+    cam_to_worlds.append(tf_mat)
+    time = getattr(frame, 'time', float(t) / (n_frames-1))
+    times.append(time)
+
+  cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
+  exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
+  times = torch.tensor(times, device=device)
+
+  return (exp_imgs, times), NeRFCamera(cam_to_worlds, focal)
+
+def single_video(path, training=True, size=256, device="cuda"):
+  frames, _, _ = torchvision.io.read_video(path, pts_unit='sec')
+  frames = frames[:100]
+  return frames, NeRFMMCamera.identity(len(frames), device=device)
+
+def monocular_video(path=".", training=True, size=256, device="cuda"):
+  return NeRFCamera.empty(len(vid))
+
+def load_cityscapes(dir=".", size=256, training=True, device="cuda"):
+  kind = "train" if training else "test"
+  cs = torchvision.datasets.Cityscapes(root=dir, split=kind, mode="fine")
+  # TODO download city scape to test.
+  return cs, NeRFCamera.empt(len(cs))

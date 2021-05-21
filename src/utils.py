@@ -17,6 +17,18 @@ def fourier(x, B):
   return torch.cat([x, mapped.sin(), mapped.cos()], dim=-1)
 
 def save_image(name, img): plt.imsave(name, img.detach().cpu().clamp(0,1).numpy())
+def save_plot(name, expected, got):
+  fig = plt.figure()
+  fig.add_subplot(1, 2, 1)
+  plt.imshow(got.detach().squeeze().cpu().numpy())
+  plt.grid("off");
+  plt.axis("off");
+  fig.add_subplot(1, 2, 2)
+  plt.imshow(expected.detach().squeeze().cpu().numpy())
+  plt.grid("off");
+  plt.axis("off");
+  plt.savefig(name)
+  plt.close(fig)
 
 # https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
 # c = cosine of theta, s = sine of theta

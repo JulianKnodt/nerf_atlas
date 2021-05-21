@@ -93,11 +93,10 @@ class Upsampler(nn.Module):
 
     kernel_size:int = 3,
 
-    repeat:int = 3,
+    repeat:int = 6,
     in_features:int = 3,
     out_features:int = 3,
-    feat_decay: float = 1.5,
-
+    feat_decay: float = 2,
     activation = nn.LeakyReLU(inplace=True),
   ):
     super().__init__()
@@ -112,7 +111,7 @@ class Upsampler(nn.Module):
       for i in range(repeat+1)
     ]
 
-    self.base = nn.Conv2d(in_features, 3, kernel_size, 1, (kernel_size-1)//2)
+    self.base = nn.Conv2d(in_features, out_features, kernel_size, 1, (kernel_size-1)//2)
 
     self.convs = nn.ModuleList([
       nn.Sequential(
@@ -125,7 +124,7 @@ class Upsampler(nn.Module):
     ])
 
     self.combine = nn.ModuleList([
-      nn.Conv2d(feat_sizes, 3, kernel_size, 1, (kernel_size-1)//2)
+      nn.Conv2d(feat_sizes, out_features, kernel_size, 1, (kernel_size-1)//2)
       for feat_sizes in feat_sizes[1:]
     ])
 
