@@ -13,11 +13,24 @@ def cumuprod_exclusive(t):
   cp[0, ...] = 1
   return cp
 
-def compute_pts_ts(rays, near, far, steps, with_noise=False):
+def compute_pts_ts(
+  rays, near, far, steps, with_noise=False, lindisp=False,
+  perturb: float = 0.1,
+):
   r_o, r_d = rays.split([3,3], dim=-1)
   device = r_o.device
   # TODO add step jitter: self.steps + random.randint(0,5),
-  ts = torch.linspace(near, far + random.random()*with_noise, steps, device=device)
+  t_vals = torch.linspace(0, 1, steps, device=device, dtype=r_o.dtype)
+  if lindisp:
+    ts = 1./(1./max(near, 1e-10) * (1.-t_vals) + 1./far * (t_vals))
+  else:
+    ts = near * (1.-t_vals) + far * (t_vals)
+  if perturb > 0.:
+    mids = 0.5 * (ts[:-1] + ts[1:])
+    lower = torch.cat([mids, ts[-1:]])
+    upper = torch.cat([ts[:1], mids])
+    rand = torch.rand_like(lower) * perturb
+    ts = lower + (upper - lower) * rand
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
   return pts, ts, r_o, r_d
 

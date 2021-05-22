@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import random
 from tqdm import trange
+import json
 
 import src.loaders
 import src.nerf as nerf
@@ -63,9 +64,11 @@ def arguments():
   a.add_argument("--seed", help="random seed to use", type=int, default=1337)
   a.add_argument("--decay", help="weight_decay value", type=float, default=1e-5)
   a.add_argument("--notest", help="run test set", action="store_true")
-  a.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit bg with some probability", action="store_true")
+
+  a.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
+  a.add_argument("--log", help="Where to save log of arguments", type=str, default="log.json")
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", default=2)
@@ -247,6 +250,13 @@ def load_model(args):
 #def all_mse_loss(ref, img, eps=1e-2):
 #  return ((ref - img).square() + eps).reciprocal().prod().log().neg()
 
+def save(model, args):
+  torch.save(model, args.save)
+  if args.log is not None:
+    with open(args.log, 'w') as f:
+      json.dump(args.__dict__, f, indent=2)
+  ...
+
 def seed(s):
   torch.manual_seed(s)
   random.seed(s)
@@ -266,7 +276,7 @@ def main():
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-8)
   train(model, cam, labels, opt, args, sched=sched)
 
-  if args.epochs != 0: torch.save(model, args.save)
+  if args.epochs != 0: save(model, args.save)
 
   if args.notest: return
   model.eval()
