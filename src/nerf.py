@@ -53,9 +53,13 @@ class CommonNeRF(nn.Module):
     self.mip = mip
   def forward(self, x): raise NotImplementedError()
   def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
-  def mip_encoding(self, r_o, r_d):
+  def mip_encoding(self, r_o, r_d, ts):
     if self.mip is None: return None
-    return self.mip(r_o, r_d, self.t_near, self.t_far)
+    end_val = torch.tensor([1e10], device=ts.device, dtype=ts.dtype)
+    ts = torch.cat([ts, end_val], dim=-1)
+    t0 = ts[..., :-1]
+    t1 = ts[..., 1:]
+    return self.mip(r_o, r_d, t0, t1)
 
 
 class TinyNeRF(CommonNeRF):
@@ -102,13 +106,13 @@ class PlainNeRF(CommonNeRF):
   ):
     super().__init__(**kwargs)
     self.latent = None
-    self.latent_size = latent_size
     if latent_size == 0:
       self.latent = torch.tensor([[]], device=device, dtype=torch.float)
+    self.latent_size = latent_size + self.mip_size()
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + intermediate_size,
-      latent_size=latent_size,
+      latent_size=self.latent_size,
 
       num_layers = 6,
       hidden_size = 128,
@@ -120,7 +124,7 @@ class PlainNeRF(CommonNeRF):
 
     self.second = SkipConnMLP(
       in_size=2, out=out_features,
-      latent_size=latent_size + intermediate_size,
+      latent_size=self.latent_size + intermediate_size,
 
       num_layers=5,
       hidden_size=64,
@@ -139,11 +143,14 @@ class PlainNeRF(CommonNeRF):
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
-    #mip_enc = self.mip_encoding(r_o, r_d)
-    # TODO concat latent with mip_enc
     latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
 
-    first_out = self.first(pts, latent if self.latent_size != 0 else None)
+    mip_enc = self.mip_encoding(r_o, r_d, ts)
+
+    # If there is a mip encoding, stack it with the latent encoding.
+    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+
+    first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
 
     density = first_out[..., 0]
     intermediate = first_out[..., 1:]

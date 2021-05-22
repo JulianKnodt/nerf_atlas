@@ -36,19 +36,19 @@ def integrated_pos_enc_diag(x, x_cov, min_deg:int, max_deg:int):
 
 #@torch.jit.script
 def lift_gaussian(r_d, t_mean, t_var, r_var):
-  mean = r_d * t_mean
+  mean = r_d[..., None] * t_mean[..., None, :]
 
   magn_sq = r_d.square().sum(dim=-1, keepdim=True).clamp(min=1e-10)
   outer_diag = r_d.square()
   null_outer_diag = 1 - outer_diag / magn_sq
 
-  t_cov_diag = t_var * outer_diag
-  xy_cov_diag = r_var * null_outer_diag
+  t_cov_diag = t_var[..., None] * outer_diag[..., None, :]
+  xy_cov_diag = r_var[..., None] * null_outer_diag[..., None, :]
   cov_diag = t_cov_diag + xy_cov_diag
 
-  return mean, cov_diag
+  # the movedim moves the time dimension to the front
+  return mean.movedim(-1, 0), cov_diag.movedim(-1, 0)
 
-def sqr(x): return x * x
 
 # Computes radius along the x-axis
 @torch.jit.script
@@ -58,21 +58,21 @@ def radii_x(r_d):
 
   return dx[..., None] * 2 / math.sqrt(12)
 
-def conical_frustrum_to_gaussian(r_d, near, far, rad:float):
+def conical_frustrum_to_gaussian(r_d, t0, t1, rad:float):
   mu = (far + near) / 2
   hw = (far - near) / 2
   mu2 = mu * mu
   hw2 = hw * hw
   t_mean = mu + (2 * mu * hw2) / (3 * mu2 + hw2)
-  t_var = (hw2) / 3 - (4 / 15) * ((hw2*hw2 * (12 * mu2 - hw2)) / sqr(3 * mu2 + hw2))
+  t_var = hw / 3 - (4 / 15) * ((hw2*hw2 * (12 * mu2 - hw2)) / (3 * mu2 + hw2).square())
   r_var = rad*rad * (mu2 / 4 + (5 / 12) * hw2 - 4 / 15 * (hw2*hw2) / (3 * mu2 + hw2))
 
   return lift_gaussian(r_d, t_mean, t_var, r_var)
 
-def cylinder_to_gaussian(r_d, near, far, rad:float):
-  t_mean = (far + near) / 2
+def cylinder_to_gaussian(r_d, t0, t1, rad:float):
+  t_mean = (t1 + t0) / 2
   r_var = rad * rad / 4
-  t_var = sqr(far - near) / 12
+  t_var = (t1 - t0).square() / 12
 
   return lift_gaussian(r_d, t_mean, t_var, r_var)
 
@@ -86,9 +86,9 @@ class CylinderGaussian(nn.Module):
     self.min_deg = min_deg
     self.max_deg = max_deg
   def size(self): return self.max_deg - self.min_deg
-  def forward(self, r_o, r_d, near, far):
+  def forward(self, r_o, r_d, t0, t1):
     rad = radii_x(r_d)
-    mean, cov = cylinder_to_gaussian(r_d, near, far, rad)
+    mean, cov = cylinder_to_gaussian(r_d, t0, t1, rad)
     mean = mean + r_o
     return integrated_pos_enc_diag(mean, cov, self.min_deg, self.max_deg)
 
