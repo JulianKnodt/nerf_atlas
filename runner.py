@@ -12,7 +12,7 @@ from tqdm import trange
 
 import src.loaders
 import src.nerf as nerf
-from src.utils import ( save_image, save_plot )
+from src.utils import ( save_image, save_plot, CylinderGaussian )
 from src.neural_blocks import Upsampler
 
 def arguments():
@@ -40,6 +40,10 @@ def arguments():
   a.add_argument("--crop", help="train with cropping", action="store_true")
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
   # TODO type of crop strategy? Maybe can do random resizing?
+  a.add_argument(
+    "--mip", help="Use MipNeRF with different sampling", type=str,
+    choices=["cone", "cylinder"],
+  )
 
   a. add_argument(
     "--feature-space",
@@ -61,6 +65,7 @@ def arguments():
   a.add_argument("--notest", help="run test set", action="store_true")
   a.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
+  a.add_argument("--omit-bg", help="Omit bg with some probability", action="store_true")
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", default=2)
@@ -83,7 +88,7 @@ def render(
   size,
 
   device="cuda",
-  with_noise=1e-3,
+  with_noise=5e-3,
 
   times=None,
 ):
@@ -127,6 +132,8 @@ def load(args, training=True):
   else:
     raise NotImplementedError(kind)
 
+def sqr(x): return x * x
+
 # train the model with a given camera and some labels (imgs or imgs+times)
 def train(model, cam, labels, opt, args, sched=None):
   t = trange(args.epochs)
@@ -151,12 +158,15 @@ def train(model, cam, labels, opt, args, sched=None):
     #idxs = [0] * len(idxs) # DEBUG
 
     ts = None if times is None else times[idxs]
-    crop = get_crop()
+    c0,c1,c2,c3 = crop = get_crop()
+    ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
+
+    # omit items which are all black with some likelihood
+    if args.omit_bg and ref.mean() + 5e-3 < sqr(random.random()): continue
+
     out = render(
       model, cam[idxs], crop, size=args.render_size, times=ts,
     )
-    c0,c1,c2,c3 = crop
-    ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
     loss = F.mse_loss(out, ref)
     loss.backward()
     loss = loss.item()
@@ -165,7 +175,6 @@ def train(model, cam, labels, opt, args, sched=None):
     if sched is not None: sched.step()
     if (i % args.valid_freq == 0):
       # TODO render whole thing if crop otherwise use output
-      #save_image(f"outputs/valid_{i:05}.png", out[0])
       save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
 
 def test(model, cam, labels, args):
@@ -177,22 +186,38 @@ def test(model, cam, labels, args):
   crop = (0,0, args.render_size, args.render_size)
   with torch.no_grad():
     for i in range(labels.shape[0]):
-      ts = None if times is None else times[None, i]
+      ts = None if times is None else times[i:i+1]
       out = render(
-        model, cam[None, i], crop, size=args.render_size, with_noise=False, times=ts
+        model, cam[i:i+1], crop, size=args.render_size, with_noise=False, times=ts
       ).squeeze(0)
       loss = F.mse_loss(out, labels[i])
       print(loss.item())
-      save_image(f"outputs/out_{i:03}.png", out)
+      save_plot(f"outputs/out_{i:03}.png", labels[i:i+1], out)
+
+def load_mip(args):
+  if args.mip is None:
+    return None
+  elif args.mip == "cone":
+    raise NotImplementedError()
+  elif args.mip == "cylinder":
+    return CylinderGaussian()
+  else:
+    raise NotImplementedError(f"Unknown mip kind {args.mip}")
 
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
+  mip = load_mip(args)
+  kwargs = {
+    "mip": mip,
+    "out_features": args.feature_space,
+    "device": device,
+  }
   if args.model == "tiny":
-    model = nerf.TinyNeRF(out_features=args.feature_space, device=device).to(device)
+    model = nerf.TinyNeRF(**kwargs).to(device)
   elif args.model == "plain":
-    model = nerf.PlainNeRF(out_features=args.feature_space, device=device).to(device)
+    model = nerf.PlainNeRF(**kwargs).to(device)
   elif args.model == "ae":
-    model = nerf.NeRFAE(out_features=args.feature_space, device=device).to(device)
+    model = nerf.NeRFAE(**kwargs).to(device)
   else:
     raise NotImplementedError(args.model)
 

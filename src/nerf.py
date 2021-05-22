@@ -19,7 +19,7 @@ def compute_pts_ts(rays, near, far, steps, with_noise=False):
   # TODO add step jitter: self.steps + random.randint(0,5),
   ts = torch.linspace(near, far + random.random()*with_noise, steps, device=device)
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
-  return pts, ts, r_d
+  return pts, ts, r_o, r_d
 
 # perform volumetric integration of density with some other quantity
 @torch.jit.script
@@ -36,16 +36,37 @@ def volumetric_integrate(density, other, ts):
   weights = alpha * cumuprod_exclusive((1.0 - alpha).clamp(min=1e-10))
   return (weights[..., None] * other).sum(dim=0)
 
-class TinyNeRF(nn.Module):
+class CommonNeRF(nn.Module):
   def __init__(
     self,
-    steps = 32,
+
+    steps: int = 64,
+    #out_features: int = 3, # 3 is for RGB
+    t_near: float = 0,
+    t_far: float = 1,
+    mip = None,
+  ):
+    super().__init__()
+    self.t_near = t_near
+    self.t_far = t_far
+    self.steps = steps
+    self.mip = mip
+  def forward(self, x): raise NotImplementedError()
+  def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
+  def mip_encoding(self, r_o, r_d):
+    if self.mip is None: return None
+    return self.mip(r_o, r_d, self.t_near, self.t_far)
+
+
+class TinyNeRF(CommonNeRF):
+  def __init__(
+    self,
     out_features: int = 3,
 
     device="cuda",
+    **kwargs,
   ):
-    super().__init__()
-    self.out_features = out_features
+    super().__init__(**kwargs)
     self.estim = SkipConnMLP(
       in_size=3, out=1 + out_features,
 
@@ -57,39 +78,33 @@ class TinyNeRF(nn.Module):
 
       xavier_init=True,
     ).to(device)
-    self.t_near = 2
-    self.t_far = 6
-    self.steps = steps
 
   def forward(self, rays):
-    pts, ts, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps)
-    return self.from_pts(pts, ts, r_d)
+    pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps)
+    return self.from_pts(pts, ts, r_o, r_d)
 
-  def from_pts(self, pts, ts, r_d):
+  def from_pts(self, pts, ts, r_o, r_d):
     density, feats = self.estim(pts).split([1, 3], dim=-1)
 
     return volumetric_integrate(density, feats, ts)
 
 # A plain old nerf
-class PlainNeRF(nn.Module):
+class PlainNeRF(CommonNeRF):
   def __init__(
     self,
     latent_size: int = 0,
     intermediate_size: int = 32,
     out_features: int = 3,
-    steps: int = 64,
-    t_near: int = 0,
-    t_far: int = 1,
 
     device: torch.device = "cuda",
+
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
     self.latent = None
     self.latent_size = latent_size
     if latent_size == 0:
       self.latent = torch.tensor([[]], device=device, dtype=torch.float)
-
-    self.steps = steps
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + intermediate_size,
@@ -102,9 +117,9 @@ class PlainNeRF(nn.Module):
 
       xavier_init=True,
     ).to(device)
-    self.out_features = out_features
+
     self.second = SkipConnMLP(
-      in_size=2, out=self.out_features,
+      in_size=2, out=out_features,
       latent_size=latent_size + intermediate_size,
 
       num_layers=5,
@@ -114,17 +129,18 @@ class PlainNeRF(nn.Module):
       xavier_init=True,
     ).to(device)
 
-    self.t_near = t_near
-    self.t_far = t_far
   def assign_latent(self, latent):
     assert(latent.shape[-1] == self.latent_size)
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.latent = latent
-  def forward(self, rays, lights=None):
-    pts, ts, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.5)
-    return self.from_pts(pts, ts, r_d)
 
-  def from_pts(self, pts, ts, r_d):
+  def forward(self, rays, lights=None):
+    pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.5)
+    return self.from_pts(pts, ts, r_o, r_d)
+
+  def from_pts(self, pts, ts, r_o, r_d):
+    #mip_enc = self.mip_encoding(r_o, r_d)
+    # TODO concat latent with mip_enc
     latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
 
     first_out = self.first(pts, latent if self.latent_size != 0 else None)
@@ -141,7 +157,7 @@ class PlainNeRF(nn.Module):
     return volumetric_integrate(density, rgb, ts)
 
 # NeRF with a thin middle layer, for encoding information
-class NeRFAE(nn.Module):
+class NeRFAE(CommonNeRF):
   def __init__(
     self,
     latent_size: int = 0,
@@ -149,19 +165,15 @@ class NeRFAE(nn.Module):
     out_features: int = 3,
 
     encoding_size: int = 32,
-    steps: int = 64,
-    t_near: int = 2,
-    t_far: int = 6,
 
     device="cuda",
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
     self.latent = None
     self.latent_size = latent_size
     if self.latent_size == 0:
       self.latent = torch.tensor([[]], device=device)
-
-    self.steps = steps
 
     self.encode = SkipConnMLP(
       in_size=3, out=encoding_size,
@@ -194,17 +206,15 @@ class NeRFAE(nn.Module):
       xavier_init=True,
     ).to(device)
 
-    self.t_near = t_near
-    self.t_far = t_far
   def assign_latent(self, latent):
     assert(latent.shape[-1] == self.latent_size)
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.latent = latent
   def forward(self, rays):
-    pts, ts, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.1)
-    return self.from_pts(pts, ts, r_d)
+    pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.1)
+    return self.from_pts(pts, ts, r_o, r_d)
 
-  def from_pts(self, pts, ts, r_d):
+  def from_pts(self, pts, ts, r_o, r_d):
     latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
 
     encoded = self.encode(pts)
@@ -248,7 +258,7 @@ class DynamicNeRF(nn.Module):
   def forward(self, rays_t):
     rays, t = rays_t
     device=rays.device
-    pts, ts, r_d = compute_pts_ts(
+    pts, ts, r_o, r_d = compute_pts_ts(
       rays,
       self.canonical.t_near,
       self.canonical.t_far,
@@ -262,5 +272,5 @@ class DynamicNeRF(nn.Module):
       dp,
     )
     pts = pts + dp
-    return self.canonical.from_pts(pts, ts, r_d)
+    return self.canonical.from_pts(pts, ts, r_o, r_d)
 

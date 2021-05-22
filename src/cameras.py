@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,8 +12,7 @@ class Camera(nn.Module):
   camera_to_world = None
   world_to_camera = None
   # samples from positions in [0,1] screen space to global
-  def sample_positions(self, positions):
-    raise NotImplementedError()
+  def sample_positions(self, positions): raise NotImplementedError()
 
 # A camera made specifically for generating rays from NeRF models
 @dataclass
