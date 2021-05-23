@@ -59,13 +59,14 @@ def radii_x(r_d):
   return dx[..., None] * 2 / math.sqrt(12)
 
 def conical_frustrum_to_gaussian(r_d, t0, t1, rad:float):
-  mu = (far + near) / 2
-  hw = (far - near) / 2
+  mu = (t1 + t0) / 2
+  hw = (t1 - t0) / 2
   mu2 = mu * mu
   hw2 = hw * hw
+  hw4 = hw2 * hw2
   t_mean = mu + (2 * mu * hw2) / (3 * mu2 + hw2)
-  t_var = hw / 3 - (4 / 15) * ((hw2*hw2 * (12 * mu2 - hw2)) / (3 * mu2 + hw2).square())
-  r_var = rad*rad * (mu2 / 4 + (5 / 12) * hw2 - 4 / 15 * (hw2*hw2) / (3 * mu2 + hw2))
+  t_var = hw / 3 - (4 / 15) * ((hw4 * (12 * mu2 - hw2)) / (3 * mu2 + hw2).square())
+  r_var = rad*rad * (mu2 / 4 + (5 / 12) * hw2 - 4 / 15 * (hw4) / (3 * mu2 + hw2))
 
   return lift_gaussian(r_d, t_mean, t_var, r_var)
 
@@ -89,6 +90,22 @@ class CylinderGaussian(nn.Module):
   def forward(self, r_o, r_d, t0, t1):
     rad = radii_x(r_d)
     mean, cov = cylinder_to_gaussian(r_d, t0, t1, rad)
+    mean = mean + r_o
+    return integrated_pos_enc_diag(mean, cov, self.min_deg, self.max_deg)
+
+class ConicGaussian(nn.Module):
+  def __init__(
+    self,
+    min_deg: int = 0,
+    max_deg: int = 16,
+  ):
+    super().__init__()
+    self.min_deg = min_deg
+    self.max_deg = max_deg
+  def size(self): return self.max_deg - self.min_deg
+  def forward(self, r_o, r_d, t0, t1):
+    rad = radii_x(r_d)
+    mean, cov = conical_frustrum_to_gaussian(r_d, t0, t1, rad)
     mean = mean + r_o
     return integrated_pos_enc_diag(mean, cov, self.min_deg, self.max_deg)
 

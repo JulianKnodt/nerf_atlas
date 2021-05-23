@@ -13,7 +13,7 @@ import json
 
 import src.loaders
 import src.nerf as nerf
-from src.utils import ( save_image, save_plot, CylinderGaussian )
+from src.utils import ( save_image, save_plot, CylinderGaussian, ConicGaussian )
 from src.neural_blocks import Upsampler
 
 def arguments():
@@ -164,13 +164,13 @@ def train(model, cam, labels, opt, args, sched=None):
     c0,c1,c2,c3 = crop = get_crop()
     ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
 
-    # omit items which are all black with some likelihood
-    if args.omit_bg and ref.mean() + 5e-3 < sqr(random.random()): continue
+    # omit items which are all darker with some likelihood.
+    if args.omit_bg and ref.mean() + 0.3 < sqr(random.random()): continue
 
     out = render(
       model, cam[idxs], crop, size=args.render_size, times=ts,
     )
-    loss = F.mse_loss(out, ref)
+    loss = F.mse_loss(out, ref).sqrt()
     loss.backward()
     loss = loss.item()
     opt.step()
@@ -195,13 +195,13 @@ def test(model, cam, labels, args):
       ).squeeze(0)
       loss = F.mse_loss(out, labels[i])
       print(loss.item())
-      save_plot(f"outputs/out_{i:03}.png", labels[i:i+1], out)
+      save_plot(f"outputs/out_{i:03}.png", labels[i], out)
 
 def load_mip(args):
   if args.mip is None:
     return None
   elif args.mip == "cone":
-    raise NotImplementedError()
+    return ConicGaussian()
   elif args.mip == "cylinder":
     return CylinderGaussian()
   else:
@@ -255,7 +255,6 @@ def save(model, args):
   if args.log is not None:
     with open(args.log, 'w') as f:
       json.dump(args.__dict__, f, indent=2)
-  ...
 
 def seed(s):
   torch.manual_seed(s)
@@ -276,7 +275,7 @@ def main():
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-8)
   train(model, cam, labels, opt, args, sched=sched)
 
-  if args.epochs != 0: save(model, args.save)
+  if args.epochs != 0: save(model, args)
 
   if args.notest: return
   model.eval()

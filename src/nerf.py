@@ -15,7 +15,7 @@ def cumuprod_exclusive(t):
 
 def compute_pts_ts(
   rays, near, far, steps, with_noise=False, lindisp=False,
-  perturb: float = 0.1,
+  perturb: float = 1.,
 ):
   r_o, r_d = rays.split([3,3], dim=-1)
   device = r_o.device
@@ -57,6 +57,7 @@ class CommonNeRF(nn.Module):
     #out_features: int = 3, # 3 is for RGB
     t_near: float = 0,
     t_far: float = 1,
+    density_std: float = 0.01,
     mip = None,
   ):
     super().__init__()
