@@ -62,17 +62,21 @@ def arguments():
     "--valid-freq", help="how often validation images are generated", type=int, default=500,
   )
   a.add_argument("--seed", help="random seed to use", type=int, default=1337)
-  a.add_argument("--decay", help="weight_decay value", type=float, default=1e-5)
+  a.add_argument("--decay", help="weight_decay value", type=float, default=0)
   a.add_argument("--notest", help="run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit bg with some probability", action="store_true")
 
   a.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
   a.add_argument("--log", help="Where to save log of arguments", type=str, default="log.json")
+  a.add_argument("--save-freq", help="# of epochs between saves", type=int, default=10_000)
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", default=2)
   cam.add_argument("--far", help="far plane for camera", default=6)
+
+  reporting = a.add_argument_group("reporting parameters")
+  reporting.add_argument("-q", "--quiet", help="Silence tqdm (UNIMPL)", action="store_true")
   # TODO add more arguments here
   return a.parse_args()
 
@@ -171,15 +175,16 @@ def train(model, cam, labels, opt, args, sched=None):
       model, cam[idxs], crop, size=args.render_size, times=ts,
     )
     # TODO add config for this sqrt? It's optional.
-    loss = F.mse_loss(out, ref).sqrt()
+    loss = F.mse_loss(out, ref)#.sqrt()
     loss.backward()
     loss = loss.item()
     opt.step()
     t.set_postfix(loss=f"{loss:03f}", lr=f"{sched.get_last_lr()[0]:.1e}", refresh=False)
     if sched is not None: sched.step()
-    if (i % args.valid_freq == 0):
+    if i % args.valid_freq == 0:
       # TODO render whole thing if crop otherwise use output
       save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
+    if i % args.save_freq == 0 and i != 0: save(model, args)
 
 def test(model, cam, labels, args):
   times = None
