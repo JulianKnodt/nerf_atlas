@@ -13,6 +13,7 @@ import json
 
 import src.loaders
 import src.nerf as nerf
+import src.utils as utils
 from src.utils import ( save_image, save_plot, CylinderGaussian, ConicGaussian )
 from src.neural_blocks import Upsampler
 
@@ -199,8 +200,8 @@ def test(model, cam, labels, args):
       out = render(
         model, cam[i:i+1, ...], crop, size=args.render_size, with_noise=False, times=ts
       ).squeeze(0)
-      loss = F.mse_loss(out, labels[i])
-      print(loss.item())
+      loss = F.mse_loss(out, labels[i]).item()
+      print("L2", loss, "PSNR", utils.mse2psnr(loss))
       save_plot(f"outputs/out_{i:03}.png", labels[i], out)
 
 def load_mip(args):
