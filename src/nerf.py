@@ -35,6 +35,7 @@ def compute_pts_ts(
   return pts, ts, r_o, r_d
 
 # perform volumetric integration of density with some other quantity
+# returns the integrated 2nd value over density at timesteps.
 @torch.jit.script
 def volumetric_integrate(density, other, ts):
   device=density.device
@@ -46,7 +47,7 @@ def volumetric_integrate(density, other, ts):
   dists = dists[:, None, None, None]
 
   alpha = 1.0 - torch.exp(-sigma_a * dists)
-  weights = alpha * cumuprod_exclusive((1.0 - alpha).clamp(min=1e-10))
+  weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return (weights[..., None] * other).sum(dim=0)
 
 class CommonNeRF(nn.Module):
@@ -185,20 +186,20 @@ class NeRFAE(CommonNeRF):
     intermediate_size: int = 32,
     out_features: int = 3,
 
-    encoding_size: int = 32,
+    encoding_size: int = 16,
 
     device="cuda",
     **kwargs,
   ):
     super().__init__(**kwargs)
     self.latent = None
-    self.latent_size = latent_size
-    if self.latent_size == 0:
-      self.latent = torch.tensor([[]], device=device)
+    if latent_size == 0: self.latent = torch.tensor([[]], device=device)
+
+    self.latent_size = latent_size + self.mip_size()
 
     self.encode = SkipConnMLP(
       in_size=3, out=encoding_size,
-      latent_size=latent_size,
+      latent_size=self.latent_size,
       num_layers=5,
       hidden_size=64,
       device=device,
@@ -207,9 +208,9 @@ class NeRFAE(CommonNeRF):
 
     self.density = SkipConnMLP(
       in_size=encoding_size, out=1,
-      latent_size=latent_size,
-      num_layers=3,
-      hidden_size=32,
+      latent_size=0,
+      num_layers=5,
+      hidden_size=64,
 
       freqs=0,
       device=device,
@@ -220,7 +221,7 @@ class NeRFAE(CommonNeRF):
       in_size=2, out=out_features,
       latent_size=encoding_size,
 
-      num_layers=3,
+      num_layers=5,
       hidden_size=32,
 
       device=device,
@@ -238,7 +239,12 @@ class NeRFAE(CommonNeRF):
   def from_pts(self, pts, ts, r_o, r_d):
     latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
 
-    encoded = self.encode(pts)
+    mip_enc = self.mip_encoding(r_o, r_d, ts)
+
+    # If there is a mip encoding, stack it with the latent encoding.
+    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+
+    encoded = self.encode(pts, latent if latent.shape[-1] != 0 else None)
 
     density = self.density(encoded).squeeze(-1)
     density = density + torch.randn_like(density) * 1e-2

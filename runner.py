@@ -170,6 +170,7 @@ def train(model, cam, labels, opt, args, sched=None):
     out = render(
       model, cam[idxs], crop, size=args.render_size, times=ts,
     )
+    # TODO add config for this sqrt? It's optional.
     loss = F.mse_loss(out, ref).sqrt()
     loss.backward()
     loss = loss.item()
@@ -189,23 +190,20 @@ def test(model, cam, labels, args):
   crop = (0,0, args.render_size, args.render_size)
   with torch.no_grad():
     for i in range(labels.shape[0]):
-      ts = None if times is None else times[i:i+1]
+      ts = None if times is None else times[i:i+1, ...]
       out = render(
-        model, cam[i:i+1], crop, size=args.render_size, with_noise=False, times=ts
+        model, cam[i:i+1, ...], crop, size=args.render_size, with_noise=False, times=ts
       ).squeeze(0)
       loss = F.mse_loss(out, labels[i])
       print(loss.item())
       save_plot(f"outputs/out_{i:03}.png", labels[i], out)
 
 def load_mip(args):
-  if args.mip is None:
-    return None
-  elif args.mip == "cone":
-    return ConicGaussian()
-  elif args.mip == "cylinder":
-    return CylinderGaussian()
-  else:
-    raise NotImplementedError(f"Unknown mip kind {args.mip}")
+  if args.mip is None: return None
+  elif args.mip == "cone": return ConicGaussian()
+  elif args.mip == "cylinder": return CylinderGaussian()
+
+  raise NotImplementedError(f"Unknown mip kind {args.mip}")
 
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
