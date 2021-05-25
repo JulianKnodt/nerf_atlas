@@ -10,6 +10,7 @@ import torch.nn as nn
 import random
 from tqdm import trange
 import json
+import math
 
 import src.loaders
 import src.nerf as nerf
@@ -202,19 +203,17 @@ def test(model, cam, labels, args):
       exp = labels[i]
       got = torch.zeros_like(exp)
       N = math.ceil(args.render_size/args.crop_size)
-      for i in range(N):
-        for j in range(N):
-          c0 = i * args.crop_size
-          c1 = j * args.crop_size
-          c2 = (i+1) * args.crop_size
-          c3 = (j+1) * args.crop_size
+      for x in range(N):
+        for y in range(N):
+          c0 = x * args.crop_size
+          c1 = y * args.crop_size
           out = render(
-            model, cam[i:i+1, ...], (c0,c1,c2,c3), size=args.render_size,
+            model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
             with_noise=False, times=ts
           ).squeeze(0)
-          exp[c0:c1, c2:c3, :] = out
+          exp[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
       loss = F.mse_loss(got, exp)
-      print("L2", loss.item(), "PSNR", utils.mse2psnr(loss))
+      print(f"L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
       save_plot(f"outputs/out_{i:03}.png", labels[i], out)
 
 def load_mip(args):
@@ -294,7 +293,9 @@ def main():
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-6)
   train(model, cam, labels, opt, args, sched=sched)
 
-  if args.epochs != 0: save(model, args)
+  if args.epochs != 0:
+    print("Saved final model")
+    save(model, args)
 
   if args.notest: return
   model.eval()
