@@ -142,3 +142,15 @@ class Upsampler(nn.Module):
       upscaled = resized_old + combine(curr)
     out = upscaled.permute(0,2,3,1)
     return out
+
+class ImageEncoder(nn.Module):
+  # Encodes an image into a latent vector, for use in PixelNeRF
+  def __init__(
+    self,
+  ):
+    super().__init__()
+    ...
+  # (B, C, H, W) -> (B, L, H, W)
+  def forward(self, img):
+    raise NotImplementedError()
+

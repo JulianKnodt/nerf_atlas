@@ -15,7 +15,7 @@ def cumuprod_exclusive(t):
 
 def compute_pts_ts(
   rays, near, far, steps, with_noise=False, lindisp=False,
-  perturb: float = 0,
+  perturb: float = 1,
 ):
   r_o, r_d = rays.split([3,3], dim=-1)
   device = r_o.device
@@ -66,6 +66,7 @@ class CommonNeRF(nn.Module):
     t_near: float = 0,
     t_far: float = 1,
     density_std: float = 0.01,
+    noise_std: int = 1e-2,
     mip = None,
   ):
     super().__init__()
@@ -255,7 +256,7 @@ class NeRFAE(CommonNeRF):
     encoded = self.encode(pts, latent if latent.shape[-1] != 0 else None)
 
     density = self.density(encoded).squeeze(-1)
-    density = density + torch.randn_like(density) * 1e-2
+    density = density + torch.randn_like(density) * 5e-2 #self.noise_std
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
 

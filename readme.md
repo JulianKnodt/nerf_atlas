@@ -2,6 +2,9 @@
 
 A repository which contains NeRF and a bunch of extensions to NeRF.
 
+Important Note:
+WORK IN PROGRESS, things may be subtly _borken_.
+
 ---
 
 ## Usage
@@ -44,4 +47,15 @@ Training/Efficiency:
 - Neural Upsampling with latent spaces inspired by
   [GIRAFFE](https://arxiv.org/pdf/2011.12100.pdf). The results don't look great, but to be fair
   the paper also has some artifacts.
+
+## Contributing
+
+If you would like to contribute, feel free to submit a PR, but I may be somewhat strict,
+apologies in advance.
+
+Please maintain the same style:
+- 2 spaces, no tabs
+- Concise but expressive names
+- Default arguments and type annotations when possible.
+- Single line comments for functions, intended for developers.
 

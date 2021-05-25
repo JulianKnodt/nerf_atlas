@@ -127,6 +127,7 @@ def load(args, training=True):
   kind = args.data_kind
   if args.derive_kind:
     if args.data.endswith(".mp4"): kind = "single_video"
+    # TODO if single image use pixel
 
   if not args.neural_upsample: args.size = args.render_size
   size = args.size
@@ -188,9 +189,7 @@ def train(model, cam, labels, opt, args, sched=None):
     if i % args.valid_freq == 0:
       # TODO render whole thing if crop otherwise use output
       save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
-    if i % args.save_freq == 0 and i != 0:
-      print(f"Saved at {i}")
-      save(model, args)
+    if i % args.save_freq == 0 and i != 0: save(model, args)
 
 def test(model, cam, labels, args):
   times = None
@@ -232,6 +231,8 @@ def load_model(args):
     "out_features": args.feature_space,
     "device": device,
     "steps": args.steps,
+    "t_near": args.near,
+    "t_far": args.far,
   }
   if args.model == "tiny":
     model = nerf.TinyNeRF(**kwargs).to(device)
@@ -262,6 +263,7 @@ def load_model(args):
   return model
 
 def save(model, args):
+  print(f"Saved to {args.save}")
   torch.save(model, args.save)
   if args.log is not None:
     with open(args.log, 'w') as f:
@@ -287,7 +289,6 @@ def main():
   train(model, cam, labels, opt, args, sched=sched)
 
   if args.epochs != 0:
-    print("Saved final model")
     save(model, args)
 
   if args.notest: return
