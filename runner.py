@@ -58,8 +58,9 @@ def arguments():
     "--model", help="which model do we want to use", type=str,
     choices=["tiny", "plain", "ae"], default="plain",
   )
+  # this default for LR seems to work pretty well?
   a.add_argument(
-    "-lr", "--learning-rate", help="learning rate", type=float, default=5e-3,
+    "-lr", "--learning-rate", help="learning rate", type=float, default=5e-4,
   )
   a.add_argument(
     "--valid-freq", help="how often validation images are generated", type=int, default=500,
@@ -211,10 +212,10 @@ def test(model, cam, labels, args):
             model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
             with_noise=False, times=ts
           ).squeeze(0)
-          exp[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+          got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
       loss = F.mse_loss(got, exp)
-      print(f"L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
-      save_plot(f"outputs/out_{i:03}.png", labels[i], out)
+      print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
+      save_plot(f"outputs/out_{i:03}.png", exp, got)
 
 def load_mip(args):
   if args.mip is None: return None
@@ -256,17 +257,9 @@ def load_model(args):
     ).to(device)
     # stick a neural upsampling block afterwards
     model = nn.Sequential(model, upsampler, nn.Sigmoid())
-  else:
-    ...
-    #model = nn.Sequential(model, nn.Sigmoid())
 
   if args.data_parallel: model = nn.DataParallel(model)
   return model
-
-# in theory this is an interesting loss function but it runs into numerical stability issues
-# probably need to converd the prod().log() into a sum of logs.
-#def all_mse_loss(ref, img, eps=1e-2):
-#  return ((ref - img).square() + eps).reciprocal().prod().log().neg()
 
 def save(model, args):
   torch.save(model, args.save)
@@ -290,7 +283,7 @@ def main():
 
   labels, cam = load(args)
 
-  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-6)
+  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-5)
   train(model, cam, labels, opt, args, sched=sched)
 
   if args.epochs != 0:
