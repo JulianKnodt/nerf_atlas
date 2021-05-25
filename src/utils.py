@@ -34,7 +34,7 @@ def integrated_pos_enc_diag(x, x_cov, min_deg:int, max_deg:int):
     torch.cat([y_var, y_var], dim=-1),
   )[0]
 
-#@torch.jit.script
+@torch.jit.script
 def lift_gaussian(r_d, t_mean, t_var, r_var):
   mean = r_d[..., None] * t_mean[..., None, :]
 
@@ -144,8 +144,11 @@ def nonzero_eps(v, eps: float=1e-7):
     v
   )
 
-
 def mse2psnr(x): return -10 * torch.log10(x)
+
+def apply_tf(w, b, v):
+  N = v.shape[-1]
+  return torch.bmm(w.reshape(-1, N, N), v.reshape(-1, 1, N)).reshape_as(b) + b
 
 def count_parameters(params): return sum(p.numel() for p in params)
 
@@ -198,23 +201,4 @@ def uv_to_dir(uv): return elev_azim_to_dir(uv_to_elev_azim(uv))
 def dir_to_uv(d):
   elaz = dir_to_elev_azim(d)
   return elev_azim_to_uv(elaz)
-
-
-# gets a set of spherical transforms about the origin
-def spherical_positions(
-  min_elev=0, max_elev=45, min_azim=-135, max_azim=135,
-
-  n_elev:int=8, n_azim:int=8, dist=1, device="cuda",
-):
-  from pytorch3d.renderer import look_at_view_transform
-  Rs, Ts = [], []
-  for elev in torch.linspace(min_elev, max_elev, n_elev):
-    for azim in torch.linspace(min_azim, max_azim, n_azim):
-      R,T = look_at_view_transform(dist=dist, elev=elev, azim=azim, device=device)
-      Rs.append(R)
-      Ts.append(T)
-  return torch.cat(Rs, dim=0), torch.cat(Ts, dim=0)
-
-
-
 

@@ -41,6 +41,7 @@ def arguments():
   a.add_argument("--neural-upsample", help="add neural upsampling", action="store_true")
   a.add_argument("--crop", help="train with cropping", action="store_true")
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
+  a.add_argument("--steps", help="Number of depth steps", type=int, default=64)
   # TODO type of crop strategy? Maybe can do random resizing?
   a.add_argument(
     "--mip", help="Use MipNeRF with different sampling", type=str,
@@ -185,7 +186,9 @@ def train(model, cam, labels, opt, args, sched=None):
     if i % args.valid_freq == 0:
       # TODO render whole thing if crop otherwise use output
       save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
-    if i % args.save_freq == 0 and i != 0: save(model, args)
+    if i % args.save_freq == 0 and i != 0:
+      print(f"Saved at {i}")
+      save(model, args)
 
 def test(model, cam, labels, args):
   times = None
@@ -193,15 +196,25 @@ def test(model, cam, labels, args):
     times = labels[-1]
     labels = labels[0]
 
-  crop = (0,0, args.render_size, args.render_size)
   with torch.no_grad():
     for i in range(labels.shape[0]):
       ts = None if times is None else times[i:i+1, ...]
-      out = render(
-        model, cam[i:i+1, ...], crop, size=args.render_size, with_noise=False, times=ts
-      ).squeeze(0)
-      loss = F.mse_loss(out, labels[i]).item()
-      print("L2", loss, "PSNR", utils.mse2psnr(loss))
+      exp = labels[i]
+      got = torch.zeros_like(exp)
+      N = math.ceil(args.render_size/args.crop_size)
+      for i in range(N):
+        for j in range(N):
+          c0 = i * args.crop_size
+          c1 = j * args.crop_size
+          c2 = (i+1) * args.crop_size
+          c3 = (j+1) * args.crop_size
+          out = render(
+            model, cam[i:i+1, ...], (c0,c1,c2,c3), size=args.render_size,
+            with_noise=False, times=ts
+          ).squeeze(0)
+          exp[c0:c1, c2:c3, :] = out
+      loss = F.mse_loss(got, exp)
+      print("L2", loss.item(), "PSNR", utils.mse2psnr(loss))
       save_plot(f"outputs/out_{i:03}.png", labels[i], out)
 
 def load_mip(args):
@@ -218,6 +231,7 @@ def load_model(args):
     "mip": mip,
     "out_features": args.feature_space,
     "device": device,
+    "steps": args.steps,
   }
   if args.model == "tiny":
     model = nerf.TinyNeRF(**kwargs).to(device)
@@ -244,7 +258,8 @@ def load_model(args):
     # stick a neural upsampling block afterwards
     model = nn.Sequential(model, upsampler, nn.Sigmoid())
   else:
-    model = nn.Sequential(model, nn.Sigmoid())
+    ...
+    #model = nn.Sequential(model, nn.Sigmoid())
 
   if args.data_parallel: model = nn.DataParallel(model)
   return model
@@ -276,7 +291,7 @@ def main():
 
   labels, cam = load(args)
 
-  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-8)
+  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-6)
   train(model, cam, labels, opt, args, sched=sched)
 
   if args.epochs != 0: save(model, args)

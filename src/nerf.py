@@ -15,17 +15,18 @@ def cumuprod_exclusive(t):
 
 def compute_pts_ts(
   rays, near, far, steps, with_noise=False, lindisp=False,
-  perturb: float = 1.,
+  perturb: float = 0,
 ):
   r_o, r_d = rays.split([3,3], dim=-1)
   device = r_o.device
   # TODO add step jitter: self.steps + random.randint(0,5),
   t_vals = torch.linspace(0, 1, steps, device=device, dtype=r_o.dtype)
   if lindisp:
-    ts = 1./(1./max(near, 1e-10) * (1.-t_vals) + 1./far * (t_vals))
+    ts = 1/(1/max(near, 1e-10) * (1-t_vals) + 1/far * (t_vals))
   else:
-    ts = near * (1.-t_vals) + far * (t_vals)
-  if perturb > 0.:
+    ts = near * (1-t_vals) + far * t_vals
+
+  if perturb > 0:
     mids = 0.5 * (ts[:-1] + ts[1:])
     lower = torch.cat([mids, ts[-1:]])
     upper = torch.cat([ts[:1], mids])
@@ -33,6 +34,12 @@ def compute_pts_ts(
     ts = lower + (upper - lower) * rand
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
   return pts, ts, r_o, r_d
+
+def batched(model, pts, batch_size: int = 8):
+  bpts = pts.split(batch_size, dim=0)
+  outs = []
+  for bpt in bpts: outs.append(model(bpt))
+  return torch.cat(outs, dim=0)
 
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
@@ -66,6 +73,7 @@ class CommonNeRF(nn.Module):
     self.t_far = t_far
     self.steps = steps
     self.mip = mip
+
   def forward(self, x): raise NotImplementedError()
   def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
   def mip_encoding(self, r_o, r_d, ts):
@@ -105,7 +113,7 @@ class TinyNeRF(CommonNeRF):
   def from_pts(self, pts, ts, r_o, r_d):
     density, feats = self.estim(pts).split([1, 3], dim=-1)
 
-    return volumetric_integrate(density, feats, ts)
+    return volumetric_integrate(density, feats.sigmoid(), ts)
 
 # A plain old nerf
 class PlainNeRF(CommonNeRF):
@@ -174,7 +182,7 @@ class PlainNeRF(CommonNeRF):
     rgb = self.second(
       elev_azim_r_d,
       torch.cat([intermediate, latent], dim=-1)
-    )
+    ).sigmoid()
 
     return volumetric_integrate(density, rgb, ts)
 
@@ -254,7 +262,7 @@ class NeRFAE(CommonNeRF):
     rgb = self.rgb(
       elev_azim_r_d,
       encoded,
-    )
+    ).sigmoid()
 
     return volumetric_integrate(density, rgb, ts)
 
@@ -294,10 +302,58 @@ class DynamicNeRF(nn.Module):
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
     dp = self.delta_estim(torch.cat([pts, t], dim=-1))
     dp = torch.where(
-      t == 0,
+      t.abs() < 1e-6,
       torch.zeros_like(pts),
       dp,
     )
     pts = pts + dp
     return self.canonical.from_pts(pts, ts, r_o, r_d)
 
+class MPI(nn.Module):
+  def __init__(
+    self,
+
+    canon: CommonNeRF,
+
+    position = [0,0,0],
+    normal = [0,0,-1],
+    delta=0.1,
+
+    n_planes: int = 6,
+
+    device="cuda",
+  ):
+    super().__init__()
+
+    self.n_planes = torch.linspace(canon.t_near, canon.t_far, steps=n_planes, device=device)
+    self.position = torch.tensor(position, device=device, dtype=torch.float)
+    self.normal = torch.tensor(normal, device=device, dtype=torch.float)
+    self.delta = delta
+
+    self.canonical = canonical.to(device)
+  def forward(self, rays):
+    r_o, r_d = rays.split([3,3], dim=-1)
+    device = r_o.device
+
+    n = self.normal.expand_as(r_d)
+    denom = (n * r_d).sum(dim=-1, keepdim=True)
+    centers = self.position.unsqueeze(0) + torch.tensordot(
+      self.delta * torch.arange(self.n_planes, device=device, dtype=torch.float),
+      -self.normal,
+      dims=0,
+    )
+    ts = ((centers - r_o) * n).sum(dim=-1, keepdim=True)/denom
+    hits = torch.where(
+      denom.abs() > 1e-3,
+      ts,
+      # if denom is too small it will have numerical instability because it's near parallel.
+      torch.zeros_like(denom),
+    )
+    pts = r_o.unsqueeze(0) + r_d.unsqueeze(0) * hits
+
+    return self.canonical.from_pts(pts, ts, r_o, r_d)
+
+  def from_pts(self, pts, ts, r_o, r_d):
+    density, feats = self.estim(pts).split([1, 3], dim=-1)
+
+    return volumetric_integrate(density, feats, ts)
