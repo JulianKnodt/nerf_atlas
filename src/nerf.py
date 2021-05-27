@@ -62,18 +62,27 @@ class CommonNeRF(nn.Module):
     self,
 
     steps: int = 64,
+
     #out_features: int = 3, # 3 is for RGB
     t_near: float = 0,
     t_far: float = 1,
     density_std: float = 0.01,
     noise_std: int = 1e-2,
     mip = None,
+    instance_latent_size: int = 0,
+    per_pixel_latent_size: int = 0,
   ):
     super().__init__()
     self.t_near = t_near
     self.t_far = t_far
     self.steps = steps
     self.mip = mip
+
+    self.per_pixel_latent_size = per_pixel_latent_size
+    self.per_pixel_latent = None
+
+    self.instance_latent_size = instance_latent_size
+    self.instance_latent = None
 
   def forward(self, x): raise NotImplementedError()
   def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
@@ -85,8 +94,33 @@ class CommonNeRF(nn.Module):
     t1 = ts[..., 1:]
     return self.mip(r_o, r_d, t0, t1)
 
+  def total_latent_size(self) -> int:
+    return self.mip_size() + self.per_pixel_latent_size + self.instance_latent_size
+  def set_per_pixel_latent(self, latent):
+    assert(latent.shape[-1] == self.per_pixel_latent_size), \
+      f"expected latent in [B, H, W, L={self.per_pixel_latent_size}], got {latent.shape}"
+    assert(len(latent.shape) == 4), \
+      f"expected latent in [B, H, W, L], got {latent.shape}"
+    self.per_pixel_latent = latent
+  def set_instance_latent(self, latent):
+    assert(latent.shape[-1] == self.instance_latent_size), "expected latent in [B, L]"
+    assert(len(latent.shape) == 2), "expected latent in [B, L]"
+    self.instance_latent = latent
+  def curr_latent(self, H: int, W: int) -> ["B", "H", "W", "L_pp + L_inst"]:
+    if self.instance_latent is None and self.per_pixel_latent is None: return None
+    elif self.instance_latent is None: return self.per_pixel_latent
+    elif self.per_pixel_latent is None:
+      return self.instance_latent[:, None, None, :]\
+        .expand(self.instance_latent.shape[0], H, W, -1)
+
+    return torch.cat([
+      self.instance_latent[:, None, None, :].expand_as(self.per_pixel_latent),
+      self.per_pixel_latent,
+    ], dim=-1)
+
 
 class TinyNeRF(CommonNeRF):
+  # No frills, single MLP NeRF
   def __init__(
     self,
     out_features: int = 3,
@@ -120,7 +154,6 @@ class TinyNeRF(CommonNeRF):
 class PlainNeRF(CommonNeRF):
   def __init__(
     self,
-    latent_size: int = 0,
     intermediate_size: int = 32,
     out_features: int = 3,
 
@@ -129,10 +162,8 @@ class PlainNeRF(CommonNeRF):
     **kwargs,
   ):
     super().__init__(**kwargs)
-    self.latent = None
-    if latent_size == 0:
-      self.latent = torch.tensor([[]], device=device, dtype=torch.float)
-    self.latent_size = latent_size + self.mip_size()
+    self.empty_latent = torch.zeros(1,1,1,1,0, device=device, dtype=torch.float)
+    self.latent_size = self.total_latent_size()
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + intermediate_size,
@@ -157,17 +188,14 @@ class PlainNeRF(CommonNeRF):
       xavier_init=True,
     ).to(device)
 
-  def assign_latent(self, latent):
-    assert(latent.shape[-1] == self.latent_size)
-    assert(len(latent.shape) == 2), "expected latent in [B, L]"
-    self.latent = latent
-
   def forward(self, rays, lights=None):
     pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.5)
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
-    latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
+    curr_latent = self.curr_latent(*r_o.shape[1:3])
+    latent =  curr_latent[None, ...] if curr_latent is not None else self.empty_latent
+    latent = latent.expand(pts.shape[:-1] + (-1,))
 
     mip_enc = self.mip_encoding(r_o, r_d, ts)
 
@@ -201,10 +229,9 @@ class NeRFAE(CommonNeRF):
     **kwargs,
   ):
     super().__init__(**kwargs)
-    self.latent = None
-    if latent_size == 0: self.latent = torch.tensor([[]], device=device)
+    self.empty_latent = torch.zeros(1,1,1,1,0, device=device, dtype=torch.float)
 
-    self.latent_size = latent_size + self.mip_size()
+    self.latent_size = self.total_latent_size()
 
     self.encode = SkipConnMLP(
       in_size=3, out=encoding_size,
@@ -216,6 +243,7 @@ class NeRFAE(CommonNeRF):
     ).to(device)
 
     self.density = SkipConnMLP(
+      # a bit hacky, but pass it in with no encodings since there are no additional inputs.
       in_size=encoding_size, out=1,
       latent_size=0,
       num_layers=5,
@@ -237,16 +265,14 @@ class NeRFAE(CommonNeRF):
       xavier_init=True,
     ).to(device)
 
-  def assign_latent(self, latent):
-    assert(latent.shape[-1] == self.latent_size)
-    assert(len(latent.shape) == 2), "expected latent in [B, L]"
-    self.latent = latent
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.1)
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
-    latent = self.latent[None, :, None, None, :].expand(pts.shape[:-1] + (-1,))
+    curr_latent = self.curr_latent(*r_o.shape[1:3])
+    latent =  curr_latent[None, ...] if curr_latent is not None else self.empty_latent
+    latent = latent.expand(pts.shape[:-1] + (-1,))
 
     mip_enc = self.mip_encoding(r_o, r_d, ts)
 
@@ -287,10 +313,7 @@ class DynamicNeRF(nn.Module):
     ).to(device)
 
     self.canonical = canonical.to(device)
-  def assign_latent(self, latent):
-    assert(latent.shape[-1] == self.latent_size)
-    assert(len(latent.shape) == 2), "expected latent in [B, L]"
-    self.latent = latent
+
   def forward(self, rays_t):
     rays, t = rays_t
     device=rays.device
@@ -309,6 +332,28 @@ class DynamicNeRF(nn.Module):
     )
     pts = pts + dp
     return self.canonical.from_pts(pts, ts, r_o, r_d)
+
+class SinglePixelNeRF(nn.Module):
+  def __init__(
+    self,
+    canon: CommonNeRF,
+    encoder,
+    img,
+
+    device: torch.device = "cuda",
+  ):
+    super().__init__()
+    self.canon = canon
+    self.encoder = encoder
+    # encode image
+    self.encoder(img)
+
+    self.device = device
+  def forward(self, rays_uvs):
+    rays, uvs = rays_uvs
+    latent = self.encoder.sample(uvs)
+    self.canon.set_per_pixel_latent(latent)
+    return self.canon(rays)
 
 class MPI(nn.Module):
   def __init__(

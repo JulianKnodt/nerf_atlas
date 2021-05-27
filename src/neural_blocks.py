@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .utils import (
-  fourier, create_fourier_basis,
-)
+import torchvision
 from itertools import chain
 from typing import Optional
+
+from .utils import ( fourier, create_fourier_basis, )
 
 class SkipConnMLP(nn.Module):
   "MLP with skip connections and fourier encoding"
@@ -143,14 +143,40 @@ class Upsampler(nn.Module):
     out = upscaled.permute(0,2,3,1)
     return out
 
-class ImageEncoder(nn.Module):
+class SpatialEncoder(nn.Module):
   # Encodes an image into a latent vector, for use in PixelNeRF
   def __init__(
     self,
+    latent_size: int =64,
+    num_layers: int = 4,
   ):
     super().__init__()
-    ...
-  # (B, C, H, W) -> (B, L, H, W)
+    self.latent = None
+    self.model = torchvision.models.resnet34(pretrained=True).eval()
+    self.latent_size = latent_size
+    self.num_layers = num_layers
+  # (B, C = 3, H, W) -> (B, L, H, W)
   def forward(self, img):
-    raise NotImplementedError()
+    img = img.permute(0,3,1,2)
+    l_sz = img.shape[2:]
+    x = self.model.conv1(img)
+    x = self.model.bn1(x)
+    x = self.model.relu(x)
+    latents = [x]
+    # TODO other latent layers?
+
+    ls = [F.interpolate(l, l_sz, mode="bilinear", align_corners=True) for l in latents]
+    # necessary to detach here because we don't gradients to resnet
+    # TODO maybe want latent gradients? Have to experiment with it.
+    self.latents = torch.cat(latents, dim=1).detach().requires_grad_(False)
+    return self.latents
+  def sample(self, uvs: torch.Tensor, mode="bilinear", align_corners=True):
+    assert(self.latents is not None), "Expected latents to be assigned in encoder"
+    latents = F.grid_sample(
+      self.latents,
+      uvs.unsqueeze(0),
+      mode=mode,
+      align_corners=align_corners,
+    )
+    return latents.permute(0,2,3,1)
 

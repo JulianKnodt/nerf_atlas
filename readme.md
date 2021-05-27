@@ -33,6 +33,8 @@ Model Level:
   should allow for similar points to be learned more effectively.
 - [D-NeRF](https://arxiv.org/abs/2011.13961) for dynamic scenes, using an MLP to encode a
   positional change.
+- \[WIP\][Pixel NeRF](https://arxiv.org/pdf/2012.02190.pdf) for single image NeRF
+  reconstruction.
 
 Encoding:
 

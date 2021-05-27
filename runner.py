@@ -16,14 +16,14 @@ import src.loaders
 import src.nerf as nerf
 import src.utils as utils
 from src.utils import ( save_image, save_plot, CylinderGaussian, ConicGaussian )
-from src.neural_blocks import Upsampler
+from src.neural_blocks import ( Upsampler, SpatialEncoder )
 
 def arguments():
   a = argparse.ArgumentParser()
   a.add_argument("-d", "--data", help="path to data", required=True)
   a.add_argument(
-    "--data-kind", help="kind of data to load",
-    choices=["original", "single_video", "dnerf"],
+    "--data-kind", help="Kind of data to load",
+    choices=["original", "single_video", "dnerf", "pixel-single"],
     default="original",
   )
   a.add_argument("--load", help="model to load from", type=str)
@@ -97,6 +97,7 @@ def render(
   crop,
   # how big should the image be
   size,
+  args,
 
   device="cuda",
   with_noise=5e-3,
@@ -119,6 +120,7 @@ def render(
     positions, size=size, with_noise=with_noise,
   )
   if times is not None: return model((rays, times))
+  elif args.data_kind == "pixel-single": return model((rays, positions))
   return model(rays)
 
 # loads the dataset
@@ -127,6 +129,7 @@ def load(args, training=True):
   kind = args.data_kind
   if args.derive_kind:
     if args.data.endswith(".mp4"): kind = "single_video"
+    elif args.data.endswith(".jpg"): kind = "pixel-single"
     # TODO if single image use pixel
 
   if not args.neural_upsample: args.size = args.render_size
@@ -141,6 +144,11 @@ def load(args, training=True):
     )
   elif kind == "single_video":
     return src.loaders.single_video(args.data)
+  elif kind == "pixel-single":
+    img, cam = src.loaders.single_image(args.data)
+    setattr(args, "img", img)
+    args.batch_size = 1
+    return img, cam
   else:
     raise NotImplementedError(kind)
 
@@ -176,9 +184,7 @@ def train(model, cam, labels, opt, args, sched=None):
     # omit items which are all darker with some likelihood.
     if args.omit_bg and ref.mean() + 0.3 < sqr(random.random()): continue
 
-    out = render(
-      model, cam[idxs], crop, size=args.render_size, times=ts,
-    )
+    out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
     # TODO add config for this sqrt? It's optional.
     loss = F.mse_loss(out, ref)#.sqrt()
     loss.backward()
@@ -187,7 +193,6 @@ def train(model, cam, labels, opt, args, sched=None):
     t.set_postfix(loss=f"{loss:03f}", lr=f"{sched.get_last_lr()[0]:.1e}", refresh=False)
     if sched is not None: sched.step()
     if i % args.valid_freq == 0:
-      # TODO render whole thing if crop otherwise use output
       save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
     if i % args.save_freq == 0 and i != 0: save(model, args)
 
@@ -209,7 +214,7 @@ def test(model, cam, labels, args):
           c1 = y * args.crop_size
           out = render(
             model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
-            with_noise=False, times=ts
+            with_noise=False, times=ts, args=args,
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
       loss = F.mse_loss(got, exp)
@@ -233,6 +238,7 @@ def load_model(args):
     "steps": args.steps,
     "t_near": args.near,
     "t_far": args.far,
+    "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0
   }
   if args.model == "tiny":
     model = nerf.TinyNeRF(**kwargs).to(device)
@@ -246,6 +252,10 @@ def load_model(args):
   # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":
     model = nerf.DynamicNeRF(model, device=device).to(device)
+  if args.data_kind == "pixel-single":
+    encoder = SpatialEncoder().to(device)
+    # args.img is populated in load (single_image)
+    model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
 
   # tack on neural upsampling if specified
   if args.neural_upsample:
@@ -278,12 +288,12 @@ def main():
   args = arguments()
   seed(args.seed)
 
+  labels, cam = load(args)
   model = load_model(args) if args.load is None else torch.load(args.load)
 
   # for some reason AdamW doesn't seem to work here
   opt = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.decay)
 
-  labels, cam = load(args)
 
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-5)
   train(model, cam, labels, opt, args, sched=sched)

@@ -65,6 +65,12 @@ def single_video(path, training=True, size=256, device="cuda"):
   frames = frames[:100]
   return frames, NeRFMMCamera.identity(len(frames), device=device)
 
+def single_image(path, training=True, size=256, device="cuda"):
+  img = torchvision.io.read_image(path).to(device)
+  img = torchvision.transforms.functional.resize(img, size=(size, size))
+  img = img.permute(1,2,0)/255
+  return img.unsqueeze(0), NeRFCamera.identity(1, device=device)
+
 def monocular_video(path=".", training=True, size=256, device="cuda"):
   return NeRFCamera.empty(len(vid))
 
@@ -72,4 +78,4 @@ def load_cityscapes(dir=".", size=256, training=True, device="cuda"):
   kind = "train" if training else "test"
   cs = torchvision.datasets.Cityscapes(root=dir, split=kind, mode="fine")
   # TODO download city scape to test.
-  return cs, NeRFCamera.empt(len(cs))
+  return cs, NeRFCamera.identity(len(cs))
