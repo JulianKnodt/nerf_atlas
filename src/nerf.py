@@ -264,12 +264,17 @@ class NeRFAE(CommonNeRF):
       device=device,
       xavier_init=True,
     ).to(device)
+    self.encoding_size = encoding_size
 
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.1)
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
+    encoded = self.compute_encoded(pts, ts, r_o, r_d)
+    return self.from_encoded(encoded, ts, r_d)
+
+  def compute_encoded(self, pts, ts, r_o, r_d):
     curr_latent = self.curr_latent(*r_o.shape[1:3])
     latent =  curr_latent[None, ...] if curr_latent is not None else self.empty_latent
     latent = latent.expand(pts.shape[:-1] + (-1,))
@@ -280,11 +285,12 @@ class NeRFAE(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     encoded = self.encode(pts, latent if latent.shape[-1] != 0 else None)
-
+    return encoded
+  def from_encoded(self, encoded, ts, r_d):
     density = self.density(encoded).squeeze(-1)
     density = density + torch.randn_like(density) * 5e-2 #self.noise_std
 
-    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
+    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(encoded.shape[:-1]+(2,))
 
     rgb = self.rgb(
       elev_azim_r_d,
@@ -297,7 +303,7 @@ class NeRFAE(CommonNeRF):
 class DynamicNeRF(nn.Module):
   def __init__(
     self,
-    canonical: nn.Module,
+    canonical: CommonNeRF,
     device="cuda",
   ):
     super().__init__()
@@ -311,7 +317,6 @@ class DynamicNeRF(nn.Module):
 
       device=device,
     ).to(device)
-
     self.canonical = canonical.to(device)
 
   def forward(self, rays_t):
@@ -356,6 +361,7 @@ class SinglePixelNeRF(nn.Module):
     return self.canon(rays)
 
 class MPI(nn.Module):
+  # [WIP] Multi Plane Images.
   def __init__(
     self,
 
