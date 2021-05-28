@@ -67,7 +67,7 @@ def arguments():
   )
   a.add_argument("--seed", help="random seed to use", type=int, default=1337)
   a.add_argument("--decay", help="weight_decay value", type=float, default=0)
-  a.add_argument("--notest", help="run test set", action="store_true")
+  a.add_argument("--notest", help="do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit bg with some probability", action="store_true")
 
@@ -76,8 +76,8 @@ def arguments():
   a.add_argument("--save-freq", help="# of epochs between saves", type=int, default=10_000)
 
   cam = a.add_argument_group("camera parameters")
-  cam.add_argument("--near", help="near plane for camera", default=2)
-  cam.add_argument("--far", help="far plane for camera", default=6)
+  cam.add_argument("--near", help="near plane for camera", type=float, default=2)
+  cam.add_argument("--far", help="far plane for camera", type=float, default=6)
 
   reporting = a.add_argument_group("reporting parameters")
   reporting.add_argument("-q", "--quiet", help="Silence tqdm (UNIMPL)", action="store_true")

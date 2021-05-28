@@ -5,4 +5,5 @@ pixel-single: clean
   --crop --crop-size 16 --save models/celeba_sp.pt --mip cylinder --model ae
 dnerf: clean
 	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 32 \
-	--crop --epochs 60_000 --mip cylinder --save models/djj_ae.pt --model ae
+	--crop --epochs 50_000 --mip cylinder --save models/djj_ae.pt --model ae \
+  --near 0 --far 1 --load models/djj_ae.pt
