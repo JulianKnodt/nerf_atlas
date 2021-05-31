@@ -15,6 +15,7 @@ import math
 import src.loaders
 import src.nerf as nerf
 import src.utils as utils
+import src.sdf as sdf
 from src.utils import ( save_image, save_plot, CylinderGaussian, ConicGaussian )
 from src.neural_blocks import ( Upsampler, SpatialEncoder )
 
@@ -48,6 +49,7 @@ def arguments():
     "--mip", help="Use MipNeRF with different sampling", type=str,
     choices=["cone", "cylinder"],
   )
+  a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
 
   a. add_argument(
     "--feature-space",
@@ -182,15 +184,21 @@ def train(model, cam, labels, opt, args, sched=None):
     ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
 
     # omit items which are all darker with some likelihood.
-    if args.omit_bg and ref.mean() + 0.3 < sqr(random.random()): continue
+    if args.omit_bg and (i % args.save_freq) != 0 and \
+      ref.mean() + 0.3 < sqr(random.random()): continue
 
     out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
     # TODO add config for this sqrt? It's optional.
     loss = F.mse_loss(out, ref)#.sqrt()
+    l2_loss = loss.item()
+    if args.sdf:
+      # TODO experimenting with multiplying all of them, multiply them all? Add weights?
+      loss = loss + \
+        sdf.eikonal_loss(model.sdf.normals) + \
+        sdf.sigmoid_loss(model.sdf.values, model.nerf.density)
     loss.backward()
-    loss = loss.item()
     opt.step()
-    t.set_postfix(loss=f"{loss:03f}", lr=f"{sched.get_last_lr()[0]:.1e}", refresh=False)
+    t.set_postfix(l2_loss=f"{l2_loss:03f}", lr=f"{sched.get_last_lr()[0]:.1e}", refresh=False)
     if sched is not None: sched.step()
     if i % args.valid_freq == 0:
       save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
@@ -207,6 +215,7 @@ def test(model, cam, labels, args):
       ts = None if times is None else times[i:i+1, ...]
       exp = labels[i]
       got = torch.zeros_like(exp)
+      if args.sdf: got_sdf = torch.zeros_like(got)
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
         for y in range(N):
@@ -217,9 +226,18 @@ def test(model, cam, labels, args):
             with_noise=False, times=ts, args=args,
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+          if not args.sdf: continue
+          out = render(
+            model.sdf.sphere_march, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size),
+            size=args.render_size, with_noise=False, times=ts, args=args,
+          ).squeeze(0)
+          got_sdf[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+
       loss = F.mse_loss(got, exp)
       print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
       save_plot(f"outputs/out_{i:03}.png", exp, got)
+      if not args.sdf: continue
+      save_plot(f"outputs/out_sdf_{i:03}.png", exp, got_sdf)
 
 def load_mip(args):
   if args.mip is None: return None
@@ -238,7 +256,8 @@ def load_model(args):
     "steps": args.steps,
     "t_near": args.near,
     "t_far": args.far,
-    "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0
+    "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0,
+    "per_point_latent_size": (1 + 3 + 128) if args.sdf else 0,
   }
   if args.model == "tiny":
     model = nerf.TinyNeRF(**kwargs).to(device)
@@ -257,6 +276,7 @@ def load_model(args):
     # args.img is populated in load (single_image)
     model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
 
+  if args.sdf: model = sdf.SDFNeRF(model, sdf.SDF()).to(device)
   # tack on neural upsampling if specified
   if args.neural_upsample:
     upsampler =  Upsampler(
