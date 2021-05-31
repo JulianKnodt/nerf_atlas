@@ -13,6 +13,7 @@ def cumuprod_exclusive(t):
   cp[0, ...] = 1
   return cp
 
+#@torch.jit.script # cannot jit script cause of tensordot :)
 def compute_pts_ts(
   rays, near, far, steps, with_noise=False, lindisp=False,
   perturb: float = 1,
@@ -35,6 +36,36 @@ def compute_pts_ts(
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
   return pts, ts, r_o, r_d
 
+def sample_pdf(
+  bins, weights, n_samples: int = 64,
+):
+  print(bins.shape, weights.shape)
+  exit()
+  # TODO test this
+  device=weights.device
+  weights = weights.clamp(min=1e-6)
+  pdf = weights / weights.sum(dim=0, keepdim=True)
+  cdf = torch.cumsum(pdf, dim=0)
+  cdf = torch.cat([torch.zeros_like(cdf[:1]), cdf], dim=0)
+
+  u = torch.rand(cdf.shape[:-1] + (num_samples,), device=device)
+
+  inds = torch.searchsorted(cdf, u, right=True)
+
+  below = (inds-1).clamp(min=0)
+  above = inds.clamp(max=inds.shape[0]-1)
+  inds_g = torch.cat([below, above], dim=-1)
+  gather_shape = (*inds_g.shape[:2], cdf.shape[-1])
+  cdf_g = torch.gather(cdf.unsqueeze(1).expand(gather_shape), 2, inds_g)
+  bins_g = torch.gather(bins.unsqueeze(1).expand(gather_shape), 2, inds_g)
+
+  denom = cdf_g[..., 1] - cdf_g[..., 0]
+  denom = torch.where(denom < 1e-5, torch.ones_like(denom), denom)
+  t = (u - cdf_g[..., 0]) / denom
+  samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
+
+  return samples
+
 def batched(model, pts, batch_size: int = 8):
   bpts = pts.split(batch_size, dim=0)
   outs = []
@@ -44,10 +75,14 @@ def batched(model, pts, batch_size: int = 8):
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
 @torch.jit.script
-def volumetric_integrate(density, other, ts):
+def volumetric_integrate(
+  density, other, ts,
+  shifted_softplus: bool =False,
+):
   device=density.device
 
-  sigma_a = F.relu(density)
+  if shifted_softplus: sigma_a = ((density-1).exp()+1).log()
+  else: sigma_a = F.relu(density)
 
   end_val = torch.tensor([1e10], device=device, dtype=torch.float)
   dists = torch.cat([ts[1:] - ts[:-1], end_val], dim=-1)
@@ -55,7 +90,7 @@ def volumetric_integrate(density, other, ts):
 
   alpha = 1.0 - torch.exp(-sigma_a * dists)
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
-  return (weights[..., None] * other).sum(dim=0)
+  return (weights[..., None] * other).sum(dim=0), alpha
 
 class CommonNeRF(nn.Module):
   def __init__(
@@ -71,6 +106,7 @@ class CommonNeRF(nn.Module):
     mip = None,
     instance_latent_size: int = 0,
     per_pixel_latent_size: int = 0,
+    per_point_latent_size: int = 0,
   ):
     super().__init__()
     self.t_near = t_near
@@ -84,6 +120,11 @@ class CommonNeRF(nn.Module):
     self.instance_latent_size = instance_latent_size
     self.instance_latent = None
 
+    self.per_pt_latent_size = per_point_latent_size
+    self.per_pt_latent = None
+
+    self.density = None
+
   def forward(self, x): raise NotImplementedError()
   def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
   def mip_encoding(self, r_o, r_d, ts):
@@ -95,7 +136,14 @@ class CommonNeRF(nn.Module):
     return self.mip(r_o, r_d, t0, t1)
 
   def total_latent_size(self) -> int:
-    return self.mip_size() + self.per_pixel_latent_size + self.instance_latent_size
+    return self.mip_size() + \
+      self.per_pixel_latent_size + self.instance_latent_size + self.per_pt_latent_size
+  def set_per_pt_latent(self, latent):
+    assert(latent.shape[-1] == self.per_pt_latent_size), \
+      f"expected latent in [T, B, H, W, L={self.per_pixel_latent_size}], got {latent.shape}"
+    assert(len(latent.shape) == 5), \
+      f"expected latent in [T, B, H, W, L], got {latent.shape}"
+    self.per_pt_latent = latent
   def set_per_pixel_latent(self, latent):
     assert(latent.shape[-1] == self.per_pixel_latent_size), \
       f"expected latent in [B, H, W, L={self.per_pixel_latent_size}], got {latent.shape}"
@@ -106,17 +154,24 @@ class CommonNeRF(nn.Module):
     assert(latent.shape[-1] == self.instance_latent_size), "expected latent in [B, L]"
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.instance_latent = latent
-  def curr_latent(self, H: int, W: int) -> ["B", "H", "W", "L_pp + L_inst"]:
-    if self.instance_latent is None and self.per_pixel_latent is None: return None
-    elif self.instance_latent is None: return self.per_pixel_latent
-    elif self.per_pixel_latent is None:
-      return self.instance_latent[:, None, None, :]\
-        .expand(self.instance_latent.shape[0], H, W, -1)
 
-    return torch.cat([
-      self.instance_latent[:, None, None, :].expand_as(self.per_pixel_latent),
-      self.per_pixel_latent,
-    ], dim=-1)
+  # gets the current latent vector for this NeRF instance
+  def curr_latent(self, pts_shape) -> ["T", "B", "H", "W", "L_pp + L_inst"]:
+    curr = None
+
+    if self.per_pt_latent is not None: curr = self.per_pt_latent
+
+    if self.per_pixel_latent is not None:
+      ppl = self.per_pixel_latent[None, ...].expand(pts.shape[:-1] + (-1,))
+      if curr is None: curr = ppl
+      else: curr = torch.cat([curr, ppl], dim=-1)
+
+    if self.instance_latent is not None:
+      il = self.instance_latent[None, :, None, None, :].expand_as(pts.shape[:-1] + (-1,))
+      if curr is None: curr = il
+      else: curr = torch.cat([curr, il], dim=-1)
+
+    return curr
 
 
 class TinyNeRF(CommonNeRF):
@@ -132,6 +187,8 @@ class TinyNeRF(CommonNeRF):
     self.estim = SkipConnMLP(
       in_size=3, out=1 + out_features,
 
+      latent = self.total_latent_size(),
+
       num_layers=6,
       hidden_size=80,
       latent_size=0,
@@ -146,9 +203,14 @@ class TinyNeRF(CommonNeRF):
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
-    density, feats = self.estim(pts).split([1, 3], dim=-1)
+    curr_latent = self.curr_latent(pts.shape)
+    latent =  curr_latent if curr_latent is not None else self.empty_latent
 
-    return volumetric_integrate(density, feats.sigmoid(), ts)
+    density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
+
+    val, alpha = volumetric_integrate(density, feats.sigmoid(), ts)
+    self.density = alpha
+    return val
 
 # A plain old nerf
 class PlainNeRF(CommonNeRF):
@@ -193,9 +255,8 @@ class PlainNeRF(CommonNeRF):
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
-    curr_latent = self.curr_latent(*r_o.shape[1:3])
-    latent =  curr_latent[None, ...] if curr_latent is not None else self.empty_latent
-    latent = latent.expand(pts.shape[:-1] + (-1,))
+    curr_latent = self.curr_latent(pts.shape)
+    latent =  curr_latent if curr_latent is not None else self.empty_latent
 
     mip_enc = self.mip_encoding(r_o, r_d, ts)
 
@@ -213,7 +274,9 @@ class PlainNeRF(CommonNeRF):
       torch.cat([intermediate, latent], dim=-1)
     ).sigmoid()
 
-    return volumetric_integrate(density, rgb, ts)
+    val, alpha = volumetric_integrate(density, rgb, ts)
+    self.density = alpha
+    return val
 
 # NeRF with a thin middle layer, for encoding information
 class NeRFAE(CommonNeRF):
@@ -242,7 +305,7 @@ class NeRFAE(CommonNeRF):
       xavier_init=True,
     ).to(device)
 
-    self.density = SkipConnMLP(
+    self.density_tform = SkipConnMLP(
       # a bit hacky, but pass it in with no encodings since there are no additional inputs.
       in_size=encoding_size, out=1,
       latent_size=0,
@@ -275,9 +338,8 @@ class NeRFAE(CommonNeRF):
     return self.from_encoded(encoded, ts, r_d)
 
   def compute_encoded(self, pts, ts, r_o, r_d):
-    curr_latent = self.curr_latent(*r_o.shape[1:3])
-    latent =  curr_latent[None, ...] if curr_latent is not None else self.empty_latent
-    latent = latent.expand(pts.shape[:-1] + (-1,))
+    curr_latent = self.curr_latent(pts.shape)
+    latent =  curr_latent if curr_latent is not None else self.empty_latent
 
     mip_enc = self.mip_encoding(r_o, r_d, ts)
 
@@ -287,7 +349,7 @@ class NeRFAE(CommonNeRF):
     encoded = self.encode(pts, latent if latent.shape[-1] != 0 else None)
     return encoded
   def from_encoded(self, encoded, ts, r_d):
-    density = self.density(encoded).squeeze(-1)
+    density = self.density_tform(encoded).squeeze(-1)
     density = density + torch.randn_like(density) * 5e-2 #self.noise_std
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(encoded.shape[:-1]+(2,))
@@ -297,7 +359,9 @@ class NeRFAE(CommonNeRF):
       encoded,
     ).sigmoid()
 
-    return volumetric_integrate(density, rgb, ts)
+    val, alpha = volumetric_integrate(density, rgb, ts)
+    self.density = alpha
+    return val
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
@@ -328,15 +392,70 @@ class DynamicNeRF(nn.Module):
       self.canonical.t_far,
       self.canonical.steps,
     )
+    # small deviation for regularization
+    t = t + 1e-3 * torch.rand_like(t)
+
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
+
     dp = self.delta_estim(torch.cat([pts, t], dim=-1))
-    dp = torch.where(
-      t.abs() < 1e-6,
-      torch.zeros_like(pts),
-      dp,
-    )
+    dp = torch.where(t.abs() < 1e-6, torch.zeros_like(pts), dp)
     pts = pts + dp
     return self.canonical.from_pts(pts, ts, r_o, r_d)
+
+# Dynamic NeRFAE for multiple framss with changing materials
+class DynamicNeRFAE(nn.Module):
+  def __init__(
+    self,
+    canonical: NeRFAE,
+    device="cuda",
+  ):
+    super().__init__()
+    assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
+    self.canonical = canonical.to(device)
+
+    self.delta_estim = SkipConnMLP(
+      # x,y,z,t -> dx, dy, dz
+      in_size=4, out=3,
+
+      num_layers = 5,
+      hidden_size = 128,
+
+      device=device,
+    ).to(device)
+
+    self.delta_enc_estim = SkipConnMLP(
+      in_size=4, out=canonical.encoding_size,
+
+      num_layers = 3,
+      hidden_size = 128,
+
+      device=device,
+      # start assuming that density and view dependent fx are preserved.
+      zero_init=True,
+    )
+
+
+  def forward(self, rays_t):
+    rays, t = rays_t
+    device=rays.device
+
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays,
+      self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
+    )
+    t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
+    # compute encoding using delta positions at a given time
+    pts_t = torch.cat([pts, t], dim=-1)
+    dp = self.delta_estim(pts_t)
+    dp = torch.where(t.abs() < 1e-6, torch.zeros_like(pts), dp)
+    encoded = self.canonical.compute_encoded(pts + dp, ts, r_o, r_d)
+
+    # compute encoding delta at a given time
+    d_enc = self.delta_enc_estim(pts_t)
+    d_enc = torch.where(t.abs() < 1e-6, torch.zeros_like(d_enc), d_enc)
+
+    # TODO is this best as a sum, or is some other kind of tform better?
+    return self.canonical.from_encoded(encoded + d_enc, ts, r_d)
 
 class SinglePixelNeRF(nn.Module):
   def __init__(
@@ -408,4 +527,5 @@ class MPI(nn.Module):
   def from_pts(self, pts, ts, r_o, r_d):
     density, feats = self.estim(pts).split([1, 3], dim=-1)
 
-    return volumetric_integrate(density, feats, ts)
+    val, _alpha = volumetric_integrate(density, feats, ts)
+    return val
