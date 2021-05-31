@@ -25,6 +25,9 @@ class SkipConnMLP(nn.Module):
 
     latent_size=0,
 
+    # Record the last layers activation
+    last_layer_act = False,
+
     zero_init = False,
     xavier_init = False,
   ):
@@ -69,6 +72,7 @@ class SkipConnMLP(nn.Module):
       for t in biases: nn.init.zeros_(t)
 
     self.activation = activation
+    self.last_layer_act = last_layer_act
 
   def forward(self, p, latent: Optional[torch.Tensor]=None):
     batches = p.shape[:-1]
@@ -80,9 +84,9 @@ class SkipConnMLP(nn.Module):
       if i != len(self.layers)-1 and (i % self.skip) == 0:
         x = torch.cat([x, init], dim=-1)
       x = layer(self.activation(x))
+    if self.last_layer_act: setattr(self, "last_layer_out", x.reshape(batches + (-1,)))
     out_size = self.out.out_features
     return self.out(self.activation(x)).reshape(batches + (out_size,))
-
 
 class Upsampler(nn.Module):
   def __init__(
