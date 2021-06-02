@@ -10,13 +10,13 @@ from .utils import dir_to_elev_azim
 def cumuprod_exclusive(t):
   cp = torch.cumprod(t, dim=0)
   cp = torch.roll(cp, 1, dims=0)
-  cp[0, ...] = 1
+  cp[0, ...] = 1.0
   return cp
 
 #@torch.jit.script # cannot jit script cause of tensordot :)
 def compute_pts_ts(
-  rays, near, far, steps, with_noise=False, lindisp=False,
-  perturb: float = 1,
+  rays, near, far, steps, lindisp=False,
+  perturb: float = 0,
 ):
   r_o, r_d = rays.split([3,3], dim=-1)
   device = r_o.device
@@ -72,25 +72,30 @@ def batched(model, pts, batch_size: int = 8):
   for bpt in bpts: outs.append(model(bpt))
   return torch.cat(outs, dim=0)
 
-# perform volumetric integration of density with some other quantity
-# returns the integrated 2nd value over density at timesteps.
 @torch.jit.script
-def volumetric_integrate(
-  density, other, ts,
-  shifted_softplus: bool =False,
+def alpha_from_density(
+  density, ts, r_d,
+  shifted_softplus: bool = False,
 ):
   device=density.device
 
-  if shifted_softplus: sigma_a = ((density-1).exp()+1).log()
+  # TODO confirm clamp does not lead to NaN
+  if shifted_softplus: sigma_a = ((density-1).exp()+1).clamp(min=1e-10).log()
   else: sigma_a = F.relu(density)
 
   end_val = torch.tensor([1e10], device=device, dtype=torch.float)
   dists = torch.cat([ts[1:] - ts[:-1], end_val], dim=-1)
-  dists = dists[:, None, None, None]
-
+  dists = dists[:, None, None, None] * torch.linalg.norm(r_d, dim=-1)
   alpha = 1.0 - torch.exp(-sigma_a * dists)
-  weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
-  return (weights[..., None] * other).sum(dim=0), alpha
+  return alpha
+
+# perform volumetric integration of density with some other quantity
+# returns the integrated 2nd value over density at timesteps.
+@torch.jit.script
+def volumetric_integrate(alpha, other):
+  weights = alpha * cumuprod_exclusive((1.0 - alpha).clamp(min=1e-10))
+
+  return (weights[..., None] * other).sum(dim=0)
 
 class CommonNeRF(nn.Module):
   def __init__(
@@ -124,6 +129,7 @@ class CommonNeRF(nn.Module):
     self.per_pt_latent = None
 
     self.density = None
+    self.noise_std = 1e-3
 
   def forward(self, x): raise NotImplementedError()
   def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
@@ -199,7 +205,10 @@ class TinyNeRF(CommonNeRF):
     ).to(device)
 
   def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps)
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps,
+      perturb = 1 if self.training else 0,
+    )
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -208,7 +217,8 @@ class TinyNeRF(CommonNeRF):
 
     density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
 
-    val, alpha = volumetric_integrate(density, feats.sigmoid(), ts)
+    alpha = alpha_from_density(density, ts, r_d)
+    val = volumetric_integrate(alpha, feats.sigmoid())
     self.density = alpha
     return val
 
@@ -250,8 +260,11 @@ class PlainNeRF(CommonNeRF):
       xavier_init=True,
     ).to(device)
 
-  def forward(self, rays, lights=None):
-    pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.5)
+  def forward(self, rays):
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps,
+      perturb = 1 if self.training else 0,
+    )
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -274,7 +287,8 @@ class PlainNeRF(CommonNeRF):
       torch.cat([intermediate, latent], dim=-1)
     ).sigmoid()
 
-    val, alpha = volumetric_integrate(density, rgb, ts)
+    alpha = alpha_from_density(density, ts, r_d)
+    val = volumetric_integrate(alpha, rgb)
     self.density = alpha
     return val
 
@@ -330,7 +344,10 @@ class NeRFAE(CommonNeRF):
     self.encoding_size = encoding_size
 
   def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(rays, self.t_near, self.t_far, self.steps, with_noise=0.1)
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps,
+      perturb = 1 if self.training else 0,
+    )
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -346,11 +363,11 @@ class NeRFAE(CommonNeRF):
     # If there is a mip encoding, stack it with the latent encoding.
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
-    encoded = self.encode(pts, latent if latent.shape[-1] != 0 else None)
-    return encoded
+    return self.encode(pts, latent if latent.shape[-1] != 0 else None)
   def from_encoded(self, encoded, ts, r_d):
     density = self.density_tform(encoded).squeeze(-1)
-    density = density + torch.randn_like(density) * 5e-2 #self.noise_std
+    if self.noise_std > 0 and self.training:
+      density = density + torch.randn_like(density) * self.noise_std
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(encoded.shape[:-1]+(2,))
 
@@ -359,9 +376,9 @@ class NeRFAE(CommonNeRF):
       encoded,
     ).sigmoid()
 
-    val, alpha = volumetric_integrate(density, rgb, ts)
+    alpha = alpha_from_density(density, ts, r_d)
     self.density = alpha
-    return val
+    return volumetric_integrate(alpha, rgb)
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
@@ -391,6 +408,7 @@ class DynamicNeRF(nn.Module):
       self.canonical.t_near,
       self.canonical.t_far,
       self.canonical.steps,
+      perturb = 1 if self.training else 0,
     )
     # small deviation for regularization
     t = t + 1e-3 * torch.rand_like(t)
@@ -527,5 +545,6 @@ class MPI(nn.Module):
   def from_pts(self, pts, ts, r_o, r_d):
     density, feats = self.estim(pts).split([1, 3], dim=-1)
 
-    val, _alpha = volumetric_integrate(density, feats, ts)
+    alpha = alpha_from_density(density, ts, r_d)
+    val = volumetric_integrate(alpha, feats.sigmoid())
     return val

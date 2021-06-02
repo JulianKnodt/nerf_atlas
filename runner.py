@@ -93,6 +93,8 @@ if torch.cuda.is_available():
   device = torch.device("cuda:0")
   torch.cuda.set_device(device)
 
+#torch.autograd.set_detect_anomaly(True)
+
 def render(
   model,
   cam,
@@ -158,6 +160,7 @@ def sqr(x): return x * x
 
 # train the model with a given camera and some labels (imgs or imgs+times)
 def train(model, cam, labels, opt, args, sched=None):
+  if args.epochs == 0: return
   t = trange(args.epochs)
   batch_size = args.batch_size
   times=None
@@ -192,13 +195,19 @@ def train(model, cam, labels, opt, args, sched=None):
     loss = F.mse_loss(out, ref)#.sqrt()
     l2_loss = loss.item()
     if args.sdf:
-      # TODO experimenting with multiplying all of them, multiply them all? Add weights?
-      loss = loss + \
-        sdf.eikonal_loss(model.sdf.normals) + \
-        sdf.sigmoid_loss(model.sdf.values, model.nerf.density)
+      eik = sdf.eikonal_loss(model.sdf.normals)
+      loss = loss + eik
+      t.set_postfix(
+        l2=f"{l2_loss:.04f}", eik=f"{eik:.02f}",
+        lr=f"{sched.get_last_lr()[0]:.1e}",
+        refresh=False,
+      )
+    else:
+      t.set_postfix(
+        l2=f"{l2_loss:.04f}", lr=f"{sched.get_last_lr()[0]:.1e}", refresh=False,
+      )
     loss.backward()
     opt.step()
-    t.set_postfix(l2_loss=f"{l2_loss:03f}", lr=f"{sched.get_last_lr()[0]:.1e}", refresh=False)
     if sched is not None: sched.step()
     if i % args.valid_freq == 0:
       save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
@@ -206,6 +215,7 @@ def train(model, cam, labels, opt, args, sched=None):
 
 def test(model, cam, labels, args):
   times = None
+  model = model.eval()
   if args.data_kind == "dnerf":
     times = labels[-1]
     labels = labels[0]
@@ -215,6 +225,7 @@ def test(model, cam, labels, args):
       ts = None if times is None else times[i:i+1, ...]
       exp = labels[i]
       got = torch.zeros_like(exp)
+      acc = torch.zeros_like(got)
       if args.sdf: got_sdf = torch.zeros_like(got)
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
@@ -226,18 +237,18 @@ def test(model, cam, labels, args):
             with_noise=False, times=ts, args=args,
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
-          if not args.sdf: continue
-          out = render(
-            model.sdf.sphere_march, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size),
-            size=args.render_size, with_noise=False, times=ts, args=args,
-          ).squeeze(0)
-          got_sdf[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+
+          #weights = nerf.volumetric_integrate(
+          #  model.nerf.density, model.nerf.density[..., None]
+          #)
+          weights = model.density * nerf.cumuprod_exclusive((1-model.density).clamp(min=1e-10))
+          acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+            weights.max(dim=0)[0][..., None]
 
       loss = F.mse_loss(got, exp)
       print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
       save_plot(f"outputs/out_{i:03}.png", exp, got)
-      if not args.sdf: continue
-      save_plot(f"outputs/out_sdf_{i:03}.png", exp, got_sdf)
+      save_plot(f"outputs/acc_{i:03}.png", exp, acc)
 
 def load_mip(args):
   if args.mip is None: return None

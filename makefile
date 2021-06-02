@@ -9,5 +9,11 @@ dnerf: clean
   --near 0 --far 1 --load models/djj_ae.pt
 sdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \
-	--render-size 32 --crop --epochs 30_000 --mip cylinder --save models/lego.pt \
-	--near 2 --far 6 --batch-size 5 #--load models/lego.pt #--omit-bg
+	--render-size 32 --crop --epochs 20_000 --save models/lego.pt \
+  --model ae --crop-size 8 \
+	--near 2 --far 6 --batch-size 6 --mip cylinder #--load models/lego.pt #--omit-bg
+plain: clean
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--render-size 32 --crop --epochs 10000 --save models/lego_plain.pt \
+	--near 2 --far 6 --batch-size 4 --mip cylinder --model ae \ #--omit-bg
+	--load models/lego_plain.pt

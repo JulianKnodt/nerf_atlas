@@ -122,7 +122,7 @@ def save_plot(name, expected, got):
   plt.imshow(expected.detach().squeeze().cpu().numpy())
   plt.grid("off");
   plt.axis("off");
-  plt.savefig(name)
+  plt.savefig(name, bbox_inches='tight')
   plt.close(fig)
 
 # https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula

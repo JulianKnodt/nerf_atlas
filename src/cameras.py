@@ -64,7 +64,7 @@ class NeRFCamera(Camera):
     r_d = torch.sum(
       d[..., None, :] * self.cam_to_world[..., :3, :3], dim=-1
     )
-    r_d = r_d.permute(2,0,1,3)#F.normalize(r_d, dim=-1).permute(2,0,1,3)
+    r_d = r_d.permute(2,0,1,3)
     r_o = self.cam_to_world[..., :3, -1][:, None, None, :].expand_as(r_d)
     return torch.cat([r_o, r_d], dim=-1)
 
@@ -95,7 +95,7 @@ class NeRFMMCamera(Camera):
   def identity(cls, batch_size: int, device="cuda"):
     t = torch.tensor([0, 0, 0], dtype=torch.float, device=device, requires_grad=True)\
       .unsqueeze(0).expand(batch_size, 3)
-    r = torch.tenso
+    r = torch.tensor # TODO
     # focals are for all the cameras and thus don't have batch dim
     focals = torch.tensor([0.7, 0.7], dtype=torch.float, device=device, requires_grad=True)
     return cls(t=t, angle=angle, axis=axis, focal=focals, device=device)
