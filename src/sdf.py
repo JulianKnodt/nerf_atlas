@@ -11,15 +11,21 @@ def eikonal_loss(normals):
   return (torch.linalg.norm(normals, dim=-1) - 1).square().mean()
 
 # Using the densities as a guide to which points are occupied or not.
-def sigmoid_loss(sdf_values, densities, alpha=1000):
-  densities = densities.detach()
-  return F.l1_loss(-sdf_values.squeeze(-1)*alpha, densities.round())
-  return F.binary_cross_entropy_with_logits(
-    -sdf_values.squeeze(-1)*alpha,
-    densities.round(),
-    # weight points which are far from the rounded value lower
-    2 * (0.5 - (densities.round() - densities).abs()),
-  )
+def sigmoid_loss(min_along_ray, densities, alpha=1000):
+  throughput = -min_along_ray.squeeze(-1) * alpha
+  assert(throughput.requires_grad)
+  hits = (throughput > 0) & (densities > 0.5)
+  misses = ~hits
+  loss = 0
+  if misses.any():
+    loss = F.binary_cross_entropy_with_logits(
+      throughput[misses].reshape(-1, 1),
+      densities[misses].reshape(-1, 1),
+      # weight points which are far from the rounded value lower
+      #2 * (0.5 - (densities.round() - densities).abs()),
+    )
+    assert(loss.isfinite().all())
+  return loss
 
 def autograd(x, y):
   assert(x.requires_grad)
@@ -41,6 +47,8 @@ class SDF(nn.Module):
     super().__init__()
     self.mlp = SkipConnMLP(
       in_size = 3, out = 1,
+      num_layers=6,
+      hidden_size=64,
 
       activation = nn.Softplus(),
       last_layer_act=True,
@@ -87,9 +95,12 @@ class SDFNeRF(nn.Module):
     super().__init__()
     self.nerf = nerf
     self.sdf = sdf
+    self.min_along_rays = None
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(rays, self.nerf.t_near, self.nerf.t_far, self.nerf.steps)
     sdf_vals = self.sdf(pts)
+    # record mins along rays for backprop
+    self.min_along_rays = sdf_vals.min(dim=0)[0]
     # values (useful for density), normals (useful for view), latent (useful for ???)
     sdf_latent = torch.cat([sdf_vals, self.sdf.normals, self.sdf.mlp.last_layer_out], dim=-1)
     self.nerf.set_per_pt_latent(sdf_latent)

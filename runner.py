@@ -49,6 +49,7 @@ def arguments():
     "--mip", help="Use MipNeRF with different sampling", type=str,
     choices=["cone", "cylinder"],
   )
+  a.add_argument("--nerf-eikonal", help="[UNIMPL] Add eikonal loss for NeRF", action="store_true")
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
 
   a. add_argument(
@@ -192,25 +193,30 @@ def train(model, cam, labels, opt, args, sched=None):
 
     out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
     # TODO add config for this sqrt? It's optional.
-    loss = F.mse_loss(out, ref)#.sqrt()
+    loss = F.mse_loss(out, ref)
     l2_loss = loss.item()
+    display = {
+      "l2": f"{l2_loss:.04f}",
+      "lr": f"{sched.get_last_lr()[0]:.1e}",
+      "refresh": False,
+    }
     if args.sdf:
       eik = sdf.eikonal_loss(model.sdf.normals)
-      loss = loss + eik
-      t.set_postfix(
-        l2=f"{l2_loss:.04f}", eik=f"{eik:.02f}",
-        lr=f"{sched.get_last_lr()[0]:.1e}",
-        refresh=False,
-      )
-    else:
-      t.set_postfix(
-        l2=f"{l2_loss:.04f}", lr=f"{sched.get_last_lr()[0]:.1e}", refresh=False,
-      )
+      s = sdf.sigmoid_loss(model.min_along_rays, model.nerf.acc())
+      loss = loss + eik + s
+      display["eik"] = "{eik:.02f}"
+      display["s"] = f"{s:.02f}"
+
+    t.set_postfix(**display)
     loss.backward()
     opt.step()
     if sched is not None: sched.step()
     if i % args.valid_freq == 0:
-      save_plot(f"outputs/valid_{i:05}.png", ref[0], out[0])
+      with torch.no_grad():
+        ref0 = ref[0]
+        save_plot(f"outputs/valid_{i:05}.png", ref0, out[0])
+        acc = model.nerf.acc()[0,...,None].expand_as(ref0)
+        save_plot(f"outputs/valid_acc_{i:05}.png", ref0, acc)
     if i % args.save_freq == 0 and i != 0: save(model, args)
 
 def test(model, cam, labels, args):
@@ -238,12 +244,7 @@ def test(model, cam, labels, args):
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
 
-          #weights = nerf.volumetric_integrate(
-          #  model.nerf.density, model.nerf.density[..., None]
-          #)
-          weights = model.density * nerf.cumuprod_exclusive((1-model.density).clamp(min=1e-10))
-          acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-            weights.max(dim=0)[0][..., None]
+          acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = model.nerf.acc()[..., None]
 
       loss = F.mse_loss(got, exp)
       print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
@@ -268,7 +269,7 @@ def load_model(args):
     "t_near": args.near,
     "t_far": args.far,
     "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0,
-    "per_point_latent_size": (1 + 3 + 128) if args.sdf else 0,
+    "per_point_latent_size": (1 + 3 + 64) if args.sdf else 0,
   }
   if args.model == "tiny":
     model = nerf.TinyNeRF(**kwargs).to(device)

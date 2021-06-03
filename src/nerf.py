@@ -75,19 +75,17 @@ def batched(model, pts, batch_size: int = 8):
 @torch.jit.script
 def alpha_from_density(
   density, ts, r_d,
-  shifted_softplus: bool = False,
+  shifted_softplus: bool = True,
 ):
   device=density.device
 
-  # TODO confirm clamp does not lead to NaN
-  if shifted_softplus: sigma_a = ((density-1).exp()+1).clamp(min=1e-10).log()
+  if shifted_softplus: sigma_a = F.softplus(density-1)
   else: sigma_a = F.relu(density)
 
   end_val = torch.tensor([1e10], device=device, dtype=torch.float)
   dists = torch.cat([ts[1:] - ts[:-1], end_val], dim=-1)
   dists = dists[:, None, None, None] * torch.linalg.norm(r_d, dim=-1)
-  alpha = 1.0 - torch.exp(-sigma_a * dists)
-  return alpha
+  return 1 - torch.exp(-sigma_a * dists)
 
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
@@ -95,7 +93,7 @@ def alpha_from_density(
 def volumetric_integrate(alpha, other):
   weights = alpha * cumuprod_exclusive((1.0 - alpha).clamp(min=1e-10))
 
-  return (weights[..., None] * other).sum(dim=0)
+  return torch.sum(weights[..., None] * other, dim=0)
 
 class CommonNeRF(nn.Module):
   def __init__(
@@ -128,7 +126,7 @@ class CommonNeRF(nn.Module):
     self.per_pt_latent_size = per_point_latent_size
     self.per_pt_latent = None
 
-    self.density = None
+    self.alpha = None
     self.noise_std = 1e-3
 
   def forward(self, x): raise NotImplementedError()
@@ -160,6 +158,17 @@ class CommonNeRF(nn.Module):
     assert(latent.shape[-1] == self.instance_latent_size), "expected latent in [B, L]"
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.instance_latent = latent
+
+  def acc(self):
+    with torch.no_grad():
+      weights = self.alpha
+      acc = weights.max(dim=0)[0]
+      #acc = acc - acc.min()
+      #acc = acc / (acc.max()+1e-5)
+      return acc
+
+  @property
+  def nerf(self): return self
 
   # gets the current latent vector for this NeRF instance
   def curr_latent(self, pts_shape) -> ["T", "B", "H", "W", "L_pp + L_inst"]:
@@ -217,10 +226,8 @@ class TinyNeRF(CommonNeRF):
 
     density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
 
-    alpha = alpha_from_density(density, ts, r_d)
-    val = volumetric_integrate(alpha, feats.sigmoid())
-    self.density = alpha
-    return val
+    self.alpha = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(self.alpha, feats.sigmoid())
 
 # A plain old nerf
 class PlainNeRF(CommonNeRF):
@@ -279,6 +286,9 @@ class PlainNeRF(CommonNeRF):
     first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
 
     density = first_out[..., 0]
+    if self.training and self.noise_std > 0:
+      density = density + torch.randn_like(density) * self.noise_std
+
     intermediate = first_out[..., 1:]
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
@@ -287,10 +297,8 @@ class PlainNeRF(CommonNeRF):
       torch.cat([intermediate, latent], dim=-1)
     ).sigmoid()
 
-    alpha = alpha_from_density(density, ts, r_d)
-    val = volumetric_integrate(alpha, rgb)
-    self.density = alpha
-    return val
+    self.alpha = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(self.alpha, rgb)
 
 # NeRF with a thin middle layer, for encoding information
 class NeRFAE(CommonNeRF):
@@ -356,7 +364,8 @@ class NeRFAE(CommonNeRF):
 
   def compute_encoded(self, pts, ts, r_o, r_d):
     curr_latent = self.curr_latent(pts.shape)
-    latent =  curr_latent if curr_latent is not None else self.empty_latent
+    latent =  curr_latent if curr_latent is not None else \
+      self.empty_latent.expand(pts.shape[:-1] + (-1,))
 
     mip_enc = self.mip_encoding(r_o, r_d, ts)
 
@@ -376,9 +385,8 @@ class NeRFAE(CommonNeRF):
       encoded,
     ).sigmoid()
 
-    alpha = alpha_from_density(density, ts, r_d)
-    self.density = alpha
-    return volumetric_integrate(alpha, rgb)
+    self.alpha = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(self.alpha, rgb)
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
