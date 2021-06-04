@@ -11,6 +11,7 @@ import random
 from tqdm import trange
 import json
 import math
+from datetime import datetime
 
 import src.loaders
 import src.nerf as nerf
@@ -20,14 +21,12 @@ from src.utils import ( save_image, save_plot, CylinderGaussian, ConicGaussian )
 from src.neural_blocks import ( Upsampler, SpatialEncoder )
 
 def arguments():
-  a = argparse.ArgumentParser()
+  a = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   a.add_argument("-d", "--data", help="path to data", required=True)
   a.add_argument(
-    "--data-kind", help="Kind of data to load",
+    "--data-kind", help="Kind of data to load", default="original",
     choices=["original", "single_video", "dnerf", "pixel-single"],
-    default="original",
   )
-  a.add_argument("--load", help="model to load from", type=str)
   a.add_argument(
     "--derive_kind", help="Attempt to derive the kind if a single file is given",
     action="store_false",
@@ -44,10 +43,8 @@ def arguments():
   a.add_argument("--crop", help="train with cropping", action="store_true")
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
   a.add_argument("--steps", help="Number of depth steps", type=int, default=64)
-  # TODO type of crop strategy? Maybe can do random resizing?
   a.add_argument(
-    "--mip", help="Use MipNeRF with different sampling", type=str,
-    choices=["cone", "cylinder"],
+    "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
   a.add_argument("--nerf-eikonal", help="Add eikonal loss for NeRF", action="store_true")
   a.add_argument("--fat-sigmoid", help="Use wider sigmoid activation for features", action="store_false")
@@ -55,8 +52,7 @@ def arguments():
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
 
   a. add_argument(
-    "--feature-space",
-    help="when using neural upsampling, what is the feature space size",
+    "--feature-space", help="when using neural upsampling, what is the feature space size",
     type=int, default=32,
   )
   a.add_argument(
@@ -64,26 +60,27 @@ def arguments():
     choices=["tiny", "plain", "ae"], default="plain",
   )
   # this default for LR seems to work pretty well?
-  a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
-  a.add_argument(
-    "--valid-freq", help="how often validation images are generated", type=int, default=500,
-  )
+  a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-3)
   a.add_argument("--seed", help="random seed to use", type=int, default=1337)
   a.add_argument("--decay", help="weight_decay value", type=float, default=0)
   a.add_argument("--notest", help="do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit bg with some probability", action="store_true")
 
-  a.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
-  a.add_argument("--log", help="Where to save log of arguments", type=str, default="log.json")
-  a.add_argument("--save-freq", help="# of epochs between saves", type=int, default=10_000)
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
   cam.add_argument("--far", help="far plane for camera", type=float, default=6)
 
-  reporting = a.add_argument_group("reporting parameters")
-  reporting.add_argument("-q", "--quiet", help="Silence tqdm", action="store_true")
+  rprt = a.add_argument_group("reporting parameters")
+  rprt.add_argument("-q", "--quiet", help="Silence tqdm", action="store_true")
+  rprt.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
+  rprt.add_argument("--log", help="Where to save log of arguments", type=str, default="log.json")
+  rprt.add_argument("--save-freq", help="# of epochs between saves", type=int, default=5000)
+  rprt.add_argument(
+    "--valid-freq", help="how often validation images are generated", type=int, default=500,
+  )
+  rprt.add_argument("--load", help="model to load from", type=str)
 
   return a.parse_args()
 
@@ -212,9 +209,8 @@ def train(model, cam, labels, opt, args, sched=None):
     if i % args.valid_freq == 0:
       with torch.no_grad():
         ref0 = ref[0]
-        save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1))
         acc = model.nerf.acc()[0,...,None].expand_as(ref0)
-        save_plot(f"outputs/valid_acc_{i:05}.png", ref0, acc)
+        save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1), acc)
     if i % args.save_freq == 0 and i != 0: save(model, args)
 
 def test(model, cam, labels, args):
@@ -245,8 +241,7 @@ def test(model, cam, labels, args):
 
       loss = F.mse_loss(got, exp)
       print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
-      save_plot(f"outputs/out_{i:03}.png", exp, got.clamp(min=0, max=1))
-      save_plot(f"outputs/acc_{i:03}.png", exp, acc)
+      save_plot(f"outputs/out_{i:03}.png", exp, got.clamp(min=0, max=1), acc)
 
 def load_mip(args):
   if args.mip is None: return None
@@ -309,6 +304,7 @@ def save(model, args):
   print(f"Saved to {args.save}")
   torch.save(model, args.save)
   if args.log is not None:
+    setattr(args, "curr_time", datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
     with open(args.log, 'w') as f:
       json.dump(args.__dict__, f, indent=2)
 

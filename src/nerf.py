@@ -137,7 +137,7 @@ class CommonNeRF(nn.Module):
     self.per_pt_latent = None
 
     self.alpha = None
-    self.noise_std = 1e-3
+    self.noise_std = 0.2
     # TODO add activation for using sigmoid or fat sigmoid
     self.feat_act = torch.sigmoid
     if use_fat_sigmoid: self.feat_act = fat_sigmoid

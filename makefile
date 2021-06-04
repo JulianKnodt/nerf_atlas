@@ -8,12 +8,12 @@ sdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \
 	--render-size 128 --crop --epochs 50_000 --save models/lego.pt --crop-size 8 \
 	--near 2 --far 6 --batch-size 24  --decay 5e-7 --model ae \
-  --load models/lego.pt --n-sparsify-alpha 100 # --mip cylinder --nerf-eikonal
+  --load models/lego.pt --n-sparsify-alpha 100 -lr 5e-3 # --mip cylinder --nerf-eikonal
 original: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--render-size 128 --crop --epochs 50_000 --save models/lego_plain.pt \
-	--near 2 --far 6 --batch-size 16 --mip cylinder --model ae \
-	#--load models/lego_plain.pt
+	--near 2 --far 6 --batch-size 16 --mip cylinder --model ae -lr 1e-3 \
+	--load models/lego_plain.pt
 
 # [WIP]
 pixel-single: clean

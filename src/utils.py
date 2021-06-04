@@ -117,16 +117,17 @@ class ConicGaussian(nn.Module):
 # TODO integrated pos enc w/o diag? It's never used so don't need to have it
 
 def save_image(name, img): plt.imsave(name, img.detach().cpu().clamp(0,1).numpy())
-def save_plot(name, expected, got):
+def save_plot(name, expected, *got):
   fig = plt.figure()
-  fig.add_subplot(1, 2, 1)
-  plt.imshow(got.detach().squeeze().cpu().numpy())
-  plt.grid("off");
-  plt.axis("off");
-  fig.add_subplot(1, 2, 2)
+  fig.add_subplot(1, 1+len(got), 1)
   plt.imshow(expected.detach().squeeze().cpu().numpy())
   plt.grid("off");
   plt.axis("off");
+  for i, g in enumerate(got):
+    fig.add_subplot(1, 1+len(got), 2 + i)
+    plt.imshow(g.detach().squeeze().cpu().numpy())
+    plt.grid("off");
+    plt.axis("off");
   plt.savefig(name, bbox_inches='tight')
   plt.close(fig)
 
