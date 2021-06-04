@@ -24,6 +24,11 @@ def expected_sin(x, x_var):
   y_var = (0.5 * (1 - (-2 * x_var).exp() * (2 * x).cos()) - y.square()).clamp(min=0)
   return y, y_var
 
+# E[normals] = 1
+@torch.jit.script
+def eikonal_loss(normals): return (torch.linalg.norm(normals, dim=-1) - 1).square().mean()
+
+@torch.jit.script
 def integrated_pos_enc_diag(x, x_cov, min_deg:int, max_deg:int):
   scales = torch.exp2(torch.arange(min_deg, max_deg, device=x.device, dtype=x.dtype))
   out_shape = x.shape[:-1] + (-1,)
@@ -55,7 +60,6 @@ def lift_gaussian(r_d, t_mean, t_var, r_var):
 def radii_x(r_d):
   dx = (r_d[..., :-1, :, :] - r_d[..., 1:, :, :]).square().sum(dim=-1).sqrt()
   dx = torch.cat([dx, dx[:, -2:-1, :]], dim=-2)
-
   return dx[..., None] * 2 / math.sqrt(12)
 
 def conical_frustrum_to_gaussian(r_d, t0, t1, rad:float):
@@ -70,7 +74,8 @@ def conical_frustrum_to_gaussian(r_d, t0, t1, rad:float):
 
   return lift_gaussian(r_d, t_mean, t_var, r_var)
 
-def cylinder_to_gaussian(r_d, t0, t1, rad:float):
+@torch.jit.script
+def cylinder_to_gaussian(r_d, t0, t1, rad):
   t_mean = (t1 + t0) / 2
   r_var = rad * rad / 4
   t_var = (t1 - t0).square() / 12
@@ -133,17 +138,6 @@ def rotate_vector(v, axis, c, s):
          + axis * (v * axis).sum(dim=-1, keepdim=True) * (1-c) \
          + torch.cross(axis, v, dim=-1) * s
 
-#@torch.jit.script
-def nonzero_eps(v, eps: float=1e-7):
-  # in theory should also be copysign of eps, but so small it doesn't matter
-  # and torch.jit.script doesn't support it
-  return torch.where(
-    v.abs() < eps,
-    torch.tensor(eps, device=v.device),
-    #torch.copysign(torch.full_like(v, eps, device=v.device), v),
-    v
-  )
-
 def mse2psnr(x): return -10 * torch.log10(x)
 
 def apply_tf(w, b, v):
@@ -186,7 +180,7 @@ def elev_azim_to_dir(elev_azim):
   return direction
 
 
-#@torch.jit.script
+@torch.jit.script
 def dir_to_elev_azim(direc):
   x, y, z = F.normalize(direc, dim=-1).clamp(min=-1+1e-10, max=1-1e-10).split([1,1,1], dim=-1)
   elev = z.asin()
@@ -202,3 +196,15 @@ def dir_to_uv(d):
   elaz = dir_to_elev_azim(d)
   return elev_azim_to_uv(elaz)
 
+def autograd(x, y):
+  assert(x.requires_grad)
+  grad_outputs = torch.ones_like(y)
+  grad, = torch.autograd.grad(
+    inputs=x,
+    outputs=y,
+    grad_outputs=grad_outputs,
+    create_graph=True,
+    retain_graph=True,
+    only_inputs=True,
+  )
+  return grad

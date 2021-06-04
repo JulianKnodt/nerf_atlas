@@ -49,7 +49,9 @@ def arguments():
     "--mip", help="Use MipNeRF with different sampling", type=str,
     choices=["cone", "cylinder"],
   )
-  a.add_argument("--nerf-eikonal", help="[UNIMPL] Add eikonal loss for NeRF", action="store_true")
+  a.add_argument("--nerf-eikonal", help="Add eikonal loss for NeRF", action="store_true")
+  a.add_argument("--fat-sigmoid", help="Use wider sigmoid activation for features", action="store_false")
+  a.add_argument("--n-sparsify-alpha", help="Epochs for sparsifying alpha", type=int, default=0)
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
 
   a. add_argument(
@@ -62,9 +64,7 @@ def arguments():
     choices=["tiny", "plain", "ae"], default="plain",
   )
   # this default for LR seems to work pretty well?
-  a.add_argument(
-    "-lr", "--learning-rate", help="learning rate", type=float, default=5e-4,
-  )
+  a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
   a.add_argument(
     "--valid-freq", help="how often validation images are generated", type=int, default=500,
   )
@@ -83,34 +83,27 @@ def arguments():
   cam.add_argument("--far", help="far plane for camera", type=float, default=6)
 
   reporting = a.add_argument_group("reporting parameters")
-  reporting.add_argument("-q", "--quiet", help="Silence tqdm (UNIMPL)", action="store_true")
-  # TODO add more arguments here
+  reporting.add_argument("-q", "--quiet", help="Silence tqdm", action="store_true")
+
   return a.parse_args()
 
 # TODO better automatic device discovery here
-
 device = "cpu"
 if torch.cuda.is_available():
   device = torch.device("cuda:0")
   torch.cuda.set_device(device)
 
+# XXX DEBUG
 #torch.autograd.set_detect_anomaly(True)
 
 def render(
-  model,
-  cam,
-  crop,
+  model, cam, crop,
   # how big should the image be
   size,
   args,
 
-  device="cuda",
-  with_noise=5e-3,
-
-  times=None,
+  times=None, with_noise=5e-3, device="cuda",
 ):
-  batch_dims = len(cam)
-
   ii, jj = torch.meshgrid(
     torch.arange(size, device=device, dtype=torch.float),
     torch.arange(size, device=device, dtype=torch.float),
@@ -120,10 +113,8 @@ def render(
   t,l,h,w = crop
   positions = positions[t:t+h,l:l+w,:]
 
+  rays = cam.sample_positions(positions, size=size, with_noise=with_noise)
 
-  rays = cam.sample_positions(
-    positions, size=size, with_noise=with_noise,
-  )
   if times is not None: return model((rays, times))
   elif args.data_kind == "pixel-single": return model((rays, positions))
   return model(rays)
@@ -135,7 +126,6 @@ def load(args, training=True):
   if args.derive_kind:
     if args.data.endswith(".mp4"): kind = "single_video"
     elif args.data.endswith(".jpg"): kind = "pixel-single"
-    # TODO if single image use pixel
 
   if not args.neural_upsample: args.size = args.render_size
   size = args.size
@@ -162,8 +152,10 @@ def sqr(x): return x * x
 # train the model with a given camera and some labels (imgs or imgs+times)
 def train(model, cam, labels, opt, args, sched=None):
   if args.epochs == 0: return
-  t = trange(args.epochs)
-  batch_size = args.batch_size
+  iters = range(args.epochs) if args.quiet else trange(args.epochs)
+  update = lambda kwargs: iters.set_postfix(**kwargs)
+  if args.quiet: update = lambda _: None
+  batch_size = min(args.batch_size, len(cam))
   times=None
   if args.data_kind == "dnerf":
     times = labels[-1]
@@ -177,11 +169,10 @@ def train(model, cam, labels, opt, args, sched=None):
       args.crop_size, args.crop_size,
     )
 
-  for i in t:
+  for i in iters:
     opt.zero_grad()
 
     idxs = random.sample(range(len(cam)), batch_size)
-    #idxs = [0] * len(idxs) # DEBUG
 
     ts = None if times is None else times[idxs]
     c0,c1,c2,c3 = crop = get_crop()
@@ -204,17 +195,24 @@ def train(model, cam, labels, opt, args, sched=None):
       eik = sdf.eikonal_loss(model.sdf.normals)
       s = sdf.sigmoid_loss(model.min_along_rays, model.nerf.acc())
       loss = loss + eik + s
-      display["eik"] = "{eik:.02f}"
-      display["s"] = f"{s:.02f}"
+      #display["eik"] = f"{eik:.02f}"
+      #display["s"] = f"{s:.02f}"
+    if args.nerf_eikonal:
+      loss = loss + 1e-3 * model.nerf.eikonal_loss
+      display["n-eik"] = f"{model.nerf.eikonal_loss:.02f}"
+    # experiment with emptying the model at the beginning
+    if i < args.n_sparsify_alpha: loss = loss + (model.nerf.alpha - 0.5).square().mean()
 
-    t.set_postfix(**display)
+    update(display)
+
+    assert(loss.isfinite().item()), "Got NaN loss"
     loss.backward()
     opt.step()
     if sched is not None: sched.step()
     if i % args.valid_freq == 0:
       with torch.no_grad():
         ref0 = ref[0]
-        save_plot(f"outputs/valid_{i:05}.png", ref0, out[0])
+        save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1))
         acc = model.nerf.acc()[0,...,None].expand_as(ref0)
         save_plot(f"outputs/valid_acc_{i:05}.png", ref0, acc)
     if i % args.save_freq == 0 and i != 0: save(model, args)
@@ -243,12 +241,11 @@ def test(model, cam, labels, args):
             with_noise=False, times=ts, args=args,
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
-
           acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = model.nerf.acc()[..., None]
 
       loss = F.mse_loss(got, exp)
       print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
-      save_plot(f"outputs/out_{i:03}.png", exp, got)
+      save_plot(f"outputs/out_{i:03}.png", exp, got.clamp(min=0, max=1))
       save_plot(f"outputs/acc_{i:03}.png", exp, acc)
 
 def load_mip(args):
@@ -270,24 +267,25 @@ def load_model(args):
     "t_far": args.far,
     "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0,
     "per_point_latent_size": (1 + 3 + 64) if args.sdf else 0,
+    "use_fat_sigmoid": args.fat_sigmoid,
+    "eikonal_loss": args.nerf_eikonal,
   }
-  if args.model == "tiny":
-    model = nerf.TinyNeRF(**kwargs).to(device)
-  elif args.model == "plain":
-    model = nerf.PlainNeRF(**kwargs).to(device)
-  elif args.model == "ae":
-    model = nerf.NeRFAE(**kwargs).to(device)
-  else:
-    raise NotImplementedError(args.model)
+  if args.model == "tiny": constructor = nerf.TinyNeRF
+  elif args.model == "plain": constructor = nerf.PlainNeRF
+  elif args.model == "ae": constructor = nerf.NeRFAE
+  else: raise NotImplementedError(args.model)
+  model = constructor(**kwargs).to(device)
 
   # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":
     model = nerf.DynamicNeRF(model, device=device).to(device)
+
   if args.data_kind == "pixel-single":
     encoder = SpatialEncoder().to(device)
     # args.img is populated in load (single_image)
     model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
 
+  og_model = model
   if args.sdf: model = sdf.SDFNeRF(model, sdf.SDF()).to(device)
   # tack on neural upsampling if specified
   if args.neural_upsample:
@@ -300,8 +298,11 @@ def load_model(args):
     ).to(device)
     # stick a neural upsampling block afterwards
     model = nn.Sequential(model, upsampler, nn.Sigmoid())
+    setattr(model, "nerf", og_model)
 
-  if args.data_parallel: model = nn.DataParallel(model)
+  if args.data_parallel:
+    model = nn.DataParallel(model)
+    setattr(model, "nerf", og_model)
   return model
 
 def save(model, args):
@@ -326,15 +327,11 @@ def main():
   # for some reason AdamW doesn't seem to work here
   opt = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.decay)
 
-
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-5)
   train(model, cam, labels, opt, args, sched=sched)
 
-  if args.epochs != 0:
-    save(model, args)
-
+  if args.epochs != 0: save(model, args)
   if args.notest: return
-  model.eval()
 
   test_labels, test_cam = load(args, training=False)
   test(model, test_cam, test_labels, args)

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 
 from .neural_blocks import ( SkipConnMLP )
-from .utils import dir_to_elev_azim
+from .utils import ( dir_to_elev_azim, autograd, eikonal_loss )
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -85,14 +85,16 @@ def alpha_from_density(
   end_val = torch.tensor([1e10], device=device, dtype=torch.float)
   dists = torch.cat([ts[1:] - ts[:-1], end_val], dim=-1)
   dists = dists[:, None, None, None] * torch.linalg.norm(r_d, dim=-1)
-  return 1 - torch.exp(-sigma_a * dists)
+  alpha = 1 - torch.exp(-sigma_a * dists)
+  weights = alpha * cumuprod_exclusive((1.0 - alpha).clamp(min=1e-10))
+  return alpha, weights
+
+def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
 
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
 @torch.jit.script
-def volumetric_integrate(alpha, other):
-  weights = alpha * cumuprod_exclusive((1.0 - alpha).clamp(min=1e-10))
-
+def volumetric_integrate(weights, other):
   return torch.sum(weights[..., None] * other, dim=0)
 
 class CommonNeRF(nn.Module):
@@ -110,8 +112,16 @@ class CommonNeRF(nn.Module):
     instance_latent_size: int = 0,
     per_pixel_latent_size: int = 0,
     per_point_latent_size: int = 0,
+    use_fat_sigmoid: bool =True,
+    eikonal_loss: bool = False,
+
+    with_sky_mlp: bool = False,
+
+    device="cuda",
   ):
     super().__init__()
+    self.empty_latent = torch.zeros(1,1,1,1,0, device=device, dtype=torch.float)
+
     self.t_near = t_near
     self.t_far = t_far
     self.steps = steps
@@ -128,16 +138,30 @@ class CommonNeRF(nn.Module):
 
     self.alpha = None
     self.noise_std = 1e-3
+    # TODO add activation for using sigmoid or fat sigmoid
+    self.feat_act = torch.sigmoid
+    if use_fat_sigmoid: self.feat_act = fat_sigmoid
 
-  def forward(self, x): raise NotImplementedError()
+    self.rec_eikonal_loss = eikonal_loss
+    self.eikonal_loss = 0
+    self.with_sky_mlp = with_sky_mlp
+    if with_sky_mlp:
+      self.sky_mlp = SkipConnMLP(
+        in_size=2, out=3,
+        num_layers=3, hidden_size=32, freqs=3, device=device, xavier_init=True,
+      ).to(device)
+
+  def forward(self, _x): raise NotImplementedError()
   def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
   def mip_encoding(self, r_o, r_d, ts):
     if self.mip is None: return None
     end_val = torch.tensor([1e10], device=ts.device, dtype=ts.dtype)
     ts = torch.cat([ts, end_val], dim=-1)
-    t0 = ts[..., :-1]
-    t1 = ts[..., 1:]
-    return self.mip(r_o, r_d, t0, t1)
+    return self.mip(r_o, r_d, ts[..., :-1], ts[..., 1:])
+
+  def record_eikonal_loss(self, pts, density):
+    self.eikonal_loss = eikonal_loss(autograd(pts, density))
+    return self.eikonal_loss
 
   def total_latent_size(self) -> int:
     return self.mip_size() + \
@@ -158,33 +182,35 @@ class CommonNeRF(nn.Module):
     assert(latent.shape[-1] == self.instance_latent_size), "expected latent in [B, L]"
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.instance_latent = latent
+  def sky_color(self, elev_azim_r_d):
+    if not self.with_sky_mlp: return torch.zeros_like(r_d)
+    # TODO use feat act here?
+    return fat_sigmoid(self.sky_mlp(elev_azim_r_d))
 
-  def acc(self):
+  # produces a segmentation mask of sorts, using the alpha for occupancy.
+  def acc(self): return self.alpha.max(dim=0)[0]
+
+  def depths(self, depths):
     with torch.no_grad():
-      weights = self.alpha
-      acc = weights.max(dim=0)[0]
-      #acc = acc - acc.min()
-      #acc = acc / (acc.max()+1e-5)
-      return acc
+      print(self.alpha.shape, depths.shape)
+      exit()
+      return volumetric_integrate(self.alpha, depths[..., None, None, None])
 
   @property
   def nerf(self): return self
 
   # gets the current latent vector for this NeRF instance
   def curr_latent(self, pts_shape) -> ["T", "B", "H", "W", "L_pp + L_inst"]:
-    curr = None
-
-    if self.per_pt_latent is not None: curr = self.per_pt_latent
+    curr = self.empty_latent.expand(pts_shape[:-1] + (0,)) if self.per_pt_latent is None \
+      else self.per_pt_latent
 
     if self.per_pixel_latent is not None:
       ppl = self.per_pixel_latent[None, ...].expand(pts.shape[:-1] + (-1,))
-      if curr is None: curr = ppl
-      else: curr = torch.cat([curr, ppl], dim=-1)
+      curr = torch.cat([curr, ppl], dim=-1)
 
     if self.instance_latent is not None:
       il = self.instance_latent[None, :, None, None, :].expand_as(pts.shape[:-1] + (-1,))
-      if curr is None: curr = il
-      else: curr = torch.cat([curr, il], dim=-1)
+      curr = torch.cat([curr, il], dim=-1)
 
     return curr
 
@@ -192,25 +218,21 @@ class CommonNeRF(nn.Module):
 class TinyNeRF(CommonNeRF):
   # No frills, single MLP NeRF
   def __init__(
-    self,
-    out_features: int = 3,
+    self, out_features: int = 3,
 
     device="cuda",
     **kwargs,
   ):
-    super().__init__(**kwargs)
+    super().__init__(**kwargs, device=device)
     self.estim = SkipConnMLP(
       in_size=3, out=1 + out_features,
+      latent_size = self.total_latent_size(),
 
-      latent = self.total_latent_size(),
-
-      num_layers=6,
-      hidden_size=80,
-      latent_size=0,
-
-      device=device,
+      num_layers=6, hidden_size=80,
 
       xavier_init=True,
+
+      device=device,
     ).to(device)
 
   def forward(self, rays):
@@ -221,13 +243,15 @@ class TinyNeRF(CommonNeRF):
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
-    curr_latent = self.curr_latent(pts.shape)
-    latent =  curr_latent if curr_latent is not None else self.empty_latent
+    latent = self.curr_latent(pts.shape)
+    mip_enc = self.mip_encoding(r_o, r_d, ts)
+    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
+    if self.rec_eikonal_loss: self.record_eikonal_loss(pts, density)
 
-    self.alpha = alpha_from_density(density, ts, r_d)
-    return volumetric_integrate(self.alpha, feats.sigmoid())
+    self.alpha, weights = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(weights, self.feat_act(feats))
 
 # A plain old nerf
 class PlainNeRF(CommonNeRF):
@@ -240,31 +264,23 @@ class PlainNeRF(CommonNeRF):
 
     **kwargs,
   ):
-    super().__init__(**kwargs)
-    self.empty_latent = torch.zeros(1,1,1,1,0, device=device, dtype=torch.float)
+    super().__init__(**kwargs, device=device)
     self.latent_size = self.total_latent_size()
 
     self.first = SkipConnMLP(
-      in_size=3, out=1 + intermediate_size,
-      latent_size=self.latent_size,
+      in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
 
-      num_layers = 6,
-      hidden_size = 128,
+      num_layers = 6, hidden_size = 128, xavier_init=True,
 
       device=device,
-
-      xavier_init=True,
     ).to(device)
 
     self.second = SkipConnMLP(
-      in_size=2, out=out_features,
-      latent_size=self.latent_size + intermediate_size,
+      in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
 
-      num_layers=5,
-      hidden_size=64,
+      num_layers=5, hidden_size=64, xavier_init=True,
+
       device=device,
-
-      xavier_init=True,
     ).to(device)
 
   def forward(self, rays):
@@ -275,8 +291,7 @@ class PlainNeRF(CommonNeRF):
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
-    curr_latent = self.curr_latent(pts.shape)
-    latent =  curr_latent if curr_latent is not None else self.empty_latent
+    latent = self.curr_latent(pts.shape)
 
     mip_enc = self.mip_encoding(r_o, r_d, ts)
 
@@ -286,19 +301,20 @@ class PlainNeRF(CommonNeRF):
     first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
 
     density = first_out[..., 0]
+    if self.rec_eikonal_loss: self.record_eikonal_loss(pts, density)
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
     intermediate = first_out[..., 1:]
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
-    rgb = self.second(
+    rgb = self.feat_act(self.second(
       elev_azim_r_d,
       torch.cat([intermediate, latent], dim=-1)
-    ).sigmoid()
+    ))
 
-    self.alpha = alpha_from_density(density, ts, r_d)
-    return volumetric_integrate(self.alpha, rgb)
+    self.alpha, weights = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(weights, rgb)
 
 # NeRF with a thin middle layer, for encoding information
 class NeRFAE(CommonNeRF):
@@ -313,8 +329,7 @@ class NeRFAE(CommonNeRF):
     device="cuda",
     **kwargs,
   ):
-    super().__init__(**kwargs)
-    self.empty_latent = torch.zeros(1,1,1,1,0, device=device, dtype=torch.float)
+    super().__init__(**kwargs, device=device)
 
     self.latent_size = self.total_latent_size()
 
@@ -363,9 +378,7 @@ class NeRFAE(CommonNeRF):
     return self.from_encoded(encoded, ts, r_d)
 
   def compute_encoded(self, pts, ts, r_o, r_d):
-    curr_latent = self.curr_latent(pts.shape)
-    latent =  curr_latent if curr_latent is not None else \
-      self.empty_latent.expand(pts.shape[:-1] + (-1,))
+    latent = self.curr_latent(pts.shape)
 
     mip_enc = self.mip_encoding(r_o, r_d, ts)
 
@@ -375,26 +388,20 @@ class NeRFAE(CommonNeRF):
     return self.encode(pts, latent if latent.shape[-1] != 0 else None)
   def from_encoded(self, encoded, ts, r_d):
     density = self.density_tform(encoded).squeeze(-1)
+    if self.rec_eikonal_loss: self.record_eikonal_loss(pts, density)
     if self.noise_std > 0 and self.training:
       density = density + torch.randn_like(density) * self.noise_std
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(encoded.shape[:-1]+(2,))
 
-    rgb = self.rgb(
-      elev_azim_r_d,
-      encoded,
-    ).sigmoid()
+    rgb = self.feat_act(self.rgb(elev_azim_r_d, encoded))
 
-    self.alpha = alpha_from_density(density, ts, r_d)
-    return volumetric_integrate(self.alpha, rgb)
+    self.alpha, weights = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(weights, rgb)
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
-  def __init__(
-    self,
-    canonical: CommonNeRF,
-    device="cuda",
-  ):
+  def __init__(self, canonical: CommonNeRF, device="cuda"):
     super().__init__()
 
     self.delta_estim = SkipConnMLP(
@@ -408,6 +415,8 @@ class DynamicNeRF(nn.Module):
     ).to(device)
     self.canonical = canonical.to(device)
 
+  @property
+  def nerf(self): return self.canonical
   def forward(self, rays_t):
     rays, t = rays_t
     device=rays.device
@@ -466,8 +475,7 @@ class DynamicNeRFAE(nn.Module):
     device=rays.device
 
     pts, ts, r_o, r_d = compute_pts_ts(
-      rays,
-      self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
+      rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
     )
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
     # compute encoding using delta positions at a given time
@@ -499,6 +507,8 @@ class SinglePixelNeRF(nn.Module):
     self.encoder(img)
 
     self.device = device
+  @property
+  def nerf(self): return self.canon
   def forward(self, rays_uvs):
     rays, uvs = rays_uvs
     latent = self.encoder.sample(uvs)
@@ -553,6 +563,5 @@ class MPI(nn.Module):
   def from_pts(self, pts, ts, r_o, r_d):
     density, feats = self.estim(pts).split([1, 3], dim=-1)
 
-    alpha = alpha_from_density(density, ts, r_d)
-    val = volumetric_integrate(alpha, feats.sigmoid())
-    return val
+    alpha, weights = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(weights, self.feat_act(feats))

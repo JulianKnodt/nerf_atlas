@@ -46,8 +46,7 @@ class SkipConnMLP(nn.Module):
     # with skip
     hidden_layers = [
       nn.Linear(
-        skip_size if (i % skip) == 0 and i != num_layers-1 else hidden_size,
-        hidden_size,
+        skip_size if (i % skip) == 0 and i != num_layers-1 else hidden_size, hidden_size,
       ) for i in range(num_layers)
     ]
 
@@ -55,13 +54,11 @@ class SkipConnMLP(nn.Module):
     self.layers = nn.ModuleList(hidden_layers)
     self.out = nn.Linear(hidden_size, out)
     weights = [
-      self.init.weight,
-      self.out.weight,
+      self.init.weight, self.out.weight,
       *[l.weight for l in self.layers],
     ]
     biases = [
-      self.init.bias,
-      self.out.bias,
+      self.init.bias, self.out.bias,
       *[l.bias for l in self.layers],
     ]
     if zero_init:
@@ -108,11 +105,10 @@ class Upsampler(nn.Module):
     self.sizes = list(range(in_size + step_size, out+step_size, step_size))
     self.sizes = self.sizes[:repeat]
     self.sizes[-1] = out
-    assert(kernel_size % 2 == 1)
+    assert(kernel_size % 2 == 1), "Must provide odd kernel upsampling"
 
     feat_sizes = [
-      max(out_features, int(in_features // (feat_decay**i)))
-      for i in range(repeat+1)
+      max(out_features, int(in_features // (feat_decay**i))) for i in range(repeat+1)
     ]
 
     self.base = nn.Conv2d(in_features, out_features, kernel_size, 1, (kernel_size-1)//2)
@@ -144,8 +140,7 @@ class Upsampler(nn.Module):
 
       curr = conv(F.interpolate(curr, size=(s, s), mode=self.feat_up_kind))
       upscaled = resized_old + combine(curr)
-    out = upscaled.permute(0,2,3,1)
-    return out
+    return upscaled.permute(0,2,3,1)
 
 class SpatialEncoder(nn.Module):
   # Encodes an image into a latent vector, for use in PixelNeRF

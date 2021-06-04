@@ -5,15 +5,11 @@ import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP )
+from .utils import ( autograd, eikonal_loss )
 
-# E[normals] = 1
-def eikonal_loss(normals):
-  return (torch.linalg.norm(normals, dim=-1) - 1).square().mean()
-
-# Using the densities as a guide to which points are occupied or not.
-def sigmoid_loss(min_along_ray, densities, alpha=1000):
+# Use loss from IDR, taking max occupancy along NeRF as segmentation.
+def sigmoid_loss(min_along_ray, densities, alpha: int=100):
   throughput = -min_along_ray.squeeze(-1) * alpha
-  assert(throughput.requires_grad)
   hits = (throughput > 0) & (densities > 0.5)
   misses = ~hits
   loss = 0
@@ -27,33 +23,15 @@ def sigmoid_loss(min_along_ray, densities, alpha=1000):
     assert(loss.isfinite().all())
   return loss
 
-def autograd(x, y):
-  assert(x.requires_grad)
-  grad_outputs = torch.ones_like(y)
-  grad, = torch.autograd.grad(
-    inputs=x,
-    outputs=y,
-    grad_outputs=grad_outputs,
-    create_graph=True,
-    retain_graph=True,
-    only_inputs=True,
-  )
-  return grad
-
 class SDF(nn.Module):
   def __init__(
     self,
   ):
     super().__init__()
     self.mlp = SkipConnMLP(
-      in_size = 3, out = 1,
-      num_layers=6,
-      hidden_size=64,
-
-      activation = nn.Softplus(),
-      last_layer_act=True,
+      in_size = 3, out = 1, num_layers=6, hidden_size=64,
+      activation=nn.Softplus(), last_layer_act=True,
     )
-
     self.values = None
     self.normals = None
   def forward(self, pts):
@@ -62,6 +40,7 @@ class SDF(nn.Module):
       else: autograd_pts = pts
       self.values = self.mlp(autograd_pts)
       self.normals = autograd(autograd_pts, self.values)
+      assert(self.normals.isfinite().all())
 
       return self.values
   # performs a spherical march of an SDF, for a fixed number of iterations
@@ -109,10 +88,7 @@ class SDFNeRF(nn.Module):
   def density(self): return self.nerf.density
   def render(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hits, ts = self.sdf.sphere_march(
-      r_o, r_d,
-      near=self.nerf.t_near,
-      far=self.nerf.t_far,
-    )
+    pts, hits, ts = self.sdf.sphere_march(r_o, r_d, near=self.nerf.t_near, far=self.nerf.t_far)
+    # TODO convert vals to some RGB value
     vals = torch.ones_like(pts)
     return torch.where(hits, vals, torch.zeros_like(vals))
