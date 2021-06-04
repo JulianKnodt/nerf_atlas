@@ -96,8 +96,7 @@ if torch.cuda.is_available():
 def render(
   model, cam, crop,
   # how big should the image be
-  size,
-  args,
+  size, args,
 
   times=None, with_noise=5e-3, device="cuda",
 ):
@@ -141,8 +140,7 @@ def load(args, training=True):
     setattr(args, "img", img)
     args.batch_size = 1
     return img, cam
-  else:
-    raise NotImplementedError(kind)
+  else: raise NotImplementedError(kind)
 
 def sqr(x): return x * x
 
@@ -213,7 +211,7 @@ def train(model, cam, labels, opt, args, sched=None):
         save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1), acc)
     if i % args.save_freq == 0 and i != 0: save(model, args)
 
-def test(model, cam, labels, args):
+def test(model, cam, labels, args, training: bool = True):
   times = None
   model = model.eval()
   if args.data_kind == "dnerf":
@@ -241,7 +239,8 @@ def test(model, cam, labels, args):
 
       loss = F.mse_loss(got, exp)
       print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
-      save_plot(f"outputs/out_{i:03}.png", exp, got.clamp(min=0, max=1), acc)
+      name = f"outputs/train_{i:03}.png" if training else f"outputs/test_{i:03}.png"
+      save_plot(name, exp, got.clamp(min=0, max=1), acc)
 
 def load_mip(args):
   if args.mip is None: return None
@@ -252,9 +251,8 @@ def load_mip(args):
 
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
-  mip = load_mip(args)
   kwargs = {
-    "mip": mip,
+    "mip": load_mip(args),
     "out_features": args.feature_space,
     "device": device,
     "steps": args.steps,
@@ -272,8 +270,7 @@ def load_model(args):
   model = constructor(**kwargs).to(device)
 
   # Add in a dynamic model if using dnerf with the underlying model.
-  if args.data_kind == "dnerf":
-    model = nerf.DynamicNeRF(model, device=device).to(device)
+  if args.data_kind == "dnerf": model = nerf.DynamicNeRF(model, device=device).to(device)
 
   if args.data_kind == "pixel-single":
     encoder = SpatialEncoder().to(device)
@@ -329,8 +326,10 @@ def main():
   if args.epochs != 0: save(model, args)
   if args.notest: return
 
+  test(model, cam, labels, args, training=True)
+
   test_labels, test_cam = load(args, training=False)
-  test(model, test_cam, test_labels, args)
+  test(model, test_cam, test_labels, args, training=False)
 
 if __name__ == "__main__": main()
 

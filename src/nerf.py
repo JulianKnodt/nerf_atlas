@@ -152,12 +152,6 @@ class CommonNeRF(nn.Module):
       ).to(device)
 
   def forward(self, _x): raise NotImplementedError()
-  def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
-  def mip_encoding(self, r_o, r_d, ts):
-    if self.mip is None: return None
-    end_val = torch.tensor([1e10], device=ts.device, dtype=ts.dtype)
-    ts = torch.cat([ts, end_val], dim=-1)
-    return self.mip(r_o, r_d, ts[..., :-1], ts[..., 1:])
 
   def record_eikonal_loss(self, pts, density):
     self.eikonal_loss = eikonal_loss(autograd(pts, density))
@@ -198,6 +192,13 @@ class CommonNeRF(nn.Module):
 
   @property
   def nerf(self): return self
+
+  def mip_size(self): return 0 if self.mip is None else self.mip.size() * 6
+  def mip_encoding(self, r_o, r_d, ts):
+    if self.mip is None: return None
+    end_val = torch.tensor([1e10], device=ts.device, dtype=ts.dtype)
+    ts = torch.cat([ts, end_val], dim=-1)
+    return self.mip(r_o, r_d, ts[..., :-1], ts[..., 1:])
 
   # gets the current latent vector for this NeRF instance
   def curr_latent(self, pts_shape) -> ["T", "B", "H", "W", "L_pp + L_inst"]:
@@ -344,25 +345,19 @@ class NeRFAE(CommonNeRF):
 
     self.density_tform = SkipConnMLP(
       # a bit hacky, but pass it in with no encodings since there are no additional inputs.
-      in_size=encoding_size, out=1,
-      latent_size=0,
-      num_layers=5,
-      hidden_size=64,
+      in_size=encoding_size, out=1, latent_size=0, freqs=0,
 
-      freqs=0,
+      num_layers=5, hidden_size=64, xavier_init=True,
+
       device=device,
-      xavier_init=True,
     ).to(device)
 
     self.rgb = SkipConnMLP(
-      in_size=2, out=out_features,
-      latent_size=encoding_size,
+      in_size=2, out=out_features, latent_size=encoding_size,
 
-      num_layers=5,
-      hidden_size=32,
+      num_layers=5, hidden_size=64, xavier_init=True,
 
       device=device,
-      xavier_init=True,
     ).to(device)
     self.encoding_size = encoding_size
 
@@ -413,6 +408,7 @@ class DynamicNeRF(nn.Module):
 
       device=device,
     ).to(device)
+    self.time_noise_std = 1e-2
     self.canonical = canonical.to(device)
 
   @property
@@ -421,14 +417,12 @@ class DynamicNeRF(nn.Module):
     rays, t = rays_t
     device=rays.device
     pts, ts, r_o, r_d = compute_pts_ts(
-      rays,
-      self.canonical.t_near,
-      self.canonical.t_far,
-      self.canonical.steps,
+      rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
     # small deviation for regularization
-    t = t + 1e-3 * torch.rand_like(t)
+    if self.training and self.time_noise_std > 0:
+      t = t + self.time_noise_std * torch.randn_like(t)
 
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
 
@@ -439,11 +433,7 @@ class DynamicNeRF(nn.Module):
 
 # Dynamic NeRFAE for multiple framss with changing materials
 class DynamicNeRFAE(nn.Module):
-  def __init__(
-    self,
-    canonical: NeRFAE,
-    device="cuda",
-  ):
+  def __init__(self, canonical: NeRFAE, device="cuda"):
     super().__init__()
     assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
     self.canonical = canonical.to(device)
@@ -451,9 +441,7 @@ class DynamicNeRFAE(nn.Module):
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz
       in_size=4, out=3,
-
-      num_layers = 5,
-      hidden_size = 128,
+      num_layers = 5, hidden_size = 128,
 
       device=device,
     ).to(device)
@@ -461,11 +449,10 @@ class DynamicNeRFAE(nn.Module):
     self.delta_enc_estim = SkipConnMLP(
       in_size=4, out=canonical.encoding_size,
 
-      num_layers = 3,
-      hidden_size = 128,
+      num_layers = 3, hidden_size = 128,
 
       device=device,
-      # start assuming that density and view dependent fx are preserved.
+      # start assuming that there is no transformation between material type
       zero_init=True,
     )
 
@@ -507,6 +494,7 @@ class SinglePixelNeRF(nn.Module):
     self.encoder(img)
 
     self.device = device
+
   @property
   def nerf(self): return self.canon
   def forward(self, rays_uvs):
@@ -546,16 +534,11 @@ class MPI(nn.Module):
     denom = (n * r_d).sum(dim=-1, keepdim=True)
     centers = self.position.unsqueeze(0) + torch.tensordot(
       self.delta * torch.arange(self.n_planes, device=device, dtype=torch.float),
-      -self.normal,
-      dims=0,
+      -self.normal, dims=0,
     )
     ts = ((centers - r_o) * n).sum(dim=-1, keepdim=True)/denom
-    hits = torch.where(
-      denom.abs() > 1e-3,
-      ts,
-      # if denom is too small it will have numerical instability because it's near parallel.
-      torch.zeros_like(denom),
-    )
+    # if denom is too small it will have numerical instability because it's near parallel.
+    hits = torch.where(denom.abs() > 1e-3, ts, torch.zeros_like(denom))
     pts = r_o.unsqueeze(0) + r_d.unsqueeze(0) * hits
 
     return self.canonical.from_pts(pts, ts, r_o, r_d)
