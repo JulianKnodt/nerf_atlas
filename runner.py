@@ -10,9 +10,11 @@ import torch.nn as nn
 import random
 import json
 import math
+import matplotlib.pyplot as plt
 
 from datetime import datetime
 from tqdm import trange
+from itertools import chain
 
 import src.loaders
 import src.nerf as nerf
@@ -52,6 +54,7 @@ def arguments():
   a.add_argument("--fat-sigmoid", help="Use wider sigmoid activation for features", action="store_false")
   a.add_argument("--n-sparsify-alpha", help="Epochs for sparsifying alpha", type=int, default=0)
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
+  a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -62,12 +65,12 @@ def arguments():
     choices=["tiny", "plain", "ae"], default="plain",
   )
   # this default for LR seems to work pretty well?
-  a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-3)
+  a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
   a.add_argument("--seed", help="random seed to use", type=int, default=1337)
   a.add_argument("--decay", help="weight_decay value", type=float, default=0)
   a.add_argument("--notest", help="do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
-  a.add_argument("--omit-bg", help="Omit bg with some probability", action="store_true")
+  a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
   a.add_argument("--l1-loss", help="Add l1 loss with output", action="store_true")
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
 
@@ -100,9 +103,10 @@ if torch.cuda.is_available():
 def render(
   model, cam, crop,
   # how big should the image be
-  size, args,
+  size,
 
-  times=None, with_noise=5e-3, device="cuda",
+  args,
+  times=None, with_noise=0.1,
 ):
   ii, jj = torch.meshgrid(
     torch.arange(size, device=device, dtype=torch.float),
@@ -152,7 +156,7 @@ def sqr(x): return x * x
 def train(model, cam, labels, opt, args, sched=None):
   if args.epochs == 0: return
 
-  assert(args.l1_loss or not args.no_l2_loss), "Must have either l1 or l2 loss")
+  assert(args.l1_loss or not args.no_l2_loss), "Must have either l1 or l2 loss"
   if args.l1_loss and not args.no_l2_loss:
     loss_fn = lambda x, ref: (F.mse_loss(x, ref) + F.l1_loss(x, ref))/2
   elif args.l1_loss and args.no_l2_loss: loss_fn = F.l1_loss
@@ -168,13 +172,13 @@ def train(model, cam, labels, opt, args, sched=None):
     labels = labels[0]
 
   get_crop = lambda: (0,0, args.render_size, args.render_size)
+  cs = args.crop_size
   if args.crop:
     get_crop = lambda: (
-      random.randint(0, args.render_size-args.crop_size),
-      random.randint(0, args.render_size-args.crop_size),
-      args.crop_size, args.crop_size,
+      random.randint(0, args.render_size-cs), random.randint(0, args.render_size-cs), cs, cs,
     )
 
+  losses = []
   for i in iters:
     opt.zero_grad()
 
@@ -189,7 +193,6 @@ def train(model, cam, labels, opt, args, sched=None):
       ref.mean() + 0.3 < sqr(random.random()): continue
 
     out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
-    # TODO add config for this sqrt? It's optional.
     loss = loss_fn(out, ref)
     l2_loss = loss.item()
     display = {
@@ -210,6 +213,7 @@ def train(model, cam, labels, opt, args, sched=None):
     if i < args.n_sparsify_alpha: loss = loss + (model.nerf.alpha - 0.5).square().mean()
 
     update(display)
+    losses.append(l2_loss)
 
     assert(loss.isfinite().item()), "Got NaN loss"
     loss.backward()
@@ -221,6 +225,11 @@ def train(model, cam, labels, opt, args, sched=None):
         acc = model.nerf.acc()[0,...,None].expand_as(ref0)
         save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1), acc)
     if i % args.save_freq == 0 and i != 0: save(model, args)
+  window = min(250, len(losses))
+  losses = np.convolve(losses, np.ones(window)/window, mode='valid')
+  plt.plot(range(len(losses)), losses)
+  plt.savefig("outputs/training_loss.png", bbox_inches='tight')
+  plt.close()
 
 def test(model, cam, labels, args, training: bool = True):
   times = None
@@ -331,10 +340,14 @@ def main():
   labels, cam = load(args)
   model = load_model(args) if args.load is None else torch.load(args.load)
 
-  # for some reason AdamW doesn't seem to work here
-  opt = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.decay)
+  parameters = model.parameters()
+  if args.train_camera: parameters = chain(parameters, cam.parameters())
 
-  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-5)
+  # for some reason AdamW doesn't seem to work here
+  opt = optim.Adam(parameters, lr=args.learning_rate, weight_decay=args.decay, eps=1e-7)
+
+  # TODO should T_max = -1 or args.epochs
+  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=5e-5)
   train(model, cam, labels, opt, args, sched=sched)
 
   if args.epochs != 0: save(model, args)

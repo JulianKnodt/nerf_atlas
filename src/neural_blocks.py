@@ -18,11 +18,10 @@ class SkipConnMLP(nn.Module):
     out=3,
 
     skip=3,
-    freqs = 32,
-    sigma=2<<5,
+    freqs = 16,
+    sigma=1<<5,
     device="cuda",
     activation = nn.LeakyReLU(inplace=True),
-
     latent_size=0,
 
     # Record the last layers activation

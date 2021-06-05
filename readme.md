@@ -3,7 +3,7 @@
 A repository which contains NeRF and a bunch of extensions to NeRF.
 
 Important Note:
-WORK IN PROGRESS, things may be subtly _borken_.
+WORK IN PROGRESS, things may be subtly _borken_ 🦮.
 
 ---
 
@@ -13,6 +13,10 @@ WORK IN PROGRESS, things may be subtly _borken_.
 python3 runner.py -h
 <All the flags>
 ```
+
+One note for usage:
+- I've found that using large crop-size with small number of batches may lead to better
+  training.
 
 ## Dependencies
 

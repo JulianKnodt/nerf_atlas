@@ -42,7 +42,7 @@ class NeRFCamera(Camera):
   def sample_positions(
     self,
     position_samples,
-    size=512,
+    size: int,
     with_noise=False,
   ):
     device=self.device
@@ -52,20 +52,13 @@ class NeRFCamera(Camera):
       u = u + (torch.rand_like(u)-0.5)*with_noise
       v = v + (torch.rand_like(v)-0.5)*with_noise
 
-    d = torch.stack(
-      [
-        # W
+    d = torch.stack([
         (u - size * 0.5) / self.focal,
-        # H
         -(v - size * 0.5) / self.focal,
         -torch.ones_like(u),
-      ],
-      dim=-1,
-    )
-    r_d = torch.sum(
-      d[..., None, :] * self.cam_to_world[..., :3, :3], dim=-1
-    )
-    r_d = r_d.permute(2,0,1,3)
+    ], dim=-1)
+    r_d = torch.sum(d[..., None, :] * self.cam_to_world[..., :3, :3], dim=-1)
+    r_d = r_d.permute(2,0,1,3) # [H, W, B, 3] -> [B, H, W, 3]
     r_o = self.cam_to_world[..., :3, -1][:, None, None, :].expand_as(r_d)
     return torch.cat([r_o, r_d], dim=-1)
 
@@ -112,12 +105,7 @@ class NeRFMMCamera(Camera):
   def __getitem__(self, v):
     return NeRFMMCamera(t=self.t[v],r=self.r[v],focals=self.focals)
 
-  def sample_positions(
-    self,
-    position_samples,
-    size=512,
-    with_noise=False,
-  ):
+  def sample_positions(self, position_samples, size:int, with_noise=False):
     device=self.device
     u,v = position_samples.split(1, dim=-1)
     # u,v each in range [0, size]
@@ -170,13 +158,15 @@ class NeRFMMTimeCamera(Camera):
   def __getitem__(self, v):
     raise NotImplementedError()
     return NeRFMMTimeCamera(
-      cam_to_world=self.cam_to_world[v], focal=self.focal, device=self.device
+      translate=self.translate[v], rot=self.rot[v], focal=self.focal,
+      delta_params=self.delta_params, device=self.device
     )
   def sample_positions(
     self,
     position_samples,
     t,
-    size=512,
+    size:int,
     with_noise=False,
   ):
+    raise NotImplementedError()
     ...

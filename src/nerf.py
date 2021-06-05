@@ -20,12 +20,11 @@ def compute_pts_ts(
 ):
   r_o, r_d = rays.split([3,3], dim=-1)
   device = r_o.device
-  # TODO add step jitter: self.steps + random.randint(0,5),
-  t_vals = torch.linspace(0, 1, steps, device=device, dtype=r_o.dtype)
   if lindisp:
+    t_vals = torch.linspace(0, 1, steps, device=device, dtype=r_o.dtype)
     ts = 1/(1/max(near, 1e-10) * (1-t_vals) + 1/far * (t_vals))
   else:
-    ts = near * (1-t_vals) + far * t_vals
+    ts = torch.linspace(near, far, steps=steps, device=device, dtype=r_o.dtype)
 
   if perturb > 0:
     mids = 0.5 * (ts[:-1] + ts[1:])
@@ -117,6 +116,8 @@ class CommonNeRF(nn.Module):
 
     with_sky_mlp: bool = False,
 
+    record_depth: bool = False,
+
     device="cuda",
   ):
     super().__init__()
@@ -144,12 +145,16 @@ class CommonNeRF(nn.Module):
 
     self.rec_eikonal_loss = eikonal_loss
     self.eikonal_loss = 0
+
     self.with_sky_mlp = with_sky_mlp
     if with_sky_mlp:
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3,
         num_layers=3, hidden_size=32, freqs=3, device=device, xavier_init=True,
       ).to(device)
+
+    self.record_depth = record_depth
+    self.depth = None
 
   def forward(self, _x): raise NotImplementedError()
 
@@ -286,8 +291,7 @@ class PlainNeRF(CommonNeRF):
 
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.t_near, self.t_far, self.steps,
-      perturb = 1 if self.training else 0,
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, ts, r_o, r_d)
 
@@ -299,6 +303,10 @@ class PlainNeRF(CommonNeRF):
     # If there is a mip encoding, stack it with the latent encoding.
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
+    #bpts = pts.split(4, dim=0)
+    #blatent = latent.split(4, dim=0)
+
+    #for p, l in zip(bpts, blatent)
     first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
 
     density = first_out[..., 0]
@@ -310,8 +318,7 @@ class PlainNeRF(CommonNeRF):
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
     rgb = self.feat_act(self.second(
-      elev_azim_r_d,
-      torch.cat([intermediate, latent], dim=-1)
+      elev_azim_r_d, torch.cat([intermediate, latent], dim=-1)
     ))
 
     self.alpha, weights = alpha_from_density(density, ts, r_d)
@@ -326,6 +333,7 @@ class NeRFAE(CommonNeRF):
     out_features: int = 3,
 
     encoding_size: int = 16,
+    sigma=1<<5,
 
     device="cuda",
     **kwargs,
