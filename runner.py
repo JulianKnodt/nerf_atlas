@@ -68,6 +68,8 @@ def arguments():
   a.add_argument("--notest", help="do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit bg with some probability", action="store_true")
+  a.add_argument("--l1-loss", help="Add l1 loss with output", action="store_true")
+  a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
 
 
   cam = a.add_argument_group("camera parameters")
@@ -149,6 +151,13 @@ def sqr(x): return x * x
 # train the model with a given camera and some labels (imgs or imgs+times)
 def train(model, cam, labels, opt, args, sched=None):
   if args.epochs == 0: return
+
+  assert(args.l1_loss or not args.no_l2_loss), "Must have either l1 or l2 loss")
+  if args.l1_loss and not args.no_l2_loss:
+    loss_fn = lambda x, ref: (F.mse_loss(x, ref) + F.l1_loss(x, ref))/2
+  elif args.l1_loss and args.no_l2_loss: loss_fn = F.l1_loss
+  else: loss_fn = F.mse_loss
+
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
   update = lambda kwargs: iters.set_postfix(**kwargs)
   if args.quiet: update = lambda _: None
@@ -176,12 +185,12 @@ def train(model, cam, labels, opt, args, sched=None):
     ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
 
     # omit items which are all darker with some likelihood.
-    if args.omit_bg and (i % args.save_freq) != 0 and \
+    if args.omit_bg and (i % args.save_freq) != 0 and (i % args.valid_freq) != 0 and \
       ref.mean() + 0.3 < sqr(random.random()): continue
 
     out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
     # TODO add config for this sqrt? It's optional.
-    loss = F.mse_loss(out, ref)
+    loss = loss_fn(out, ref)
     l2_loss = loss.item()
     display = {
       "l2": f"{l2_loss:.04f}",

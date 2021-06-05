@@ -11,9 +11,9 @@ sdf: clean
   --load models/lego.pt --n-sparsify-alpha 100 -lr 5e-3 # --mip cylinder --nerf-eikonal
 original: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--render-size 128 --crop --epochs 30_000 --save models/lego_plain.pt \
+	--render-size 128 --crop --epochs 50_000 --save models/lego_plain.pt \
 	--near 2 --far 6 --batch-size 16 --mip cylinder --model ae -lr 1e-3 \
-	#--load models/lego_plain.pt --omit-bg
+	--load models/lego_plain.pt --l1-loss #--omit-bg
 
 single-video: clean
 	python3 runner.py -d data/video/fencing.mp4 \
