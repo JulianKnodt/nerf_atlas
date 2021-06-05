@@ -8,7 +8,7 @@ from .neural_blocks import ( SkipConnMLP )
 from .utils import ( autograd, eikonal_loss )
 
 # Use loss from IDR, taking max occupancy along NeRF as segmentation.
-def sigmoid_loss(min_along_ray, densities, alpha: int=100):
+def sigmoid_loss(min_along_ray, densities, alpha: int=500):
   throughput = -min_along_ray.squeeze(-1) * alpha
   hits = (throughput > 0) & (densities > 0.5)
   misses = ~hits

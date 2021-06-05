@@ -543,6 +543,8 @@ class MPI(nn.Module):
 
     return self.canonical.from_pts(pts, ts, r_o, r_d)
 
+  @property
+  def nerf(self): return self.canon
   def from_pts(self, pts, ts, r_o, r_d):
     density, feats = self.estim(pts).split([1, 3], dim=-1)
 

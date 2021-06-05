@@ -8,10 +8,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.nn as nn
 import random
-from tqdm import trange
 import json
 import math
+
 from datetime import datetime
+from tqdm import trange
 
 import src.loaders
 import src.nerf as nerf
@@ -36,6 +37,7 @@ def arguments():
   a.add_argument(
     "--render-size", help="size to render images at w/o upsampling", type=int, default=16
   )
+  a.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
 
   a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
   a.add_argument("--batch-size", help="size of each training batch", type=int, default=8)
@@ -251,6 +253,7 @@ def load_mip(args):
 
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
+  if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   kwargs = {
     "mip": load_mip(args),
     "out_features": args.feature_space,
@@ -270,7 +273,9 @@ def load_model(args):
   model = constructor(**kwargs).to(device)
 
   # Add in a dynamic model if using dnerf with the underlying model.
-  if args.data_kind == "dnerf": model = nerf.DynamicNeRF(model, device=device).to(device)
+  if args.data_kind == "dnerf":
+    constructor = nerf.DynamicNeRFAE if arg.dnerfae else nerf.DynamicNeRF
+    model = constructor(canonical=model, device=device).to(device)
 
   if args.data_kind == "pixel-single":
     encoder = SpatialEncoder().to(device)

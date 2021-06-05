@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torchvision
 import numpy as np
 
-from .cameras import NeRFCamera
+from . import cameras
 from .utils import load_image
 
 def original(dir=".", normalize=True, training=True, size=256, device="cuda"):
@@ -33,7 +33,7 @@ def original(dir=".", normalize=True, training=True, size=256, device="cuda"):
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
 
-  return exp_imgs, NeRFCamera(cam_to_worlds, focal)
+  return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal)
 
 def dnerf(dir=".", normalize=True, training=True, size=256, device="cuda"):
   kind = "train" if training else "test"
@@ -58,24 +58,19 @@ def dnerf(dir=".", normalize=True, training=True, size=256, device="cuda"):
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
   times = torch.tensor(times, device=device)
 
-  return (exp_imgs, times), NeRFCamera(cam_to_worlds, focal)
+  return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal)
 
 def single_video(path, training=True, size=256, device="cuda"):
   frames, _, _ = torchvision.io.read_video(path, pts_unit='sec')
-  frames = frames[:100]
-  return frames, NeRFMMCamera.identity(len(frames), device=device)
+  frames = (frames[:100]/255).to(device)
+  return frames, cameras.NeRFMMCamera.identity(len(frames), device=device)
 
 def single_image(path, training=True, size=256, device="cuda"):
   img = torchvision.io.read_image(path).to(device)
   img = torchvision.transforms.functional.resize(img, size=(size, size))
   img = img.permute(1,2,0)/255
-  return img.unsqueeze(0), NeRFCamera.identity(1, device=device)
+  return img.unsqueeze(0), cameras.NeRFCamera.identity(1, device=device)
 
 def monocular_video(path=".", training=True, size=256, device="cuda"):
+  raise NotImplementedError()
   return NeRFCamera.empty(len(vid))
-
-def load_cityscapes(dir=".", size=256, training=True, device="cuda"):
-  kind = "train" if training else "test"
-  cs = torchvision.datasets.Cityscapes(root=dir, split=kind, mode="fine")
-  # TODO download city scape to test.
-  return cs, NeRFCamera.identity(len(cs))
