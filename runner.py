@@ -73,6 +73,7 @@ def arguments():
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
   a.add_argument("--l1-loss", help="Add l1 loss with output", action="store_true")
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
+  a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
 
 
   cam = a.add_argument_group("camera parameters")
@@ -183,6 +184,7 @@ def train(model, cam, labels, opt, args, sched=None):
     opt.zero_grad()
 
     idxs = random.sample(range(len(cam)), batch_size)
+    # idxs = [i%15] * len(idxs) # DEBUG
 
     ts = None if times is None else times[idxs]
     c0,c1,c2,c3 = crop = get_crop()
@@ -344,10 +346,12 @@ def main():
   if args.train_camera: parameters = chain(parameters, cam.parameters())
 
   # for some reason AdamW doesn't seem to work here
+  # eps = 1e-7 was in the original paper.
   opt = optim.Adam(parameters, lr=args.learning_rate, weight_decay=args.decay, eps=1e-7)
 
   # TODO should T_max = -1 or args.epochs
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=5e-5)
+  if args.no_sched: sched = None
   train(model, cam, labels, opt, args, sched=sched)
 
   if args.epochs != 0: save(model, args)

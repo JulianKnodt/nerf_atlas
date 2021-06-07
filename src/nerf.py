@@ -85,7 +85,7 @@ def alpha_from_density(
   dists = torch.cat([ts[1:] - ts[:-1], end_val], dim=-1)
   dists = dists[:, None, None, None] * torch.linalg.norm(r_d, dim=-1)
   alpha = 1 - torch.exp(-sigma_a * dists)
-  weights = alpha * cumuprod_exclusive((1.0 - alpha).clamp(min=1e-10))
+  weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
 
 def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
