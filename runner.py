@@ -76,6 +76,7 @@ def arguments():
   a.add_argument("--l1-loss", help="Add l1 loss with output", action="store_true")
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
+  a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
 
 
   cam = a.add_argument_group("camera parameters")
@@ -181,12 +182,13 @@ def train(model, cam, labels, opt, args, sched=None):
       random.randint(0, args.render_size-cs), random.randint(0, args.render_size-cs), cs, cs,
     )
 
+  next_idxs = lambda _: random.sample(range(len(cam)), batch_size)
+  if args.serial_idxs: next_idxs = lambda i: [i%len(cam)] * batch_size
   losses = []
   for i in iters:
     opt.zero_grad()
 
-    idxs = random.sample(range(len(cam)), batch_size)
-    #idxs = [i%45] * len(idxs) # DEBUG
+    idxs = next_idxs(i)
 
     ts = None if times is None else times[idxs]
     c0,c1,c2,c3 = crop = get_crop()
