@@ -6,6 +6,7 @@ import argparse
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+import torchvision.transforms.functional as TVF
 import torch.nn as nn
 import random
 import json
@@ -55,6 +56,7 @@ def arguments():
   a.add_argument("--n-sparsify-alpha", help="Epochs for sparsifying alpha", type=int, default=0)
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
+  a.add_argument("--blur", help="Blur exp/got before backprop", action="store_true")
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -184,7 +186,7 @@ def train(model, cam, labels, opt, args, sched=None):
     opt.zero_grad()
 
     idxs = random.sample(range(len(cam)), batch_size)
-    # idxs = [i%15] * len(idxs) # DEBUG
+    #idxs = [i%45] * len(idxs) # DEBUG
 
     ts = None if times is None else times[idxs]
     c0,c1,c2,c3 = crop = get_crop()
@@ -195,13 +197,17 @@ def train(model, cam, labels, opt, args, sched=None):
       ref.mean() + 0.3 < sqr(random.random()): continue
 
     out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
+    if args.blur:
+      r = 1 + 2 * random.randint(0,2)
+      out = TVF.gaussian_blur(out.permute(0,3,1,2), r).permute(0,2,3,1)
+      ref = TVF.gaussian_blur(ref.permute(0,3,1,2), r).permute(0,2,3,1) # TODO cache ref blur?
     loss = loss_fn(out, ref)
     l2_loss = loss.item()
     display = {
       "l2": f"{l2_loss:.04f}",
-      "lr": f"{sched.get_last_lr()[0]:.1e}",
       "refresh": False,
     }
+    if sched is not None: display["lr"] = f"{sched.get_last_lr()[0]:.1e}"
     if args.sdf:
       eik = sdf.eikonal_loss(model.sdf.normals)
       s = sdf.sigmoid_loss(model.min_along_rays, model.nerf.acc())
