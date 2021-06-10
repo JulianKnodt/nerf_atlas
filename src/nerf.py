@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-from .neural_blocks import ( SkipConnMLP )
+from .neural_blocks import ( SkipConnMLP, FourierEncoder, PositionalEncoder )
 from .utils import ( dir_to_elev_azim, autograd, eikonal_loss )
 
 @torch.jit.script
@@ -150,7 +150,7 @@ class CommonNeRF(nn.Module):
     if with_sky_mlp:
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3,
-        num_layers=3, hidden_size=32, freqs=3, device=device, xavier_init=True,
+        num_layers=3, hidden_size=32, device=device, xavier_init=True,
       ).to(device)
 
     self.record_depth = record_depth
@@ -275,6 +275,8 @@ class PlainNeRF(CommonNeRF):
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
+      #fourier_enc=FourierEncoder(3, max_freq=, device=device),
+      positional_enc=PositionalEncoder(3, 10, N=16),
 
       num_layers = 6, hidden_size = 128, xavier_init=True,
 
@@ -283,6 +285,7 @@ class PlainNeRF(CommonNeRF):
 
     self.second = SkipConnMLP(
       in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
+      positional_enc=PositionalEncoder(2, 4, N=16),
 
       num_layers=5, hidden_size=64, xavier_init=True,
 
@@ -346,14 +349,14 @@ class NeRFAE(CommonNeRF):
       in_size=3, out=encoding_size,
       latent_size=self.latent_size,
       num_layers=5,
-      hidden_size=64,
+      hidden_size=128,
       device=device,
       xavier_init=True,
     ).to(device)
 
     self.density_tform = SkipConnMLP(
       # a bit hacky, but pass it in with no encodings since there are no additional inputs.
-      in_size=encoding_size, out=1, latent_size=0, freqs=0,
+      in_size=encoding_size, out=1, latent_size=0,
 
       num_layers=5, hidden_size=64, xavier_init=True,
 

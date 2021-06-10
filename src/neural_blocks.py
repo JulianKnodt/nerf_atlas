@@ -7,6 +7,43 @@ from typing import Optional
 
 from .utils import ( fourier, create_fourier_basis, )
 
+class PositionalEncoder(nn.Module):
+  def __init__(
+    self,
+    input_dims: int = 3,
+    max_freq: float = 6.,
+    N: int = 64,
+    log_sampling: bool = False,
+  ):
+    super().__init__()
+    if log_sampling:
+      bands = 2**torch.linspace(1, max_freq, steps=N, requires_grad=False, dtype=torch.float)
+    else:
+      bands = torch.linspace(1, 2**max_freq, steps=N, requires_grad=False, dtype=torch.float)
+    self.bands = nn.Parameter(bands, requires_grad=False)
+    self.input_dims = input_dims
+  def output_dims(self): return self.input_dims * 2 * len(self.bands)
+  def forward(self, x):
+    assert(x.shape[-1] == self.input_dims)
+    raw_freqs = torch.tensordot(x, self.bands, dims=0)
+    raw_freqs = raw_freqs.reshape(x.shape[:-1] + (-1,))
+    return torch.cat([ raw_freqs.sin(), raw_freqs.cos() ], dim=-1)
+
+class FourierEncoder(nn.Module):
+  def __init__(
+    self,
+    input_dims: int = 3,
+    freqs: int = 16,
+    sigma: int = 1 << 5,
+    device="cuda",
+  ):
+    super().__init__()
+    self.input_dims = input_dims
+    self.freqs = freqs
+    self.basis, _ = create_fourier_basis(freqs, features=input_dims, freq=sigma, device=device)
+  def output_dims(self): return self.freqs * 2
+  def forward(self, x): return fourier(x, self.basis)
+
 class SkipConnMLP(nn.Module):
   "MLP with skip connections and fourier encoding"
   def __init__(
@@ -14,15 +51,15 @@ class SkipConnMLP(nn.Module):
 
     num_layers = 5,
     hidden_size = 128,
-    in_size=3,
-    out=3,
+    in_size=3, out=3,
 
     skip=3,
-    freqs = 16,
-    sigma=1<<5,
     device="cuda",
     activation = nn.LeakyReLU(inplace=True),
     latent_size=0,
+
+    fourier_enc: Optional[FourierEncoder] = None,
+    positional_enc: Optional[PositionalEncoder] = None,
 
     # Record the last layers activation
     last_layer_act = False,
@@ -33,11 +70,15 @@ class SkipConnMLP(nn.Module):
     super(SkipConnMLP, self).__init__()
     self.in_size = in_size
     assert(type(freqs) == int)
-    self.basis_p, map_size = create_fourier_basis(
-      freqs, features=in_size, freq=sigma, device=device
-    )
+    map_size = 0
 
-    self.dim_p = map_size + latent_size
+    self.fourier_enc = fourier_enc
+    if fourier_enc is not None: map_size += fourier_enc.output_dims()
+
+    self.positional_enc = positional_enc
+    if positional_enc is not None: map_size += positional_enc.output_dims()
+
+    self.dim_p = in_size + map_size + latent_size
     self.skip = skip
     self.latent_size = latent_size
     skip_size = hidden_size + self.dim_p
@@ -72,9 +113,12 @@ class SkipConnMLP(nn.Module):
 
   def forward(self, p, latent: Optional[torch.Tensor]=None):
     batches = p.shape[:-1]
-    init = fourier(p.reshape(-1, self.in_size), self.basis_p)
-    if latent is not None:
-      init = torch.cat([init, latent.reshape(-1, self.latent_size)], dim=-1)
+    init = flat = p.reshape(-1, p.shape[-1])
+
+    if self.fourier_enc is not None: init = torch.cat([init, self.fourier_enc(flat)], dim=-1)
+    if self.positional_enc is not None: init = torch.cat([init,self.positional_enc(flat)],dim=-1)
+    if latent is not None: init = torch.cat([init, latent.reshape(-1, self.latent_size)], dim=-1)
+
     x = self.init(init)
     for i, layer in enumerate(self.layers):
       if i != len(self.layers)-1 and (i % self.skip) == 0:

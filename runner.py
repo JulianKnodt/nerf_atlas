@@ -77,6 +77,7 @@ def arguments():
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
+  a.add_argument("--subcrop", help="Size of subcrop, -1 means none", type=int, default=-1)
 
 
   cam = a.add_argument_group("camera parameters")
@@ -125,7 +126,15 @@ def render(
 
   if times is not None: return model((rays, times))
   elif args.data_kind == "pixel-single": return model((rays, positions))
+  elif args.subcrop != -1:
+    hs = []
+    for bh in rays.split(args.subcrop, dim=1):
+      h = torch.cat([model(bw) for bw in bh.split(args.subcrop, dim=2)],dim=2)
+      #torch.cuda.empty_cache()
+      hs.append(h)
+    return torch.cat(hs, dim=1)
   return model(rays)
+
 
 # loads the dataset
 def load(args, training=True):
@@ -232,10 +241,11 @@ def train(model, cam, labels, opt, args, sched=None):
     if i % args.valid_freq == 0:
       with torch.no_grad():
         ref0 = ref[0]
-        acc = model.nerf.acc()[0,...,None].expand_as(ref0)
+        #acc = model.nerf.acc()[0,...,None].expand_as(ref0)
+        acc = torch.zeros_like(ref0)
         save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1), acc)
     if i % args.save_freq == 0 and i != 0: save(model, args)
-  window = min(250, len(losses))
+  window = min(500, len(losses))
   losses = np.convolve(losses, np.ones(window)/window, mode='valid')
   plt.plot(range(len(losses)), losses)
   plt.savefig("outputs/training_loss.png", bbox_inches='tight')
