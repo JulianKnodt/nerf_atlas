@@ -158,6 +158,13 @@ def load(args, training=True):
 
 def sqr(x): return x * x
 
+def save_losses(losses):
+  window = min(500, len(losses))
+  losses = np.convolve(losses, np.ones(window)/window, mode='valid')
+  plt.plot(range(len(losses)), losses)
+  plt.savefig("outputs/training_loss.png", bbox_inches='tight')
+  plt.close()
+
 # train the model with a given camera and some labels (imgs or imgs+times)
 def train(model, cam, labels, opt, args, sched=None):
   if args.epochs == 0: return
@@ -206,8 +213,8 @@ def train(model, cam, labels, opt, args, sched=None):
       out = TVF.gaussian_blur(out.permute(0,3,1,2), r).permute(0,2,3,1)
       ref = TVF.gaussian_blur(ref.permute(0,3,1,2), r).permute(0,2,3,1) # TODO cache ref blur?
     if args.sharpen:
-      out = TVF.sharpen(out.permute(0,3,1,2), 1.5).permute(0,2,3,1)
-      ref = TVF.sharpen(ref.permute(0,3,1,2), 1.5).permute(0,2,3,1) # TODO cache ref sharpen?
+      out = TVF.adjust_sharpness(out.permute(0,3,1,2),1.5).permute(0,2,3,1)
+      ref = TVF.adjust_sharpness(ref.permute(0,3,1,2),1.5).permute(0,2,3,1) # TODO cache sharpen?
     loss = loss_fn(out, ref)
     l2_loss = loss.item()
     display = {
@@ -239,12 +246,10 @@ def train(model, cam, labels, opt, args, sched=None):
         ref0 = ref[0]
         acc = model.nerf.acc()[0,...,None].expand_as(ref0)
         save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1), acc)
-    if i % args.save_freq == 0 and i != 0: save(model, args)
-  window = min(500, len(losses))
-  losses = np.convolve(losses, np.ones(window)/window, mode='valid')
-  plt.plot(range(len(losses)), losses)
-  plt.savefig("outputs/training_loss.png", bbox_inches='tight')
-  plt.close()
+    if i % args.save_freq == 0 and i != 0:
+      save(model, args)
+      save_losses(losses)
+  save_losses(losses)
 
 def test(model, cam, labels, args, training: bool = True):
   times = None
