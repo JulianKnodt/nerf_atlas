@@ -269,8 +269,7 @@ class PlainNeRF(CommonNeRF):
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
-      #fourier_enc=FourierEncoder(3, max_freq=, device=device),
-      positional_enc=PositionalEncoder(3, 10, N=16),
+      enc=PositionalEncoder(3, 10, N=16),
 
       num_layers = 6, hidden_size = 128, xavier_init=True,
 
@@ -279,7 +278,7 @@ class PlainNeRF(CommonNeRF):
 
     self.second = SkipConnMLP(
       in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
-      positional_enc=PositionalEncoder(2, 4, N=16),
+      enc=PositionalEncoder(2, 4, N=16),
 
       num_layers=5, hidden_size=64, xavier_init=True,
 
@@ -344,7 +343,7 @@ class NeRFAE(CommonNeRF):
       latent_size=self.latent_size,
       num_layers=5,
       hidden_size=128,
-      fourier_enc=FourierEncoder(input_dims=3, device=device),
+      enc=FourierEncoder(input_dims=3, device=device),
       device=device,
       xavier_init=True,
     ).to(device)
@@ -362,7 +361,7 @@ class NeRFAE(CommonNeRF):
       in_size=2, out=out_features, latent_size=encoding_size,
 
       num_layers=5, hidden_size=64, xavier_init=True,
-      fourier_enc=FourierEncoder(input_dims=2, device=device),
+      enc=FourierEncoder(input_dims=2, device=device),
 
       device=device,
     ).to(device)

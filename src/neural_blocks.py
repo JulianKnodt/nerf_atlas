@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from itertools import chain
-from typing import Optional
+from typing import Optional, Union
 
 from .utils import ( fourier, create_fourier_basis, )
 
@@ -58,9 +58,7 @@ class SkipConnMLP(nn.Module):
     activation = nn.LeakyReLU(inplace=True),
     latent_size=0,
 
-    # TODO convert this into one encoder
-    fourier_enc: Optional[FourierEncoder] = None,
-    positional_enc: Optional[PositionalEncoder] = None,
+    enc: Optional[Union[FourierEncoder, PositionalEncoder]] = None,
 
     # Record the last layers activation
     last_layer_act = False,
@@ -73,11 +71,8 @@ class SkipConnMLP(nn.Module):
     assert(type(freqs) == int)
     map_size = 0
 
-    self.fourier_enc = fourier_enc
-    if fourier_enc is not None: map_size += fourier_enc.output_dims()
-
-    self.positional_enc = positional_enc
-    if positional_enc is not None: map_size += positional_enc.output_dims()
+    self.enc = enc
+    if enc is not None: map_size += enc.output_dims()
 
     self.dim_p = in_size + map_size + latent_size
     self.skip = skip
@@ -114,10 +109,9 @@ class SkipConnMLP(nn.Module):
 
   def forward(self, p, latent: Optional[torch.Tensor]=None):
     batches = p.shape[:-1]
-    init = flat = p.reshape(-1, p.shape[-1])
+    init = p.reshape(-1, p.shape[-1])
 
-    if self.fourier_enc is not None: init = torch.cat([init, self.fourier_enc(flat)], dim=-1)
-    if self.positional_enc is not None: init = torch.cat([init,self.positional_enc(flat)],dim=-1)
+    if self.enc is not None: init = torch.cat([init, self.enc(init)], dim=-1)
     if latent is not None: init = torch.cat([init, latent.reshape(-1, self.latent_size)], dim=-1)
 
     x = self.init(init)
