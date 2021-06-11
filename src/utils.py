@@ -16,7 +16,7 @@ def create_fourier_basis(batch_size, features=3, freq=40, device="cuda"):
 @torch.jit.script
 def fourier(x, B):
   mapped = x @ B
-  return torch.cat([x, mapped.sin(), mapped.cos()], dim=-1)
+  return torch.cat([mapped.sin(), mapped.cos()], dim=-1)
 
 @torch.jit.script
 def expected_sin(x, x_var):

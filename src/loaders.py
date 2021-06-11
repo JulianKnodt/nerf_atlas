@@ -41,7 +41,8 @@ def dnerf(dir=".", normalize=True, training=True, size=256, device="cuda"):
   cam_to_worlds = []
   times = []
 
-  focal = tfs['camera_angle_x']
+  #focal = tfs['camera_angle_x']
+  focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
   n_frames = len(tfs["frames"])
   for t, frame in enumerate(tfs["frames"]):
     img = load_image(os.path.join(dir, frame['file_path'] + '.png'), resize=(size, size))

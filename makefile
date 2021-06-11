@@ -11,13 +11,13 @@ sdf: clean
   --load models/lego.pt --n-sparsify-alpha 100 -lr 2e-3 # --mip cylinder --nerf-eikonal
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--render-size 64 --crop --epochs 10_000 --save models/lego_high_cap.pt \
-	--near 2 --far 6 --batch-size 5 --crop-size 28 --model plain -lr 5e-4 \
-	--l1-loss --valid-freq 499 --no-sched --load models/lego_high_cap.pt #--omit-bg
+	--render-size 64 --crop --epochs 80_000 --save models/lego.pt \
+	--near 2 --far 6 --batch-size 5 --crop-size 26 --model plain -lr 5e-4 \
+	--l1-loss --valid-freq 499 --no-sched #--load models/lego.pt #--omit-bg
 ae: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--render-size 64 --crop --epochs 80_000 --save models/lego_ae.pt \
-	--near 2 --far 6 --batch-size 5 --crop-size 26 --model plain -lr 5e-4 \
+	--near 2 --far 6 --batch-size 5 --crop-size 26 --model ae -lr 5e-4 \
 	--l1-loss --valid-freq 499 --no-sched #--load models/lego_ae.pt #--omit-bg
 
 single-video: clean

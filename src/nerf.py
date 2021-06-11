@@ -269,7 +269,8 @@ class PlainNeRF(CommonNeRF):
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
-      enc=PositionalEncoder(3, 10, N=16),
+      #enc=PositionalEncoder(3, 10, N=16),
+      enc=FourierEncoder(input_dims=3, device=device),
 
       num_layers = 6, hidden_size = 128, xavier_init=True,
 
@@ -278,7 +279,8 @@ class PlainNeRF(CommonNeRF):
 
     self.second = SkipConnMLP(
       in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
-      enc=PositionalEncoder(2, 4, N=16),
+      #enc=PositionalEncoder(2, 4, N=16),
+      enc=FourierEncoder(input_dims=2, device=device),
 
       num_layers=5, hidden_size=64, xavier_init=True,
 
@@ -299,10 +301,6 @@ class PlainNeRF(CommonNeRF):
     # If there is a mip encoding, stack it with the latent encoding.
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
-    #bpts = pts.split(4, dim=0)
-    #blatent = latent.split(4, dim=0)
-
-    #for p, l in zip(bpts, blatent)
     first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
 
     density = first_out[..., 0]
@@ -341,17 +339,16 @@ class NeRFAE(CommonNeRF):
     self.encode = SkipConnMLP(
       in_size=3, out=encoding_size,
       latent_size=self.latent_size,
-      num_layers=5,
-      hidden_size=128,
+      num_layers=5, hidden_size=128,
       enc=FourierEncoder(input_dims=3, device=device),
-      device=device,
       xavier_init=True,
+
+      device=device,
     ).to(device)
 
     self.density_tform = SkipConnMLP(
       # a bit hacky, but pass it in with no encodings since there are no additional inputs.
       in_size=encoding_size, out=1, latent_size=0,
-
       num_layers=5, hidden_size=64, xavier_init=True,
 
       device=device,
