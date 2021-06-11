@@ -21,7 +21,6 @@ def original(dir=".", normalize=True, training=True, size=256, device="cuda"):
   exp_imgs = []
   cam_to_worlds = []
   focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
-  focal = tfs['camera_angle_x']
   for frame in tfs["frames"]:
     img = load_image(os.path.join(dir, frame['file_path'] + '.png'), resize=(size, size))
     exp_imgs.append(img[..., :3])
