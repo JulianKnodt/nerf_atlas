@@ -65,12 +65,6 @@ def sample_pdf(
 
   return samples
 
-def batched(model, pts, batch_size: int = 8):
-  bpts = pts.split(batch_size, dim=0)
-  outs = []
-  for bpt in bpts: outs.append(model(bpt))
-  return torch.cat(outs, dim=0)
-
 @torch.jit.script
 def alpha_from_density(
   density, ts, r_d,
@@ -350,6 +344,7 @@ class NeRFAE(CommonNeRF):
       latent_size=self.latent_size,
       num_layers=5,
       hidden_size=128,
+      fourier_enc=FourierEncoder(input_dims=3, device=device),
       device=device,
       xavier_init=True,
     ).to(device)
@@ -367,6 +362,7 @@ class NeRFAE(CommonNeRF):
       in_size=2, out=out_features, latent_size=encoding_size,
 
       num_layers=5, hidden_size=64, xavier_init=True,
+      fourier_enc=FourierEncoder(input_dims=2, device=device),
 
       device=device,
     ).to(device)

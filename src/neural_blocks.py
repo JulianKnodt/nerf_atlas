@@ -58,6 +58,7 @@ class SkipConnMLP(nn.Module):
     activation = nn.LeakyReLU(inplace=True),
     latent_size=0,
 
+    # TODO convert this into one encoder
     fourier_enc: Optional[FourierEncoder] = None,
     positional_enc: Optional[PositionalEncoder] = None,
 
