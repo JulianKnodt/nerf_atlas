@@ -56,7 +56,8 @@ def arguments():
   a.add_argument("--n-sparsify-alpha", help="Epochs for sparsifying alpha", type=int, default=0)
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
-  a.add_argument("--blur", help="Blur exp/got before backprop", action="store_true")
+  a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
+  a.add_argument("--sharpen", help="Sharpen before loss comparison", action="store_true")
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -77,7 +78,6 @@ def arguments():
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
-  a.add_argument("--subcrop", help="Size of subcrop, -1 means none", type=int, default=-1)
 
 
   cam = a.add_argument_group("camera parameters")
@@ -126,13 +126,6 @@ def render(
 
   if times is not None: return model((rays, times))
   elif args.data_kind == "pixel-single": return model((rays, positions))
-  elif args.subcrop != -1:
-    hs = []
-    for bh in rays.split(args.subcrop, dim=1):
-      h = torch.cat([model(bw) for bw in bh.split(args.subcrop, dim=2)],dim=2)
-      #torch.cuda.empty_cache()
-      hs.append(h)
-    return torch.cat(hs, dim=1)
   return model(rays)
 
 
@@ -212,6 +205,9 @@ def train(model, cam, labels, opt, args, sched=None):
       r = 1 + 2 * random.randint(0,2)
       out = TVF.gaussian_blur(out.permute(0,3,1,2), r).permute(0,2,3,1)
       ref = TVF.gaussian_blur(ref.permute(0,3,1,2), r).permute(0,2,3,1) # TODO cache ref blur?
+    if args.sharpen:
+      out = TVF.sharpen(out.permute(0,3,1,2), 1.5).permute(0,2,3,1)
+      ref = TVF.sharpen(ref.permute(0,3,1,2), 1.5).permute(0,2,3,1) # TODO cache ref sharpen?
     loss = loss_fn(out, ref)
     l2_loss = loss.item()
     display = {
@@ -241,8 +237,7 @@ def train(model, cam, labels, opt, args, sched=None):
     if i % args.valid_freq == 0:
       with torch.no_grad():
         ref0 = ref[0]
-        #acc = model.nerf.acc()[0,...,None].expand_as(ref0)
-        acc = torch.zeros_like(ref0)
+        acc = model.nerf.acc()[0,...,None].expand_as(ref0)
         save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1), acc)
     if i % args.save_freq == 0 and i != 0: save(model, args)
   window = min(500, len(losses))
