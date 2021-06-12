@@ -1,9 +1,9 @@
 clean:
 	-@rm outputs/*.png
 dnerf: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 32 \
-	--crop --epochs 50_000 --mip cylinder --save models/djj_ae.pt --model ae \
-  --near 0 --far 1 --load models/djj_ae.pt
+	python3 -O runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 32 \
+	--crop --epochs 50_000  --save models/djj_ae.pt --model ae --crop --batch-size 5 \
+	--crop-size 24 --near 2 --far 6 --l1-loss -lr 5e-4 --no-sched
 sdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \
 	--render-size 128 --crop --epochs 50_000 --save models/lego.pt --crop-size 8 \
@@ -13,12 +13,20 @@ original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--render-size 64 --crop --epochs 80_000 --save models/lego.pt \
 	--near 2 --far 6 --batch-size 5 --crop-size 26 --model plain -lr 5e-4 \
-	--l1-loss --valid-freq 499 --no-sched #--load models/lego.pt #--omit-bg
+	--l1-loss --valid-freq 499 --no-sched --load models/lego.pt #--omit-bg
+test_original: clean
+	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--render-size 64 --crop --epochs 0 --near 2 --far 6 --batch-size 5 \
+  --crop-size 26 --load models/lego.pt
 ae: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--render-size 64 --crop --epochs 80_000 --save models/lego_ae.pt \
 	--near 2 --far 6 --batch-size 5 --crop-size 26 --model ae -lr 5e-4 \
 	--l1-loss --valid-freq 499 --no-sched #--load models/lego_ae.pt #--omit-bg
+test_ae: clean
+	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--render-size 64 --crop --epochs 0 --near 2 --far 6 --batch-size 5 \
+  --crop-size 26 --load models/lego_ae.pt
 
 single-video: clean
 	python3 runner.py -d data/video/fencing.mp4 \

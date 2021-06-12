@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-from .neural_blocks import ( SkipConnMLP, FourierEncoder, PositionalEncoder )
+from .neural_blocks import ( SkipConnMLP, FourierEncoder, PositionalEncoder, NNEncoder )
 from .utils import ( dir_to_elev_azim, autograd, eikonal_loss )
 
 @torch.jit.script
@@ -326,7 +326,7 @@ class NeRFAE(CommonNeRF):
     intermediate_size: int = 32,
     out_features: int = 3,
 
-    encoding_size: int = 16,
+    encoding_size: int = 32,
     sigma=1<<5,
 
     device="cuda",
@@ -363,7 +363,11 @@ class NeRFAE(CommonNeRF):
       device=device,
     ).to(device)
     self.encoding_size = encoding_size
+    self.regularize_latent = False
 
+  def set_regularize_latent(self):
+    self.regularize_latent = True
+    self.latent_l2_loss = 0
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps,
@@ -373,6 +377,8 @@ class NeRFAE(CommonNeRF):
 
   def from_pts(self, pts, ts, r_o, r_d):
     encoded = self.compute_encoded(pts, ts, r_o, r_d)
+    if self.regularize_latent:
+      self.latent_l2_loss = torch.linalg.norm(encoded, dim=-1).mean()
     return self.from_encoded(encoded, ts, r_d)
 
   def compute_encoded(self, pts, ts, r_o, r_d):

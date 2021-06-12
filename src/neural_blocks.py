@@ -44,6 +44,21 @@ class FourierEncoder(nn.Module):
   def output_dims(self): return self.freqs * 2
   def forward(self, x): return fourier(x, self.basis)
 
+# It seems a cheap approximation to SIREN works just as well? Not entirely sure.
+class NNEncoder(nn.Module):
+  def __init__(
+    self,
+    input_dims: int = 3,
+    out: int = 32,
+    device=None,
+  ):
+    super().__init__()
+    self.fwd = nn.Linear(input_dims, out)
+  def output_dims(self): return self.fwd.out_features
+  def forward(self, x):
+    assert(x.shape[-1] == self.fwd.in_features)
+    return torch.sin(30 * self.fwd(x))
+
 class SkipConnMLP(nn.Module):
   "MLP with skip connections and fourier encoding"
   def __init__(

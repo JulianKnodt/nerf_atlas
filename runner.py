@@ -58,6 +58,7 @@ def arguments():
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
   a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
   a.add_argument("--sharpen", help="Sharpen before loss comparison", action="store_true")
+  a.add_argument("--regularize-latent", help="L2 regularize tlatent codes", action="store_true")
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -231,6 +232,8 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.nerf_eikonal:
       loss = loss + 1e-3 * model.nerf.eikonal_loss
       display["n-eik"] = f"{model.nerf.eikonal_loss:.02f}"
+    if args.regularize_latent:
+      loss = loss + model.nerf.latent_l2_loss
     # experiment with emptying the model at the beginning
     if i < args.n_sparsify_alpha: loss = loss + (model.nerf.alpha - 0.5).square().mean()
 
@@ -258,6 +261,7 @@ def test(model, cam, labels, args, training: bool = True):
     times = labels[-1]
     labels = labels[0]
 
+  ls = []
   with torch.no_grad():
     for i in range(labels.shape[0]):
       ts = None if times is None else times[i:i+1, ...]
@@ -278,9 +282,16 @@ def test(model, cam, labels, args, training: bool = True):
           acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = model.nerf.acc()[..., None]
 
       loss = F.mse_loss(got, exp)
-      print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {utils.mse2psnr(loss).item():.03f}")
+      psnr = utils.mse2psnr(loss).item()
+      print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
       name = f"outputs/train_{i:03}.png" if training else f"outputs/test_{i:03}.png"
       save_plot(name, exp, got.clamp(min=0, max=1), acc)
+      ls.append(psnr)
+  print(f"""[Summary ({"training" if training else "test"})]:
+          mean {np.mean(ls):.03f}
+          min {min(ls):.03f}
+          max {max(ls):.03f}
+          var {np.var(ls):.03f}""")
 
 def load_mip(args):
   if args.mip is None: return None
@@ -292,6 +303,7 @@ def load_mip(args):
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
+  if args.model != "ae": args.regularize_latent = False
   kwargs = {
     "mip": load_mip(args),
     "out_features": args.feature_space,
@@ -310,9 +322,12 @@ def load_model(args):
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
 
+  if args.model == "ae" and args.regularize_latent:
+    model.set_regularize_latent()
+
   # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":
-    constructor = nerf.DynamicNeRFAE if arg.dnerfae else nerf.DynamicNeRF
+    constructor = nerf.DynamicNeRFAE if args.dnerfae else nerf.DynamicNeRF
     model = constructor(canonical=model, device=device).to(device)
 
   if args.data_kind == "pixel-single":
