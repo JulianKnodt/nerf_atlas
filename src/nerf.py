@@ -378,7 +378,7 @@ class NeRFAE(CommonNeRF):
   def from_pts(self, pts, ts, r_o, r_d):
     encoded = self.compute_encoded(pts, ts, r_o, r_d)
     if self.regularize_latent:
-      self.latent_l2_loss = torch.linalg.norm(encoded, dim=-1).mean()
+      self.latent_l2_loss = torch.linalg.norm(encoded, dim=-1).square().mean()
     return self.from_encoded(encoded, ts, r_d)
 
   def compute_encoded(self, pts, ts, r_o, r_d):
@@ -412,10 +412,9 @@ class DynamicNeRF(nn.Module):
       # x,y,z,t -> dx, dy, dz
       in_size=4, out=3,
 
-      num_layers = 5,
-      hidden_size = 128,
-
-      device=device,
+      num_layers = 5, hidden_size = 128,
+      enc=NNEncoder(input_dims=4, device=device), device=device,
+      zero_init=True,
     ).to(device)
     self.time_noise_std = 1e-2
     self.canonical = canonical.to(device)
@@ -513,11 +512,10 @@ class SinglePixelNeRF(nn.Module):
     return self.canon(rays)
 
 class MPI(nn.Module):
-  # [WIP] Multi Plane Images.
+  # Multi Plane Imaging.
   def __init__(
     self,
-
-    canon: CommonNeRF,
+    canonical: CommonNeRF,
 
     position = [0,0,0],
     normal = [0,0,-1],

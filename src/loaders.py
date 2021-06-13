@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 import torchvision
 import numpy as np
+import imageio
 
 from . import cameras
 from .utils import load_image
@@ -34,14 +35,13 @@ def original(dir=".", normalize=True, training=True, size=256, device="cuda"):
 
   return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal)
 
-def dnerf(dir=".", normalize=True, training=True, size=256, device="cuda"):
+def dnerf(dir=".", normalize=False, training=True, size=256, device="cuda"):
   kind = "train" if training else "test"
   tfs = json.load(open(dir + f"transforms_{kind}.json"))
   exp_imgs = []
   cam_to_worlds = []
   times = []
 
-  #focal = tfs['camera_angle_x']
   focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
   n_frames = len(tfs["frames"])
   for t, frame in enumerate(tfs["frames"]):
@@ -59,6 +59,34 @@ def dnerf(dir=".", normalize=True, training=True, size=256, device="cuda"):
   times = torch.tensor(times, device=device)
 
   return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal)
+
+# taken from https://github.com/nex-mpi/nex-code/blob/main/utils/load_llff.py#L59
+def shiny(path, training=True, size=256, device="cuda"):
+  #tfs = open(os.path.join(path, "poses_bounds.npy"))
+  poses_file = os.path.join(path, "poses_bounds.npy")
+  assert(os.path.exists(poses_file))
+  poses_arr = np.load(poses_file)
+  shape = 5
+  if os.path.isfile(os.path.join(path, 'hwf_cxcy.npy')):
+    shape = 4
+    #h, w, fx, fy, cx, cy
+    intrinsic_arr = np.load(os.path.join(path, 'hwf_cxcy.npy'))
+  else: raise NotImplementedError()
+  poses = poses_arr[:, :-2].reshape([-1, 3, shape]).transpose([1,2,0])
+  bds = poses_arr[:, -2:].transpose([1,0])
+
+  img_dir = os.path.join(path, 'images')
+  assert(os.path.exists(img_dir))
+  img_files = [
+    os.path.join(img_dir, f) for f in sorted(os.listdir(img_dir)) \
+    if f.endswith('JPG') or f.endswith('jpg') or f.endswith('png')
+  ]
+  def imread(f): return imageio.imread(f, ignoregamma=f.endswith('png'))
+  exit()
+  imgs = np.stack([imread(f)[...,:3]/255. for f in img_files], axis=-1)
+  poses, bds, intrinsic_arr, imgs
+  raise NotImplementedError("TODO get camera from poses, bds")
+  return
 
 def single_video(path, training=True, size=256, device="cuda"):
   frames, _, _ = torchvision.io.read_video(path, pts_unit='sec')

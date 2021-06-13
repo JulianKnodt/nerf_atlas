@@ -54,6 +54,15 @@ Training/Efficiency:
   [GIRAFFE](https://arxiv.org/pdf/2011.12100.pdf). The results don't look great, but to be fair
   the paper also has some artifacts.
 
+---
+
+### Example outputs
+
+![Example Output Gif](examples/example.gif)
+
+- Collecting datasets for this is difficult. If you have a dataset that you'd like contributed,
+  add _a script to download it_ to the `data/` directory!
+
 ## Contributing
 
 If you would like to contribute, feel free to submit a PR, but I may be somewhat strict,

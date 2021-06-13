@@ -29,10 +29,10 @@ def arguments():
   a.add_argument("-d", "--data", help="path to data", required=True)
   a.add_argument(
     "--data-kind", help="Kind of data to load", default="original",
-    choices=["original", "single_video", "dnerf", "pixel-single"],
+    choices=["original", "single_video", "dnerf", "pixel-single", "shiny"],
   )
   a.add_argument(
-    "--derive_kind", help="Attempt to derive the kind if a single file is given",
+    "--derive-kind", help="Attempt to derive the kind if a single file is given",
     action="store_false",
   )
   # various size arguments
@@ -58,7 +58,7 @@ def arguments():
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
   a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
   a.add_argument("--sharpen", help="Sharpen before loss comparison", action="store_true")
-  a.add_argument("--regularize-latent", help="L2 regularize tlatent codes", action="store_true")
+  a.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -79,6 +79,7 @@ def arguments():
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
+  a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
 
 
   cam = a.add_argument_group("camera parameters")
@@ -145,9 +146,7 @@ def load(args, training=True):
       args.data, training=training, normalize=False, size=size, device=device
     )
   elif kind == "dnerf":
-    return src.loaders.dnerf(
-      args.data, training=training, normalize=False, size=size, device=device
-    )
+    return src.loaders.dnerf(args.data, training=training, size=size, device=device)
   elif kind == "single_video":
     return src.loaders.single_video(args.data)
   elif kind == "pixel-single":
@@ -155,6 +154,9 @@ def load(args, training=True):
     setattr(args, "img", img)
     args.batch_size = 1
     return img, cam
+  elif kind == "shiny":
+    src.loaders.shiny(args.data)
+    raise NotImplementedError()
   else: raise NotImplementedError(kind)
 
 def sqr(x): return x * x
@@ -194,6 +196,8 @@ def train(model, cam, labels, opt, args, sched=None):
 
   next_idxs = lambda _: random.sample(range(len(cam)), batch_size)
   if args.serial_idxs: next_idxs = lambda i: [i%len(cam)] * batch_size
+  #next_idxs = lambda i: [i%10] * batch_size # DEBUG
+
   losses = []
   for i in iters:
     opt.zero_grad()
@@ -232,8 +236,8 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.nerf_eikonal:
       loss = loss + 1e-3 * model.nerf.eikonal_loss
       display["n-eik"] = f"{model.nerf.eikonal_loss:.02f}"
-    if args.regularize_latent:
-      loss = loss + model.nerf.latent_l2_loss
+    if args.latent_l2_weight > 0:
+      loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
     # experiment with emptying the model at the beginning
     if i < args.n_sparsify_alpha: loss = loss + (model.nerf.alpha - 0.5).square().mean()
 
@@ -303,7 +307,7 @@ def load_mip(args):
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
-  if args.model != "ae": args.regularize_latent = False
+  if args.model != "ae": args.latent_l2_weight = 0
   kwargs = {
     "mip": load_mip(args),
     "out_features": args.feature_space,
@@ -322,8 +326,10 @@ def load_model(args):
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
 
-  if args.model == "ae" and args.regularize_latent:
+  if args.model == "ae" and args.latent_l2_weight > 0:
     model.set_regularize_latent()
+
+  if args.mpi: model = MPI(canonical=model, device=device)
 
   # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":
