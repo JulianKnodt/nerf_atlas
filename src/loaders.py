@@ -54,9 +54,15 @@ def dnerf(dir=".", normalize=False, training=True, size=256, device="cuda"):
     time = getattr(frame, 'time', float(t) / (n_frames-1))
     times.append(time)
 
+  assert(sorted(times) == times), "Internal: assume times are sorted"
+  # TODO sort by time if not already sorted.
+
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
   times = torch.tensor(times, device=device)
+
+  # XXX experiment below
+  exp_imgs = exp_imgs.pow(times[:, None, None, None].exp())
 
   return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal)
 
@@ -69,11 +75,12 @@ def shiny(path, training=True, size=256, device="cuda"):
   shape = 5
   if os.path.isfile(os.path.join(path, 'hwf_cxcy.npy')):
     shape = 4
-    #h, w, fx, fy, cx, cy
-    intrinsic_arr = np.load(os.path.join(path, 'hwf_cxcy.npy'))
+    [h,w,fx,fy,cx,cy] = np.load(os.path.join(path, 'hwf_cxcy.npy'))
+    assert(fx == fy), "Internal: assumed that focal x and focal y equal"
   else: raise NotImplementedError()
-  poses = poses_arr[:, :-2].reshape([-1, 3, shape]).transpose([1,2,0])
-  bds = poses_arr[:, -2:].transpose([1,0])
+  poses = poses_arr[:, :-2].reshape([-1, 3, shape])
+  # bds is near, far
+  bds = poses_arr[:, -2:]
 
   img_dir = os.path.join(path, 'images')
   assert(os.path.exists(img_dir))
@@ -81,12 +88,9 @@ def shiny(path, training=True, size=256, device="cuda"):
     os.path.join(img_dir, f) for f in sorted(os.listdir(img_dir)) \
     if f.endswith('JPG') or f.endswith('jpg') or f.endswith('png')
   ]
-  def imread(f): return imageio.imread(f, ignoregamma=f.endswith('png'))
-  exit()
-  imgs = np.stack([imread(f)[...,:3]/255. for f in img_files], axis=-1)
-  poses, bds, intrinsic_arr, imgs
+  imgs = torch.stack([load_image(f, (size, size)) for f in img_files], dim=0).to(device)
   raise NotImplementedError("TODO get camera from poses, bds")
-  return
+  return imgs, cameras.NeRFCamera(poses, focal=fx)
 
 def single_video(path, training=True, size=256, device="cuda"):
   frames, _, _ = torchvision.io.read_video(path, pts_unit='sec')

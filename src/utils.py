@@ -149,8 +149,7 @@ def count_parameters(params): return sum(p.numel() for p in params)
 
 def load_image(src, resize=None):
   img = Image.open(src)
-  if resize is not None:
-    img = img.resize(resize)
+  if resize is not None: img = img.resize(resize)
   return torch.from_numpy(np.array(img, dtype=float)/255).float()
 
 # [-1, 1] -> [-pi/2, pi/2]

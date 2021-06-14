@@ -40,7 +40,6 @@ def arguments():
   a.add_argument(
     "--render-size", help="size to render images at w/o upsampling", type=int, default=16
   )
-  a.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
 
   a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
   a.add_argument("--batch-size", help="size of each training batch", type=int, default=8)
@@ -81,6 +80,11 @@ def arguments():
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
 
+  dnerf = a.add_argument_group("dnerf")
+  dnerf.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
+  dnerf.add_argument(
+    "--dnerf-tf-smooth-weight", help="L2 smooth dnerf tf", type=float, default=0,
+  )
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -240,6 +244,8 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
     # experiment with emptying the model at the beginning
     if i < args.n_sparsify_alpha: loss = loss + (model.nerf.alpha - 0.5).square().mean()
+    if args.dnerf_tf_smooth_weight > 0:
+      loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
 
     update(display)
     losses.append(l2_loss)
@@ -335,6 +341,7 @@ def load_model(args):
   if args.data_kind == "dnerf":
     constructor = nerf.DynamicNeRFAE if args.dnerfae else nerf.DynamicNeRF
     model = constructor(canonical=model, device=device).to(device)
+    if args.dnerf_tf_smooth_weight > 0: model.set_smooth_delta()
 
   if args.data_kind == "pixel-single":
     encoder = SpatialEncoder().to(device)

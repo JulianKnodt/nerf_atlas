@@ -69,11 +69,10 @@ class SkipConnMLP(nn.Module):
     in_size=3, out=3,
 
     skip=3,
-    device="cuda",
     activation = nn.LeakyReLU(inplace=True),
     latent_size=0,
 
-    enc: Optional[Union[FourierEncoder, PositionalEncoder]] = None,
+    enc: Optional[Union[FourierEncoder, PositionalEncoder, NNEncoder]] = None,
 
     # Record the last layers activation
     last_layer_act = False,
@@ -83,7 +82,6 @@ class SkipConnMLP(nn.Module):
   ):
     super(SkipConnMLP, self).__init__()
     self.in_size = in_size
-    assert(type(freqs) == int)
     map_size = 0
 
     self.enc = enc
@@ -137,6 +135,12 @@ class SkipConnMLP(nn.Module):
     if self.last_layer_act: setattr(self, "last_layer_out", x.reshape(batches + (-1,)))
     out_size = self.out.out_features
     return self.out(self.activation(x)).reshape(batches + (out_size,))
+  # smoothness of this sample along a given dimension for the last axis of a tensor
+  def l2_smoothness(self, sample, values=None, noise=1e-1, dim=-1):
+    if values is None: values = self(sample)
+    adjusted = sample + noise * torch.rand_like(sample)
+    adjusted = self(adjusted)
+    return (values-adjusted).square().mean()
 
 class Upsampler(nn.Module):
   def __init__(

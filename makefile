@@ -9,10 +9,16 @@ food: clean
 
 # note: l1 loss completely breaks dnerf
 dnerf: clean
-	python3 -O runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 32 \
-	--crop --epochs 50_000  --save models/djj_ae.pt --model ae --crop --batch-size 4 \
+	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 32 \
+	--crop --epochs 30_000  --save models/djj_ae.pt --model ae --crop --batch-size 4 \
+	--crop-size 20 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
+  --dnerf-tf-smooth-weight 1e-4 --load models/djj_ae.pt
+
+dnerfae: clean
+	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 32 \
+	--crop --epochs 30_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 4 \
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-  --load models/djj_ae.pt --decay 1e-6
+  --dnerfae --load models/djj_ae_gamma.pt
 
 sdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \
@@ -25,6 +31,7 @@ original: clean
 	--render-size 64 --crop --epochs 80_000 --save models/lego.pt \
 	--near 2 --far 6 --batch-size 5 --crop-size 26 --model plain -lr 5e-4 \
 	--l1-loss --valid-freq 499 --no-sched --load models/lego.pt #--omit-bg
+
 test_original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--render-size 64 --crop --epochs 0 --near 2 --far 6 --batch-size 5 \

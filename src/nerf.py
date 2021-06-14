@@ -144,8 +144,9 @@ class CommonNeRF(nn.Module):
     if with_sky_mlp:
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3,
+        # TODO add encoder here
         num_layers=3, hidden_size=32, device=device, xavier_init=True,
-      ).to(device)
+      )
 
     self.record_depth = record_depth
     self.depth = None
@@ -227,13 +228,10 @@ class TinyNeRF(CommonNeRF):
     self.estim = SkipConnMLP(
       in_size=3, out=1 + out_features,
       latent_size = self.total_latent_size(),
-
       num_layers=6, hidden_size=80,
 
       xavier_init=True,
-
-      device=device,
-    ).to(device)
+    )
 
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
@@ -273,9 +271,7 @@ class PlainNeRF(CommonNeRF):
       enc=FourierEncoder(input_dims=3, device=device),
 
       num_layers = 6, hidden_size = 128, xavier_init=True,
-
-      device=device,
-    ).to(device)
+    )
 
     self.second = SkipConnMLP(
       in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
@@ -283,9 +279,7 @@ class PlainNeRF(CommonNeRF):
       enc=FourierEncoder(input_dims=2, device=device),
 
       num_layers=5, hidden_size=64, xavier_init=True,
-
-      device=device,
-    ).to(device)
+    )
 
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
@@ -342,26 +336,20 @@ class NeRFAE(CommonNeRF):
       num_layers=5, hidden_size=128,
       enc=FourierEncoder(input_dims=3, device=device),
       xavier_init=True,
-
-      device=device,
-    ).to(device)
+    )
 
     self.density_tform = SkipConnMLP(
       # a bit hacky, but pass it in with no encodings since there are no additional inputs.
       in_size=encoding_size, out=1, latent_size=0,
       num_layers=5, hidden_size=64, xavier_init=True,
-
-      device=device,
-    ).to(device)
+    )
 
     self.rgb = SkipConnMLP(
       in_size=2, out=out_features, latent_size=encoding_size,
 
       num_layers=5, hidden_size=64, xavier_init=True,
       enc=FourierEncoder(input_dims=2, device=device),
-
-      device=device,
-    ).to(device)
+    )
     self.encoding_size = encoding_size
     self.regularize_latent = False
 
@@ -407,20 +395,24 @@ class NeRFAE(CommonNeRF):
 class DynamicNeRF(nn.Module):
   def __init__(self, canonical: CommonNeRF, device="cuda"):
     super().__init__()
+    self.canonical = canonical.to(device)
 
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz
       in_size=4, out=3,
 
       num_layers = 5, hidden_size = 128,
-      enc=NNEncoder(input_dims=4, device=device), device=device,
+      enc=NNEncoder(input_dims=4, device=device),
+      activation=nn.Softplus(),
       zero_init=True,
-    ).to(device)
+    )
     self.time_noise_std = 1e-2
-    self.canonical = canonical.to(device)
+    self.smooth_delta = False
+    self.delta_smoothness = 0
 
   @property
   def nerf(self): return self.canonical
+  def set_smooth_delta(self): setattr(self, "smooth_delta", True)
   def forward(self, rays_t):
     rays, t = rays_t
     device=rays.device
@@ -434,8 +426,11 @@ class DynamicNeRF(nn.Module):
 
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
 
-    dp = self.delta_estim(torch.cat([pts, t], dim=-1))
+    pts_t = torch.cat([pts, t], dim=-1)
+    dp = self.delta_estim(pts_t)
     dp = torch.where(t.abs() < 1e-6, torch.zeros_like(pts), dp)
+    if self.training and self.smooth_delta:
+      self.delta_smoothness = self.delta_estim.l2_smoothness(pts_t, dp)
     pts = pts + dp
     return self.canonical.from_pts(pts, ts, r_o, r_d)
 
@@ -450,21 +445,27 @@ class DynamicNeRFAE(nn.Module):
       # x,y,z,t -> dx, dy, dz
       in_size=4, out=3,
       num_layers = 5, hidden_size = 128,
+      enc=NNEncoder(input_dims=4, device=device),
 
-      device=device,
-    ).to(device)
+      activation=nn.Softplus(), zero_init=True,
+    )
 
     self.delta_enc_estim = SkipConnMLP(
       in_size=4, out=canonical.encoding_size,
 
       num_layers = 3, hidden_size = 128,
+      enc=NNEncoder(input_dims=4, device=device),
 
-      device=device,
       # start assuming that there is no transformation between material type
-      zero_init=True,
+      activation=nn.Softplus(), zero_init=True,
     )
+    self.smooth_delta = False
+    self.tf_smoothness = 0
+    self.smooth_delta_enc = False
+    self.enc_smoothness = 0
 
-
+  @property
+  def nerf(self): return self.canonical
   def forward(self, rays_t):
     rays, t = rays_t
     device=rays.device
