@@ -14,11 +14,18 @@ dnerf: clean
 	--crop-size 20 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
   --dnerf-tf-smooth-weight 1e-4 --load models/djj_ae.pt
 
+# testing out dnerfae dataset on dnerf
+dnerf_dyn: clean
+	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 64 \
+	--crop --epochs 80_000  --save models/djj_gamma.pt --model ae --crop --batch-size 1 \
+	--crop-size 40 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
+	--serial-idxs --time-gamma #--load models/djj_gamma.pt
+
 dnerfae: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 32 \
-	--crop --epochs 30_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 4 \
-	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-  --dnerfae --load models/djj_ae_gamma.pt
+	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 64 \
+	--crop --epochs 80_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 1 \
+	--crop-size 40 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
+	--dnerfae --serial-idxs --time-gamma --load models/djj_ae_gamma.pt --decay 1e-6
 
 sdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \

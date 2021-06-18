@@ -35,7 +35,7 @@ def original(dir=".", normalize=True, training=True, size=256, device="cuda"):
 
   return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal)
 
-def dnerf(dir=".", normalize=False, training=True, size=256, device="cuda"):
+def dnerf(dir=".", normalize=False, training=True, size=256, time_gamma=True, device="cuda"):
   kind = "train" if training else "test"
   tfs = json.load(open(dir + f"transforms_{kind}.json"))
   exp_imgs = []
@@ -61,8 +61,9 @@ def dnerf(dir=".", normalize=False, training=True, size=256, device="cuda"):
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
   times = torch.tensor(times, device=device)
 
-  # XXX experiment below
-  exp_imgs = exp_imgs.pow(times[:, None, None, None].exp())
+  # This is for testing out DNeRFAE, apply a gamma transform based on the time.
+  if time_gamma:
+    exp_imgs = exp_imgs.pow((2 * times[:, None, None, None] - 1).exp())
 
   return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal)
 

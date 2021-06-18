@@ -107,6 +107,7 @@ class CommonNeRF(nn.Module):
     per_point_latent_size: int = 0,
     use_fat_sigmoid: bool =True,
     eikonal_loss: bool = False,
+    unisurf_loss: bool = False,
 
     with_sky_mlp: bool = False,
 
@@ -140,6 +141,9 @@ class CommonNeRF(nn.Module):
     self.rec_eikonal_loss = eikonal_loss
     self.eikonal_loss = 0
 
+    self.rec_unisurf_loss = unisurf_loss
+    self.unisurf_loss = 0
+
     self.with_sky_mlp = with_sky_mlp
     if with_sky_mlp:
       self.sky_mlp = SkipConnMLP(
@@ -154,8 +158,22 @@ class CommonNeRF(nn.Module):
   def forward(self, _x): raise NotImplementedError()
 
   def record_eikonal_loss(self, pts, density):
+    if not self.rec_eikonal_loss or not self.training: return
     self.eikonal_loss = eikonal_loss(autograd(pts, density))
     return self.eikonal_loss
+
+  def record_unisurf_loss(self, pts, alpha):
+    if not self.rec_unisurf_loss or not self.training: return
+    alpha = alpha.unsqueeze(-1)
+    normals, = torch.autograd.grad(
+      inputs=pts, outputs=alpha, grad_outputs=torch.ones_like(alpha), create_graph=True
+    )
+    self.unisurf_loss, = torch.autograd.grad(
+      inputs=normals, outputs=alpha, grad_outputs=torch.ones_like(alpha),
+      only_inputs=True, allow_unused=True,
+    )
+    self.unisurf_loss = self.unisurf_loss or 0
+    return self.unisurf_loss
 
   def total_latent_size(self) -> int:
     return self.mip_size() + \
@@ -246,7 +264,7 @@ class TinyNeRF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
-    if self.rec_eikonal_loss: self.record_eikonal_loss(pts, density)
+    self.record_eikonal_loss(pts, density)
 
     self.alpha, weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(weights, self.feat_act(feats))
@@ -298,7 +316,7 @@ class PlainNeRF(CommonNeRF):
     first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
 
     density = first_out[..., 0]
-    if self.rec_eikonal_loss: self.record_eikonal_loss(pts, density)
+    self.record_eikonal_loss(pts, density)
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
@@ -367,7 +385,7 @@ class NeRFAE(CommonNeRF):
     encoded = self.compute_encoded(pts, ts, r_o, r_d)
     if self.regularize_latent:
       self.latent_l2_loss = torch.linalg.norm(encoded, dim=-1).square().mean()
-    return self.from_encoded(encoded, ts, r_d)
+    return self.from_encoded(encoded, ts, r_d, pts)
 
   def compute_encoded(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
@@ -378,9 +396,9 @@ class NeRFAE(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     return self.encode(pts, latent if latent.shape[-1] != 0 else None)
-  def from_encoded(self, encoded, ts, r_d):
+  def from_encoded(self, encoded, ts, r_d, pts):
     density = self.density_tform(encoded).squeeze(-1)
-    if self.rec_eikonal_loss: self.record_eikonal_loss(pts, density)
+    self.record_eikonal_loss(pts, density)
     if self.noise_std > 0 and self.training:
       density = density + torch.randn_like(density) * self.noise_std
 
@@ -389,6 +407,8 @@ class NeRFAE(CommonNeRF):
     rgb = self.feat_act(self.rgb(elev_azim_r_d, encoded))
 
     self.alpha, weights = alpha_from_density(density, ts, r_d)
+    self.record_unisurf_loss(pts, self.alpha)
+
     return volumetric_integrate(weights, rgb)
 
 # Dynamic NeRF for multiple frams
@@ -439,53 +459,41 @@ class DynamicNeRFAE(nn.Module):
   def __init__(self, canonical: NeRFAE, device="cuda"):
     super().__init__()
     assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
-    self.canonical = canonical.to(device)
+    self.canon = canonical.to(device)
 
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz
-      in_size=4, out=3,
-      num_layers = 5, hidden_size = 128,
+      in_size=4, out=3 + canonical.encoding_size,
+      num_layers = 6, hidden_size = 128,
       enc=NNEncoder(input_dims=4, device=device),
 
       activation=nn.Softplus(), zero_init=True,
     )
 
-    self.delta_enc_estim = SkipConnMLP(
-      in_size=4, out=canonical.encoding_size,
-
-      num_layers = 3, hidden_size = 128,
-      enc=NNEncoder(input_dims=4, device=device),
-
-      # start assuming that there is no transformation between material type
-      activation=nn.Softplus(), zero_init=True,
-    )
     self.smooth_delta = False
     self.tf_smoothness = 0
-    self.smooth_delta_enc = False
-    self.enc_smoothness = 0
 
   @property
-  def nerf(self): return self.canonical
+  def nerf(self): return self.canon
+  def set_smooth_delta(self): setattr(self, "smooth_delta", True)
   def forward(self, rays_t):
     rays, t = rays_t
     device=rays.device
 
     pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
+      rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
     )
+    if self.canon.rec_eikonal_loss or self.canon.rec_unisurf_loss: pts.requires_grad_()
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
     # compute encoding using delta positions at a given time
     pts_t = torch.cat([pts, t], dim=-1)
-    dp = self.delta_estim(pts_t)
-    dp = torch.where(t.abs() < 1e-6, torch.zeros_like(pts), dp)
-    encoded = self.canonical.compute_encoded(pts + dp, ts, r_o, r_d)
-
-    # compute encoding delta at a given time
-    d_enc = self.delta_enc_estim(pts_t)
-    d_enc = torch.where(t.abs() < 1e-6, torch.zeros_like(d_enc), d_enc)
+    delta = self.delta_estim(pts_t)
+    delta = torch.where(t.abs() < 1e-6, torch.zeros_like(delta), delta)
+    dp, d_enc = delta.split([3, self.canon.encoding_size], dim=-1)
+    encoded = self.canon.compute_encoded(pts + dp, ts, r_o, r_d)
 
     # TODO is this best as a sum, or is some other kind of tform better?
-    return self.canonical.from_encoded(encoded + d_enc, ts, r_d)
+    return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
 
 class SinglePixelNeRF(nn.Module):
   def __init__(

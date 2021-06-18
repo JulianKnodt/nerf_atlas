@@ -51,6 +51,7 @@ def arguments():
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
   a.add_argument("--nerf-eikonal", help="Add eikonal loss for NeRF", action="store_true")
+  a.add_argument("--unisurf-loss", help="Add unisurf loss", action="store_true")
   a.add_argument("--fat-sigmoid", help="Use wider sigmoid activation for features", action="store_false")
   a.add_argument("--n-sparsify-alpha", help="Epochs for sparsifying alpha", type=int, default=0)
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
@@ -85,6 +86,7 @@ def arguments():
   dnerf.add_argument(
     "--dnerf-tf-smooth-weight", help="L2 smooth dnerf tf", type=float, default=0,
   )
+  dnerf.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -150,7 +152,7 @@ def load(args, training=True):
       args.data, training=training, normalize=False, size=size, device=device
     )
   elif kind == "dnerf":
-    return src.loaders.dnerf(args.data, training=training, size=size, device=device)
+    return src.loaders.dnerf(args.data, training=training, size=size, time_gamma=args.time_gamma, device=device)
   elif kind == "single_video":
     return src.loaders.single_video(args.data)
   elif kind == "pixel-single":
@@ -166,7 +168,7 @@ def load(args, training=True):
 def sqr(x): return x * x
 
 def save_losses(losses):
-  window = min(500, len(losses))
+  window = min(250, len(losses))
   losses = np.convolve(losses, np.ones(window)/window, mode='valid')
   plt.plot(range(len(losses)), losses)
   plt.savefig("outputs/training_loss.png", bbox_inches='tight')
@@ -246,6 +248,7 @@ def train(model, cam, labels, opt, args, sched=None):
     if i < args.n_sparsify_alpha: loss = loss + (model.nerf.alpha - 0.5).square().mean()
     if args.dnerf_tf_smooth_weight > 0:
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
+    if model.nerf.unisurf_loss > 0: loss = loss + model.nerf.unisurf_loss
 
     update(display)
     losses.append(l2_loss)
@@ -325,6 +328,7 @@ def load_model(args):
     "per_point_latent_size": (1 + 3 + 64) if args.sdf else 0,
     "use_fat_sigmoid": args.fat_sigmoid,
     "eikonal_loss": args.nerf_eikonal,
+    "unisurf_loss": args.unisurf_loss,
   }
   if args.model == "tiny": constructor = nerf.TinyNeRF
   elif args.model == "plain": constructor = nerf.PlainNeRF
