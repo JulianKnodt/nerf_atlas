@@ -199,6 +199,52 @@ class Upsampler(nn.Module):
       upscaled = resized_old + combine(curr)
     return upscaled.permute(0,2,3,1)
 
+# An update operator from https://github.com/princeton-vl/RAFT/blob/master/core/update.py
+# takes as input a vector, with some hidden state and returns iterative updates on it.
+class UpdateOperator(nn.Module):
+  def __init__(
+    self,
+    in_size: int = 3,
+    out_size: Optional[int] = None,
+    hidden_size: int = 32,
+    iters: int = 3,
+  ):
+    super().__init__()
+    self.hidden_size = hs = hidden_size
+    self.convz = nn.Conv3d(hs+in_size, hs, kernel_size=3, padding=1)
+    self.convr = nn.Conv3d(hs+in_size, hs, kernel_size=3, padding=1)
+    self.convq = nn.Conv3d(hs+in_size, hs, kernel_size=3, padding=1)
+
+    self.conv1 = nn.Conv3d(hs, hs, 3, padding=1)
+    self.conv2 = nn.Conv3d(hs, in_size, 3, padding=1)
+    self.relu = nn.LeakyReLU(inplace=True)
+
+    assert(iters > 0), "Must have at least one iteration"
+    self.iters = iters
+    self.out_size = out_size or in_size
+
+  def forward(self, x, h=None):
+    x = x.permute(1,4,0,2,3)
+    if h is None:
+      shape = list(x.shape)
+      shape[1] = self.hidden_size
+      h = torch.zeros(shape, device=x.device, dtype=x.dtype)
+    else: raise NotImplementedError("TODO Have to permute h")
+    init_x = x
+    # total change in x
+    for i in range(self.iters):
+      hx = torch.cat([x.detach(), h], dim=1)
+      z = self.convz(hx).sigmoid()
+      r = self.convr(hx).sigmoid()
+      q = self.convq(torch.cat([r*h, x], dim=1)).sigmoid()
+
+      h = (1-z) * h + z * q
+      dx = self.conv2(self.relu(self.conv1(h)))
+      x = x + dx
+    # returns total delta, rather than the shifted input
+    out = (x - init_x).permute(2,0,3,4,1)[..., :self.out_size]
+    return out
+
 class SpatialEncoder(nn.Module):
   # Encodes an image into a latent vector, for use in PixelNeRF
   def __init__(

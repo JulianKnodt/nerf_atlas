@@ -66,7 +66,7 @@ def arguments():
   )
   a.add_argument(
     "--model", help="which model do we want to use", type=str,
-    choices=["tiny", "plain", "ae"], default="plain",
+    choices=["tiny", "plain", "ae", "unisurf"], default="plain",
   )
   # this default for LR seems to work pretty well?
   a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
@@ -87,6 +87,7 @@ def arguments():
     "--dnerf-tf-smooth-weight", help="L2 smooth dnerf tf", type=float, default=0,
   )
   dnerf.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
+  dnerf.add_argument("--gru-flow", help="Use GRU for Δx", action="store_true")
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -100,7 +101,14 @@ def arguments():
   rprt.add_argument(
     "--valid-freq", help="how often validation images are generated", type=int, default=500,
   )
+  rprt.add_argument("--nosave", help="do not save", action="store_true")
   rprt.add_argument("--load", help="model to load from", type=str)
+  rprt.add_argument(
+    "--loss-window", help="# epochs to smooth loss over", type=int, default=250
+  )
+
+  meta = a.add_argument_group("meta runner parameters")
+  meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
 
   return a.parse_args()
 
@@ -167,8 +175,8 @@ def load(args, training=True):
 
 def sqr(x): return x * x
 
-def save_losses(losses):
-  window = min(250, len(losses))
+def save_losses(losses, window=250):
+  window = min(window, len(losses))
   losses = np.convolve(losses, np.ones(window)/window, mode='valid')
   plt.plot(range(len(losses)), losses)
   plt.savefig("outputs/training_loss.png", bbox_inches='tight')
@@ -261,11 +269,15 @@ def train(model, cam, labels, opt, args, sched=None):
       with torch.no_grad():
         ref0 = ref[0]
         acc = model.nerf.acc()[0,...,None].expand_as(ref0)
-        save_plot(f"outputs/valid_{i:05}.png", ref0, out[0].clamp(min=0, max=1), acc)
+        save_plot(
+          f"outputs/valid_{i:05}.png",
+          ref0, out[0].clamp(min=0, max=1),
+          acc.clamp(min=0, max=1)
+        )
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
-      save_losses(losses)
-  save_losses(losses)
+      save_losses(losses, args.loss_window)
+  save_losses(losses, args.loss_window)
 
 def test(model, cam, labels, args, training: bool = True):
   times = None
@@ -333,6 +345,7 @@ def load_model(args):
   if args.model == "tiny": constructor = nerf.TinyNeRF
   elif args.model == "plain": constructor = nerf.PlainNeRF
   elif args.model == "ae": constructor = nerf.NeRFAE
+  elif args.model == "unisurf": constructor = nerf.Unisurf
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
 
@@ -344,7 +357,11 @@ def load_model(args):
   # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":
     constructor = nerf.DynamicNeRFAE if args.dnerfae else nerf.DynamicNeRF
-    model = constructor(canonical=model, device=device).to(device)
+    model = constructor(
+      canonical=model,
+      gru_flow=args.gru_flow,
+      device=device
+    ).to(device)
     if args.dnerf_tf_smooth_weight > 0: model.set_smooth_delta()
 
   if args.data_kind == "pixel-single":
@@ -365,16 +382,20 @@ def load_model(args):
     ).to(device)
     # stick a neural upsampling block afterwards
     model = nn.Sequential(model, upsampler, nn.Sigmoid())
-    setattr(model, "nerf", og_model)
+    #setattr(model, "nerf", og_model) # TODO how to specify this?
 
   if args.data_parallel:
     model = nn.DataParallel(model)
     setattr(model, "nerf", og_model)
+
+  if args.torchjit: model = torch.jit.script(model)
   return model
 
 def save(model, args):
+  if args.nosave: return
   print(f"Saved to {args.save}")
-  torch.save(model, args.save)
+  if args.torchjit: raise NotImplementedError()
+  else: torch.save(model, args.save)
   if args.log is not None:
     setattr(args, "curr_time", datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
     with open(args.log, 'w') as f:

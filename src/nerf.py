@@ -3,7 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-from .neural_blocks import ( SkipConnMLP, FourierEncoder, PositionalEncoder, NNEncoder )
+from .neural_blocks import (
+  SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder
+)
 from .utils import ( dir_to_elev_azim, autograd, eikonal_loss )
 
 @torch.jit.script
@@ -413,19 +415,22 @@ class NeRFAE(CommonNeRF):
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
-  def __init__(self, canonical: CommonNeRF, device="cuda"):
+  def __init__(self, canonical: CommonNeRF, gru_flow:bool=False, device="cuda"):
     super().__init__()
     self.canonical = canonical.to(device)
 
-    self.delta_estim = SkipConnMLP(
-      # x,y,z,t -> dx, dy, dz
-      in_size=4, out=3,
+    if gru_flow:
+      self.delta_estim = UpdateOperator(in_size=4, out_size=3, hidden_size=32)
+    else:
+      self.delta_estim = SkipConnMLP(
+        # x,y,z,t -> dx, dy, dz
+        in_size=4, out=3,
 
-      num_layers = 5, hidden_size = 128,
-      enc=NNEncoder(input_dims=4, device=device),
-      activation=nn.Softplus(),
-      zero_init=True,
-    )
+        num_layers = 5, hidden_size = 128,
+        enc=NNEncoder(input_dims=4, device=device),
+        activation=nn.Softplus(),
+        zero_init=True,
+      )
     self.time_noise_std = 1e-2
     self.smooth_delta = False
     self.delta_smoothness = 0
@@ -456,7 +461,7 @@ class DynamicNeRF(nn.Module):
 
 # Dynamic NeRFAE for multiple framss with changing materials
 class DynamicNeRFAE(nn.Module):
-  def __init__(self, canonical: NeRFAE, device="cuda"):
+  def __init__(self, canonical: NeRFAE, gru_flow: bool=False, device="cuda"):
     super().__init__()
     assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
     self.canon = canonical.to(device)
@@ -494,6 +499,51 @@ class DynamicNeRFAE(nn.Module):
 
     # TODO is this best as a sum, or is some other kind of tform better?
     return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
+
+class Unisurf(CommonNeRF):
+  def __init__(
+    self,
+    intermediate_size: int = 32, out_features: int = 3,
+    device: torch.device = "cuda",
+    **kwargs,
+  ):
+    super().__init__(**kwargs, device=device)
+    self.latent_size = self.total_latent_size()
+
+    self.alpha_pred = SkipConnMLP(
+      in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
+      enc=NNEncoder(input_dims=3, device=device),
+      num_layers = 6, hidden_size = 128, xavier_init=True,
+    )
+
+    self.second = SkipConnMLP(
+      in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
+      enc=NNEncoder(input_dims=2, device=device),
+      num_layers=5, hidden_size=64, xavier_init=True,
+    )
+
+  def forward(self, rays):
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+    )
+    return self.from_pts(pts, ts, r_o, r_d)
+
+  def from_pts(self, pts, ts, r_o, r_d):
+    latent = self.curr_latent(pts.shape)
+    mip_enc = self.mip_encoding(r_o, r_d, ts)
+    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+
+    first_out = self.alpha_pred(pts, latent if latent.shape[-1] != 0 else None)
+
+    self.alpha = fat_sigmoid(first_out[..., 0])
+    intermediate = first_out[..., 1:]
+
+    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
+    rgb = self.feat_act(self.second(
+      elev_azim_r_d, torch.cat([intermediate, latent], dim=-1)
+    ))
+    weights = self.alpha * cumuprod_exclusive(1.0 - self.alpha + 1e-10)
+    return volumetric_integrate(weights, rgb)
 
 class SinglePixelNeRF(nn.Module):
   def __init__(
