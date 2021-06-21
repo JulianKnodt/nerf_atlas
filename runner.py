@@ -103,12 +103,11 @@ def arguments():
   )
   rprt.add_argument("--nosave", help="do not save", action="store_true")
   rprt.add_argument("--load", help="model to load from", type=str)
-  rprt.add_argument(
-    "--loss-window", help="# epochs to smooth loss over", type=int, default=250
-  )
+  rprt.add_argument("--loss-window", help="# epochs to smooth loss over", type=int, default=250)
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
+  meta.add_argument("--train-imgs", help="# training examples", type=int, default=-1)
 
   return a.parse_args()
 
@@ -160,7 +159,9 @@ def load(args, training=True):
       args.data, training=training, normalize=False, size=size, device=device
     )
   elif kind == "dnerf":
-    return src.loaders.dnerf(args.data, training=training, size=size, time_gamma=args.time_gamma, device=device)
+    return src.loaders.dnerf(
+      args.data, training=training, size=size, time_gamma=args.time_gamma, device=device,
+    )
   elif kind == "single_video":
     return src.loaders.single_video(args.data)
   elif kind == "pixel-single":
@@ -411,6 +412,10 @@ def main():
   seed(args.seed)
 
   labels, cam = load(args)
+  if args.train_imgs > 0:
+    labels = labels[:args.train_imgs, ...]
+    cam = cam[:args.train_imgs, ...]
+
   model = load_model(args) if args.load is None else torch.load(args.load)
 
   parameters = model.parameters()

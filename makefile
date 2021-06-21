@@ -25,13 +25,13 @@ dnerf_dyn: clean
 	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 64 \
 	--crop --epochs 80_000  --save models/djj_gamma.pt --model ae --crop --batch-size 1 \
 	--crop-size 40 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-	--serial-idxs --time-gamma #--load models/djj_gamma.pt
+	--serial-idxs --time-gamma --loss-window 750 #--load models/djj_gamma.pt
 
 dnerfae: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 64 \
-	--crop --epochs 80_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
+	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 128 \
+	--crop --epochs 50_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
 	--crop-size 32 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-	--dnerfae --time-gamma --load models/djj_ae_gamma.pt # --serial-idxs
+	--dnerfae --time-gamma --load models/djj_ae_gamma.pt --omit-bg #--serial-idxs
 
 sdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \

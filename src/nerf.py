@@ -493,7 +493,7 @@ class DynamicNeRFAE(nn.Module):
     # compute encoding using delta positions at a given time
     pts_t = torch.cat([pts, t], dim=-1)
     delta = self.delta_estim(pts_t)
-    delta = torch.where(t.abs() < 1e-6, torch.zeros_like(delta), delta)
+    #delta = torch.where(t.abs() < 1e-6, torch.zeros_like(delta), delta)
     dp, d_enc = delta.split([3, self.canon.encoding_size], dim=-1)
     encoded = self.canon.compute_encoded(pts + dp, ts, r_o, r_d)
 
