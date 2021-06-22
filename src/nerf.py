@@ -477,6 +477,7 @@ class DynamicNeRFAE(nn.Module):
 
     self.smooth_delta = False
     self.tf_smoothness = 0
+    self.time_noise_std = 1e-3
 
   @property
   def nerf(self): return self.canon
@@ -489,6 +490,8 @@ class DynamicNeRFAE(nn.Module):
       rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
     )
     if self.canon.rec_eikonal_loss or self.canon.rec_unisurf_loss: pts.requires_grad_()
+    # small deviation for regularization
+    if self.training and self.time_noise_std > 0: t = t + self.time_noise_std * torch.randn_like(t)
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
     # compute encoding using delta positions at a given time
     pts_t = torch.cat([pts, t], dim=-1)

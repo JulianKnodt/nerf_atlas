@@ -413,7 +413,8 @@ def main():
 
   labels, cam = load(args)
   if args.train_imgs > 0:
-    labels = labels[:args.train_imgs, ...]
+    if type(labels) == tuple: labels = tuple(l[:args.train_imgs, ...] for l in labels)
+    else: labels = labels[:args.train_imgs, ...]
     cam = cam[:args.train_imgs, ...]
 
   model = load_model(args) if args.load is None else torch.load(args.load)
