@@ -37,36 +37,6 @@ def compute_pts_ts(
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
   return pts, ts, r_o, r_d
 
-def sample_pdf(
-  bins, weights, n_samples: int = 64,
-):
-  print(bins.shape, weights.shape)
-  exit()
-  # TODO test this
-  device=weights.device
-  weights = weights.clamp(min=1e-6)
-  pdf = weights / weights.sum(dim=0, keepdim=True)
-  cdf = torch.cumsum(pdf, dim=0)
-  cdf = torch.cat([torch.zeros_like(cdf[:1]), cdf], dim=0)
-
-  u = torch.rand(cdf.shape[:-1] + (num_samples,), device=device)
-
-  inds = torch.searchsorted(cdf, u, right=True)
-
-  below = (inds-1).clamp(min=0)
-  above = inds.clamp(max=inds.shape[0]-1)
-  inds_g = torch.cat([below, above], dim=-1)
-  gather_shape = (*inds_g.shape[:2], cdf.shape[-1])
-  cdf_g = torch.gather(cdf.unsqueeze(1).expand(gather_shape), 2, inds_g)
-  bins_g = torch.gather(bins.unsqueeze(1).expand(gather_shape), 2, inds_g)
-
-  denom = cdf_g[..., 1] - cdf_g[..., 0]
-  denom = torch.where(denom < 1e-5, torch.ones_like(denom), denom)
-  t = (u - cdf_g[..., 0]) / denom
-  samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
-
-  return samples
-
 @torch.jit.script
 def alpha_from_density(
   density, ts, r_d,
