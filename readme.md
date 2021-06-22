@@ -2,10 +2,33 @@
 
 A repository which contains NeRF and a bunch of extensions to NeRF.
 
+
 Important Note:
 WORK IN PROGRESS, things may be subtly _borken_ 🦮.
 
 ---
+
+# What's a NeRF?
+
+Ne(ural) R(adiance) F(ield)s represent a surface by approximating how much light is blocked at
+each point in space, and the color of the surface that is blocking it. This approximation can be
+used with volumetric rendering to view a surface from new angles.
+
+The original paper implements this idea, and demonstrates its capacity for reconstructing a
+surface or scene from a set of views. It has insanely high quality of reconstruction, but takes
+forever to train, isn't modifiable at all, and takes a stupid amount of memory. In order to
+fix those issues, there are a bunch of different repos which implement single changes to the
+original that give it new capabilities, make it train faster, or give it wings, but
+no projects mix multiple different modifications. This repo is supposed to be a single
+unified interface to many different extensions.  I've implemented a number of other projects,
+but there are more. Please feel free to contribute any you would like!
+
+NeRF is similar to projects like [COLMAP](https://demuc.de/colmap/) in that it can perform
+surface reconstruction from a series of images, but has not yet been shown to be able to scale
+to incredibly large scales while jointly working without prior known camera angles.
+
+The original project is [here](https://www.matthewtancik.com/nerf),
+but math to understand why it works is [here](https://pbr-book.org/3ed-2018/Volume_Scattering).
 
 ## Usage
 
@@ -31,6 +54,7 @@ One note for usage:
 ## Dependencies
 
 PyTorch, NumPy, tqdm, matplotlib.
+
 Install them how you want.
 
 ---
