@@ -14,9 +14,19 @@ python3 runner.py -h
 <All the flags>
 ```
 
+See makefile for example usages. i.e.
+```sh
+make dnerf
+make dnerfae
+make original
+```
+
 One note for usage:
 - I've found that using large crop-size with small number of batches may lead to better
   training.
+- DNeRF is great at reproducing images at training time, but I had trouble getting good test
+  results. I noticed that they have an [additional loss](https://github.com/albertpumarola/D-NeRF/issues/1) in their code,
+  which isn't mentioned in their paper, but it's not clear to me whether it was used.
 
 ## Dependencies
 
@@ -32,18 +42,24 @@ Currently, this repository contains a few extensions on "Plain" NeRF.
 Model Level:
 
 - TinyNeRF: One MLP for both density and output spectrum.
+- PlainNeRF: Same architecture as original, probably different parameters.
 - NeRFAE (NeRF Auto Encoder): Our extension, which encodes every point in space as a vector in a
   latent material space, and derives density and RGB from this latent space. In theory this
   should allow for similar points to be learned more effectively.
 - [D-NeRF](https://arxiv.org/abs/2011.13961) for dynamic scenes, using an MLP to encode a
   positional change.
+  - Convolutional Update Operator based off of [RAFT's](https://arxiv.org/pdf/2003.12039.pdf).
+    Interpolation is definitely not what it's design was intended for, but is more memory
+    efficient.
 - \[WIP\][Pixel NeRF](https://arxiv.org/pdf/2012.02190.pdf) for single image NeRF
   reconstruction.
 
 Encoding:
 
-- [Fourier Features](https://github.com/tancik/fourier-feature-networks) are applied to all
-  low-dimensional inputs. This is always on.
+- Positional Encoding, as in the original paper.
+- [Fourier Features](https://github.com/tancik/fourier-feature-networks).
+- Learned Features based on [Siren](https://arxiv.org/abs/2006.09661): Pass low dimensional
+  features through an MLP and then use `sin` activations. Not sure if it works.
 - [MipNeRF](https://arxiv.org/abs/2103.13415) can be turned on with cylinder or conic volumes.
 
 Training/Efficiency:
@@ -52,7 +68,10 @@ Training/Efficiency:
 - Train on cropped regions of the image for smaller GPUs.
 - Neural Upsampling with latent spaces inspired by
   [GIRAFFE](https://arxiv.org/pdf/2011.12100.pdf). The results don't look great, but to be fair
-  the paper also has some artifacts.
+  the paper also has some artifacts. \*I accidentally broke this while working on other things,
+  but will fix it... eventually.
+
+Note: NeRF is stupid slow.
 
 ---
 
@@ -62,6 +81,10 @@ Training/Efficiency:
 
 - Collecting datasets for this is difficult. If you have a dataset that you'd like contributed,
   add _a script to download it_ to the `data/` directory!
+
+The outputs I've done are low-res because I'm working off a 3GB gpu and NeRF is memory intensive
+during training. That's why I've explored a few different encodings and other tricks to speed it
+up.
 
 ## Contributing
 
