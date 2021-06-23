@@ -111,6 +111,7 @@ def arguments():
   ae = a.add_argument_group("auto encoder parameters")
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
   ae.add_argument("--normalize-latent", help="Ensure latent space has norm 1", action="store_true")
+  ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
 
   return a.parse_args()
 
@@ -351,6 +352,7 @@ def load_model(args):
   elif args.model == "ae":
     constructor = nerf.NeRFAE
     kwargs["normalize_latent"] = args.normalize_latent
+    kwargs["encoding_size"] = args.encoding_size
   elif args.model == "unisurf": constructor = nerf.Unisurf
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)

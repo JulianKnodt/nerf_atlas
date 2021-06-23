@@ -306,7 +306,6 @@ class PlainNeRF(CommonNeRF):
 class NeRFAE(CommonNeRF):
   def __init__(
     self,
-    latent_size: int = 0,
     intermediate_size: int = 32,
     out_features: int = 3,
 
