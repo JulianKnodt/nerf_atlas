@@ -78,6 +78,7 @@ def arguments():
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
+  a.add_argument("--white-bg", help="Use white background for NeRF", action="store_true")
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
 
   dnerf = a.add_argument_group("dnerf")
@@ -103,6 +104,7 @@ def arguments():
   rprt.add_argument("--nosave", help="do not save", action="store_true")
   rprt.add_argument("--load", help="model to load from", type=str)
   rprt.add_argument("--loss-window", help="# epochs to smooth loss over", type=int, default=250)
+  rprt.add_argument("--notraintest", help="Do not test on training set", action="store_true")
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -160,11 +162,13 @@ def load(args, training=True):
   size = args.size
   if kind == "original":
     return src.loaders.original(
-      args.data, training=training, normalize=False, size=size, device=device
+      args.data, training=training, normalize=False, size=size,
+      white_bg=args.white_bg, device=device,
     )
   elif kind == "dnerf":
     return src.loaders.dnerf(
-      args.data, training=training, size=size, time_gamma=args.time_gamma, device=device,
+      args.data, training=training, size=size, time_gamma=args.time_gamma, white_bg=args.white_bg,
+      device=device,
     )
   elif kind == "single_video":
     return src.loaders.single_video(args.data)
@@ -313,7 +317,8 @@ def test(model, cam, labels, args, training: bool = True):
 
       loss = F.mse_loss(got, exp)
       psnr = utils.mse2psnr(loss).item()
-      print(f"[{i:03}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
+      ts = "" if ts is None else f",t={ts.item():.02f}"
+      print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
       name = f"outputs/train_{i:03}.png" if training else f"outputs/test_{i:03}.png"
       save_plot(name, exp, got.clamp(min=0, max=1), acc)
       ls.append(psnr)
@@ -346,6 +351,7 @@ def load_model(args):
     "use_fat_sigmoid": args.fat_sigmoid,
     "eikonal_loss": args.nerf_eikonal,
     "unisurf_loss": args.unisurf_loss,
+    "white_bg": args.white_bg,
   }
   if args.model == "tiny": constructor = nerf.TinyNeRF
   elif args.model == "plain": constructor = nerf.PlainNeRF
@@ -441,7 +447,7 @@ def main():
   if args.epochs != 0: save(model, args)
   if args.notest: return
 
-  test(model, cam, labels, args, training=True)
+  if not args.notraintest: test(model, cam, labels, args, training=True)
 
   test_labels, test_cam = load(args, training=False)
   test(model, test_cam, test_labels, args, training=False)

@@ -82,6 +82,7 @@ class CommonNeRF(nn.Module):
     unisurf_loss: bool = False,
 
     with_sky_mlp: bool = False,
+    white_bg: bool = False,
 
     record_depth: bool = False,
 
@@ -116,16 +117,17 @@ class CommonNeRF(nn.Module):
     self.rec_unisurf_loss = unisurf_loss
     self.unisurf_loss = 0
 
+    assert(not (white_bg and with_sky_mlp)), "Can only specify one of sky mlp or white bg"
     self.with_sky_mlp = with_sky_mlp
     if with_sky_mlp:
       self.sky_mlp = SkipConnMLP(
-        in_size=2, out=3,
-        # TODO add encoder here
+        in_size=2, out=3, enc=NNEncoder(in_size=2,out=3),
         num_layers=3, hidden_size=32, device=device, xavier_init=True,
       )
 
     self.record_depth = record_depth
     self.depth = None
+    self.white_bg = white_bg
 
   def forward(self, _x): raise NotImplementedError()
 
@@ -167,9 +169,14 @@ class CommonNeRF(nn.Module):
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.instance_latent = latent
   def sky_color(self, elev_azim_r_d):
-    if not self.with_sky_mlp: return torch.zeros_like(r_d)
-    # TODO use feat act here?
-    return fat_sigmoid(self.sky_mlp(elev_azim_r_d))
+    if self.with_sky_mlp:
+      return fat_sigmoid(self.sky_mlp(elev_azim_r_d))
+    elif self.white_bg:
+      print(self.weights.shape)
+      exit()
+      return 1-self.weights.sum(dim=0)
+    # TODO return tensor here?
+    else: return 0
 
   # produces a segmentation mask of sorts, using the alpha for occupancy.
   def acc(self): return self.alpha.max(dim=0)[0]
