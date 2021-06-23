@@ -110,6 +110,20 @@ The outputs I've done are low-res because I'm working off a 3GB gpu and NeRF is 
 during training. That's why I've explored a few different encodings and other tricks to speed it
 up.
 
+##### Dynamic NeRF Auto-Encoded
+
+![dnerfae jumpingjacks](examples/dnerfae.gif)
+
+A new change to NeRF using NeRF with an auto-encoder at every point in space. Sinec we're
+mapping to a latent space at every point, it's possible to learn a transformation on that latent
+space, for modifying density and visual appearance over time. One downside is that it is much
+slower to train because of the higher number of dimensions, and may overfit due to the higher
+number of dimensions.
+
+The visualization is on the training set. On the test set it does not perform as well. I suspect
+it lacks some regularization for temporal consistency, but I'll continue to look for ways to
+make testing better.
+
 ## Contributing
 
 If you would like to contribute, feel free to submit a PR, but I may be somewhat strict,

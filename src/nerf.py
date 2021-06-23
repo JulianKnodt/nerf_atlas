@@ -311,7 +311,7 @@ class NeRFAE(CommonNeRF):
     out_features: int = 3,
 
     encoding_size: int = 32,
-    sigma=1<<5,
+    normalize_latent: bool = True,
 
     device="cuda",
     **kwargs,
@@ -342,6 +342,7 @@ class NeRFAE(CommonNeRF):
     )
     self.encoding_size = encoding_size
     self.regularize_latent = False
+    self.normalize_latent = normalize_latent
 
   def set_regularize_latent(self):
     self.regularize_latent = True
@@ -369,9 +370,11 @@ class NeRFAE(CommonNeRF):
 
     return self.encode(pts, latent if latent.shape[-1] != 0 else None)
   def from_encoded(self, encoded, ts, r_d, pts):
+    if self.normalize_latent: encoded = F.normalize(encoded, dim=-1)
+
     density = self.density_tform(encoded).squeeze(-1)
     self.record_eikonal_loss(pts, density)
-    if self.noise_std > 0 and self.training:
+    if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(encoded.shape[:-1]+(2,))

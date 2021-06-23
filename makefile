@@ -29,9 +29,9 @@ dnerf_dyn: clean
 
 dnerfae: clean
 	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 128 \
-	--crop --epochs 80_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
+	--crop --epochs 30_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
 	--crop-size 32 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-	--dnerfae --time-gamma --load models/djj_ae_gamma.pt --omit-bg --loss-window 750 \
+	--dnerfae --time-gamma --load models/djj_ae_gamma.pt --loss-window 750 \
   #--serial-idxs
 
 sdf: clean

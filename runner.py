@@ -58,7 +58,6 @@ def arguments():
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
   a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
   a.add_argument("--sharpen", help="Sharpen before loss comparison", action="store_true")
-  a.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -108,6 +107,10 @@ def arguments():
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
   meta.add_argument("--train-imgs", help="# training examples", type=int, default=-1)
+
+  ae = a.add_argument_group("auto encoder parameters")
+  ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
+  ae.add_argument("--normalize-latent", help="Ensure latent space has norm 1", action="store_true")
 
   return a.parse_args()
 
@@ -345,7 +348,9 @@ def load_model(args):
   }
   if args.model == "tiny": constructor = nerf.TinyNeRF
   elif args.model == "plain": constructor = nerf.PlainNeRF
-  elif args.model == "ae": constructor = nerf.NeRFAE
+  elif args.model == "ae":
+    constructor = nerf.NeRFAE
+    kwargs["normalize_latent"] = args.normalize_latent
   elif args.model == "unisurf": constructor = nerf.Unisurf
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
