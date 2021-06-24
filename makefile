@@ -1,3 +1,5 @@
+PHONY:
+
 clean:
 	-@rm outputs/*.png
 
@@ -28,11 +30,11 @@ dnerf_dyn: clean
 	--serial-idxs --time-gamma --loss-window 750 #--load models/djj_gamma.pt
 
 dnerfae: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 64 \
+	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 128 \
 	--crop --epochs 60_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
 	--crop-size 32 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-	--dnerfae --time-gamma --load models/djj_ae_gamma.pt --loss-window 750 \
-	--sparsify-alpha 1e-4 #--omit-bg #--serial-idxs
+	--dnerfae --time-gamma --loss-window 750 \
+	--sigmoid-kind thin --load models/djj_ae_gamma.pt  #--omit-bg #--serial-idxs
 
 sdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \

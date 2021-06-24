@@ -54,8 +54,13 @@ def alpha_from_density(
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
 
+# sigmoids which shrink or expand the total range to prevent gradient vanishing,
+# or prevent it from representing full density items.
+# fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
 def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
-def thin_sigmoid(v, eps: float = 1e-3) return v.sigmoid() * (1-2*eps) + eps
+def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps)
+def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
+  return ((v/period).sin()+1)/2 * (1+2*eps) - eps
 
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
@@ -63,6 +68,15 @@ def thin_sigmoid(v, eps: float = 1e-3) return v.sigmoid() * (1-2*eps) + eps
 def volumetric_integrate(weights, other):
   return torch.sum(weights[..., None] * other, dim=0)
 
+
+# bg functions, need to be here for pickling
+def black(_elaz_r_d, _weights): return 0
+def white(_, weights): 1-weights.sum(dim=0).unsqueeze(-1)
+# having a random color will probably help prevent any background
+def random_color(_elaz_r_d, weights):
+  # TODO need to think this through more
+  summed = (1-weights.sum(dim=0).unsqueeze(-1))
+  return torch.rand_like(summed) * summed
 
 class CommonNeRF(nn.Module):
   def __init__(
@@ -79,10 +93,10 @@ class CommonNeRF(nn.Module):
     instance_latent_size: int = 0,
     per_pixel_latent_size: int = 0,
     per_point_latent_size: int = 0,
-    use_fat_sigmoid: bool =True,
     eikonal_loss: bool = False,
     unisurf_loss: bool = False,
 
+    sigmoid_kind: str = "thin",
     bg: str = "black",
 
     record_depth: bool = False,
@@ -109,8 +123,6 @@ class CommonNeRF(nn.Module):
     self.alpha = None
     self.noise_std = 0.2
     # TODO add activation for using sigmoid or fat sigmoid
-    self.feat_act = torch.sigmoid
-    if use_fat_sigmoid: self.feat_act = fat_sigmoid
 
     self.rec_eikonal_loss = eikonal_loss
     self.eikonal_loss = 0
@@ -119,6 +131,7 @@ class CommonNeRF(nn.Module):
     self.unisurf_loss = 0
 
     self.set_bg(bg)
+    self.set_sigmoid(sigmoid_kind)
 
     self.record_depth = record_depth
     self.depth = None
@@ -126,27 +139,29 @@ class CommonNeRF(nn.Module):
   def forward(self, _x): raise NotImplementedError()
   def set_bg(self, bg="black"):
     if bg == "black":
-      def black(_elaz_r_d, _weights): return 0
       self.sky_color = black
     elif bg == "white":
-      def white(_, weights): 1-weights.sum(dim=0).unsqueeze(-1)
       self.sky_color = white
     elif bg == "mlp":
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3, enc=NNEncoder(in_size=2,out=3),
         num_layers=3, hidden_size=32, device=device, xavier_init=True,
       )
-      def sky_mlp(elaz_r_d, _weights): return fat_sigmoid(self.sky_mlp(elaz_r_d))
-      self.sky_color = sky_mlp
+      self.sky_color = self.sky_from_mlp
     elif bg == "random":
-      def random_color(_elaz_r_d, weights):
-        # TODO need to think this through more
-        summed = (1-weights.sum(dim=0).unsqueeze(-1))
-        return torch.rand_like(summed) * summed
       self.sky_color = random_color
     else:
       raise NotImplementedError(f"Unexpected bg: {bg}")
 
+  def set_sigmoid(self, kind="thin"):
+    if kind == "thin": self.feat_act = thin_sigmoid
+    elif kind == "fat": self.feat_act = fat_sigmoid
+    elif kind == "normal": self.feat_act = torch.sigmoid
+    elif kind == "cyclic": self.feat_act = cyclic_sigmoid
+    elif kind == "softmax": self.feat_act = nn.Softmax(dim=-1)
+    else: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
+  def sky_from_mlp(self, elaz_r_d, weights):
+    return (1-weights.sum(dim=0)).unsqueeze(-1) * fat_sigmoid(self.sky_mlp(elaz_r_d))
   def record_eikonal_loss(self, pts, density):
     if not self.rec_eikonal_loss or not self.training: return
     self.eikonal_loss = eikonal_loss(autograd(pts, density))
@@ -167,7 +182,9 @@ class CommonNeRF(nn.Module):
 
   def total_latent_size(self) -> int:
     return self.mip_size() + \
-      self.per_pixel_latent_size + self.instance_latent_size + self.per_pt_latent_size
+      self.per_pixel_latent_size + \
+      self.instance_latent_size + \
+      self.per_pt_latent_size
   def set_per_pt_latent(self, latent):
     assert(latent.shape[-1] == self.per_pt_latent_size), \
       f"expected latent in [T, B, H, W, L={self.per_pixel_latent_size}], got {latent.shape}"

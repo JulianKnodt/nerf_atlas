@@ -52,7 +52,10 @@ def arguments():
   )
   a.add_argument("--nerf-eikonal", help="Add eikonal loss for NeRF", action="store_true")
   a.add_argument("--unisurf-loss", help="Add unisurf loss", action="store_true")
-  a.add_argument("--fat-sigmoid", help="Use wider sigmoid activation for features", action="store_false")
+  a.add_argument(
+    "--sigmoid-kind", help="What sigmoid to use, curr keeps old", default="thin",
+    choices=["normal", "fat", "thin", "cyclic", "softmax", "curr"],
+  )
   a.add_argument("--sparsify-alpha", help="Weight for sparsifying alpha",type=float,default=0)
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
@@ -343,6 +346,7 @@ def load_mip(args):
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
   model.nerf.set_bg(args.bg)
+  if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
 
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
@@ -357,9 +361,10 @@ def load_model(args):
     "t_far": args.far,
     "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0,
     "per_point_latent_size": (1 + 3 + 64) if args.sdf else 0,
-    "use_fat_sigmoid": args.fat_sigmoid,
+    "sigmoid_kind": args.sigmoid_kind,
     "eikonal_loss": args.nerf_eikonal,
     "unisurf_loss": args.unisurf_loss,
+    "sigmoid_kind": args.sigmoid_kind if args.sigmoid_kind != "curr" else "thin",
     "bg": args.bg,
   }
   if args.model == "tiny": constructor = nerf.TinyNeRF
