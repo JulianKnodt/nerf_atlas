@@ -55,12 +55,14 @@ def alpha_from_density(
   return alpha, weights
 
 def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
+def thin_sigmoid(v, eps: float = 1e-3) return v.sigmoid() * (1-2*eps) + eps
 
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
 @torch.jit.script
 def volumetric_integrate(weights, other):
   return torch.sum(weights[..., None] * other, dim=0)
+
 
 class CommonNeRF(nn.Module):
   def __init__(
@@ -81,8 +83,7 @@ class CommonNeRF(nn.Module):
     eikonal_loss: bool = False,
     unisurf_loss: bool = False,
 
-    with_sky_mlp: bool = False,
-    white_bg: bool = False,
+    bg: str = "black",
 
     record_depth: bool = False,
 
@@ -117,19 +118,34 @@ class CommonNeRF(nn.Module):
     self.rec_unisurf_loss = unisurf_loss
     self.unisurf_loss = 0
 
-    assert(not (white_bg and with_sky_mlp)), "Can only specify one of sky mlp or white bg"
-    self.with_sky_mlp = with_sky_mlp
-    if with_sky_mlp:
+    self.set_bg(bg)
+
+    self.record_depth = record_depth
+    self.depth = None
+
+  def forward(self, _x): raise NotImplementedError()
+  def set_bg(self, bg="black"):
+    if bg == "black":
+      def black(_elaz_r_d, _weights): return 0
+      self.sky_color = black
+    elif bg == "white":
+      def white(_, weights): 1-weights.sum(dim=0).unsqueeze(-1)
+      self.sky_color = white
+    elif bg == "mlp":
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3, enc=NNEncoder(in_size=2,out=3),
         num_layers=3, hidden_size=32, device=device, xavier_init=True,
       )
-
-    self.record_depth = record_depth
-    self.depth = None
-    self.white_bg = white_bg
-
-  def forward(self, _x): raise NotImplementedError()
+      def sky_mlp(elaz_r_d, _weights): return fat_sigmoid(self.sky_mlp(elaz_r_d))
+      self.sky_color = sky_mlp
+    elif bg == "random":
+      def random_color(_elaz_r_d, weights):
+        # TODO need to think this through more
+        summed = (1-weights.sum(dim=0).unsqueeze(-1))
+        return torch.rand_like(summed) * summed
+      self.sky_color = random_color
+    else:
+      raise NotImplementedError(f"Unexpected bg: {bg}")
 
   def record_eikonal_loss(self, pts, density):
     if not self.rec_eikonal_loss or not self.training: return
@@ -168,18 +184,10 @@ class CommonNeRF(nn.Module):
     assert(latent.shape[-1] == self.instance_latent_size), "expected latent in [B, L]"
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.instance_latent = latent
-  def sky_color(self, elev_azim_r_d):
-    if self.with_sky_mlp:
-      return fat_sigmoid(self.sky_mlp(elev_azim_r_d))
-    elif self.white_bg:
-      print(self.weights.shape)
-      exit()
-      return 1-self.weights.sum(dim=0)
-    # TODO return tensor here?
-    else: return 0
 
   # produces a segmentation mask of sorts, using the alpha for occupancy.
   def acc(self): return self.alpha.max(dim=0)[0]
+  def acc_smooth(self): return torch.sum(self.weights,dim=0).unsqueeze(-1)
 
   def depths(self, depths):
     with torch.no_grad():
@@ -245,8 +253,9 @@ class TinyNeRF(CommonNeRF):
     density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
     self.record_eikonal_loss(pts, density)
 
-    self.alpha, weights = alpha_from_density(density, ts, r_d)
-    return volumetric_integrate(weights, self.feat_act(feats))
+    self.alpha, self.weights = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(self.weights, self.feat_act(feats)) + \
+      self.sky_color(None, self.weights)
 
 # A plain old nerf
 class PlainNeRF(CommonNeRF):
@@ -306,8 +315,9 @@ class PlainNeRF(CommonNeRF):
       elev_azim_r_d, torch.cat([intermediate, latent], dim=-1)
     ))
 
-    self.alpha, weights = alpha_from_density(density, ts, r_d)
-    return volumetric_integrate(weights, rgb)
+    self.alpha, self.weights = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(self.weights, rgb) + \
+      self.sky_color(elev_azim_r_d, self.weights)
 
 # NeRF with a thin middle layer, for encoding information
 class NeRFAE(CommonNeRF):
@@ -387,10 +397,12 @@ class NeRFAE(CommonNeRF):
 
     rgb = self.feat_act(self.rgb(elev_azim_r_d, encoded))
 
-    self.alpha, weights = alpha_from_density(density, ts, r_d)
+    self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     self.record_unisurf_loss(pts, self.alpha)
 
-    return volumetric_integrate(weights, rgb)
+    color = volumetric_integrate(self.weights, rgb)
+    sky = self.sky_color(elev_azim_r_d, self.weights)
+    return color + sky
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
@@ -524,8 +536,8 @@ class Unisurf(CommonNeRF):
     rgb = self.feat_act(self.second(
       elev_azim_r_d, torch.cat([intermediate, latent], dim=-1)
     ))
-    weights = self.alpha * cumuprod_exclusive(1.0 - self.alpha + 1e-10)
-    return volumetric_integrate(weights, rgb)
+    self.weights = self.alpha * cumuprod_exclusive(1.0 - self.alpha + 1e-10)
+    return volumetric_integrate(self.weights, rgb)
 
 class SinglePixelNeRF(nn.Module):
   def __init__(

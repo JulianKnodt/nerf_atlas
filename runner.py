@@ -53,7 +53,7 @@ def arguments():
   a.add_argument("--nerf-eikonal", help="Add eikonal loss for NeRF", action="store_true")
   a.add_argument("--unisurf-loss", help="Add unisurf loss", action="store_true")
   a.add_argument("--fat-sigmoid", help="Use wider sigmoid activation for features", action="store_false")
-  a.add_argument("--n-sparsify-alpha", help="Epochs for sparsifying alpha", type=int, default=0)
+  a.add_argument("--sparsify-alpha", help="Weight for sparsifying alpha",type=float,default=0)
   a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
   a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
@@ -67,6 +67,10 @@ def arguments():
     "--model", help="which model do we want to use", type=str,
     choices=["tiny", "plain", "ae", "unisurf"], default="plain",
   )
+  a.add_argument(
+    "--bg", help="What kind of background to use for NeRF", type=str,
+    choices=["black", "white", "mlp", "noise"], default="black",
+  )
   # this default for LR seems to work pretty well?
   a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
   a.add_argument("--seed", help="random seed to use", type=int, default=1337)
@@ -78,7 +82,6 @@ def arguments():
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
-  a.add_argument("--white-bg", help="Use white background for NeRF", action="store_true")
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
 
   dnerf = a.add_argument_group("dnerf")
@@ -163,12 +166,12 @@ def load(args, training=True):
   if kind == "original":
     return src.loaders.original(
       args.data, training=training, normalize=False, size=size,
-      white_bg=args.white_bg, device=device,
+      white_bg=args.bg=="white", device=device,
     )
   elif kind == "dnerf":
     return src.loaders.dnerf(
-      args.data, training=training, size=size, time_gamma=args.time_gamma, white_bg=args.white_bg,
-      device=device,
+      args.data, training=training, size=size, time_gamma=args.time_gamma,
+      white_bg=args.bg=="white", device=device,
     )
   elif kind == "single_video":
     return src.loaders.single_video(args.data)
@@ -262,7 +265,7 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.latent_l2_weight > 0:
       loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
     # experiment with emptying the model at the beginning
-    if i < args.n_sparsify_alpha: loss = loss + (model.nerf.alpha - 0.5).square().mean()
+    if args.sparsify_alpha > 0: loss = loss + args.sparsify_alpha * (model.nerf.alpha).square().mean()
     if args.dnerf_tf_smooth_weight > 0:
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
     if model.nerf.unisurf_loss > 0: loss = loss + model.nerf.unisurf_loss
@@ -278,10 +281,12 @@ def train(model, cam, labels, opt, args, sched=None):
       with torch.no_grad():
         ref0 = ref[0]
         acc = model.nerf.acc()[0,...,None].expand_as(ref0)
+        acc2 = model.nerf.acc_smooth()[0,...].expand_as(ref0)
         save_plot(
           f"outputs/valid_{i:05}.png",
           ref0, out[0].clamp(min=0, max=1),
-          acc.clamp(min=0, max=1)
+          acc.clamp(min=0, max=1),
+          acc2.clamp(min=0,max=1),
         )
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
@@ -335,6 +340,10 @@ def load_mip(args):
 
   raise NotImplementedError(f"Unknown mip kind {args.mip}")
 
+# Sets these parameters on the model on each run, regardless if loaded from previous state.
+def set_per_run(model, args):
+  model.nerf.set_bg(args.bg)
+
 def load_model(args):
   if not args.neural_upsample: args.feature_space = 3
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
@@ -351,7 +360,7 @@ def load_model(args):
     "use_fat_sigmoid": args.fat_sigmoid,
     "eikonal_loss": args.nerf_eikonal,
     "unisurf_loss": args.unisurf_loss,
-    "white_bg": args.white_bg,
+    "bg": args.bg,
   }
   if args.model == "tiny": constructor = nerf.TinyNeRF
   elif args.model == "plain": constructor = nerf.PlainNeRF
@@ -431,6 +440,7 @@ def main():
     cam = cam[:args.train_imgs, ...]
 
   model = load_model(args) if args.load is None else torch.load(args.load)
+  set_per_run(model, args)
 
   parameters = model.parameters()
   if args.train_camera: parameters = chain(parameters, cam.parameters())
