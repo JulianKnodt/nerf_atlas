@@ -208,3 +208,30 @@ def autograd(x, y):
     only_inputs=True,
   )
   return grad
+
+
+#https://github.com/albertpumarola/D-NeRF/blob/main/load_blender.py#L62
+def spherical_pose(elev, azim, rad):
+  assert(0 <= elev <= 180)
+  assert(0 <= azim <= 180)
+  trans_t = lambda t : torch.Tensor([
+    [1,0,0,0],
+    [0,1,0,0],
+    [0,0,1,t],
+    [0,0,0,1]]).float()
+  rot_phi = lambda phi : torch.Tensor([
+    [1,0,0,0],
+    [0,np.cos(phi),-np.sin(phi),0],
+    [0,np.sin(phi), np.cos(phi),0],
+    [0,0,0,1]]).float()
+
+  rot_theta = lambda th : torch.Tensor([
+    [np.cos(th),0,-np.sin(th),0],
+    [0,1,0,0],
+    [np.sin(th),0, np.cos(th),0],
+    [0,0,0,1]]).float()
+  c2w = trans_t(radius)
+  c2w = rot_phi(phi/180.*np.pi) @ c2w
+  c2w = rot_theta(theta/180.*np.pi) @ c2w
+  c2w = torch.Tensor([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
+  return c2w

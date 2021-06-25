@@ -81,6 +81,10 @@ def arguments():
   a.add_argument("--notest", help="do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
+  a.add_argument(
+    "--loss-fns", help="loss functions to use", nargs="+",
+    choices=["l1", "l2", "rmse"], default=["l2"], type=str,
+  )
   a.add_argument("--l1-loss", help="Add l1 loss with output", action="store_true")
   a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
@@ -94,6 +98,7 @@ def arguments():
   )
   dnerf.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
   dnerf.add_argument("--gru-flow", help="Use GRU for Δx", action="store_true")
+  dnerf.add_argument("--nicepath", help="Render a nice path for DNeRF", action="store_true")
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -122,6 +127,12 @@ def arguments():
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
 
   return a.parse_args()
+
+loss_map = {
+  "l2": F.mse_loss,
+  "l1": F.l1_loss,
+  "rmse": lambda x, ref: F.mse_loss(x, ref).clamp(min=1e-10).sqrt(),
+}
 
 # TODO better automatic device discovery here
 device = "cpu"
@@ -201,11 +212,15 @@ def save_losses(losses, window=250):
 def train(model, cam, labels, opt, args, sched=None):
   if args.epochs == 0: return
 
-  assert(args.l1_loss or not args.no_l2_loss), "Must have either l1 or l2 loss"
-  if args.l1_loss and not args.no_l2_loss:
-    loss_fn = lambda x, ref: (F.mse_loss(x, ref) + F.l1_loss(x, ref))/2
-  elif args.l1_loss and args.no_l2_loss: loss_fn = F.l1_loss
-  else: loss_fn = F.mse_loss
+  loss_fns = [loss_map[lfn] for lfn in args.loss_fns]
+  assert(len(loss_fns) > 0)
+  if len(loss_fns) == 1: loss_fn = loss_fns[0]
+  else:
+    def loss_fn(x, ref):
+      loss = 0
+      for fn in loss_fns: loss = loss + fn(x, ref)
+      return loss
+
 
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
   update = lambda kwargs: iters.set_postfix(**kwargs)

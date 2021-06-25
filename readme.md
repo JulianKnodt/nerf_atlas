@@ -114,7 +114,7 @@ up.
 
 ![dnerfae jumpingjacks](examples/dnerfae.gif)
 
-A new change to NeRF using NeRF with an auto-encoder at every point in space. Sinec we're
+A new change to NeRF using NeRF with an auto-encoder at every point in space. Since we're
 mapping to a latent space at every point, it's possible to learn a transformation on that latent
 space, for modifying density and visual appearance over time. One downside is that it is much
 slower to train because of the higher number of dimensions, and may overfit due to the higher

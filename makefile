@@ -30,10 +30,10 @@ dnerf_dyn: clean
 	--serial-idxs --time-gamma --loss-window 750 #--load models/djj_gamma.pt
 
 dnerfae: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 128 \
-	--crop --epochs 60_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
+	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 64 \
+	--crop --epochs 40_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
 	--crop-size 32 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-	--dnerfae --time-gamma --loss-window 750 \
+	--dnerfae --time-gamma --loss-window 750 --loss-fns rmse \
 	--sigmoid-kind thin --load models/djj_ae_gamma.pt  #--omit-bg #--serial-idxs
 
 sdf: clean
