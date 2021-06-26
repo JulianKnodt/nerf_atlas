@@ -68,7 +68,11 @@ def arguments():
   )
   a.add_argument(
     "--model", help="which model do we want to use", type=str,
-    choices=["tiny", "plain", "ae", "unisurf"], default="plain",
+    choices=["tiny", "plain", "ae", "unisurf", "sdf"], default="plain",
+  )
+  a.add_argument(
+    "--sdf-kind", help="which SDF model to use", type=str,
+    choices=["spheres", "siren"], default="spheres",
   )
   a.add_argument(
     "--bg", help="What kind of background to use for NeRF", type=str,
@@ -180,7 +184,9 @@ def load(args, training=True):
   if kind == "original":
     return src.loaders.original(
       args.data, training=training, normalize=False, size=size,
-      white_bg=args.bg=="white", device=device,
+      white_bg=args.bg=="white",
+      with_mask= args.model == "sdf",
+      device=device,
     )
   elif kind == "dnerf":
     return src.loaders.dnerf(
@@ -220,6 +226,7 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = 0
       for fn in loss_fns: loss = loss + fn(x, ref)
       return loss
+  if args.model == "sdf": loss_fn = masked_loss
 
 
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
@@ -364,6 +371,7 @@ def set_per_run(model, args):
   if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
 
 def load_model(args):
+  if args.model == "sdf": return sdf.load(args)
   if not args.neural_upsample: args.feature_space = 3
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   if args.model != "ae": args.latent_l2_weight = 0

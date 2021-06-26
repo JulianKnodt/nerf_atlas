@@ -15,9 +15,13 @@ import imageio
 from . import cameras
 from .utils import load_image
 
-def original(dir=".", normalize=True, training=True, size=256, white_bg=False, device="cuda"):
+def original(
+  dir=".", normalize=True, training=True, size=256, white_bg=False, with_mask=False,
+  device="cuda",
+):
   kind = "train" if training else "test"
   tfs = json.load(open(dir + f"transforms_{kind}.json"))
+  channels = 3 + with_mask
 
   exp_imgs = []
   cam_to_worlds = []
@@ -25,7 +29,7 @@ def original(dir=".", normalize=True, training=True, size=256, white_bg=False, d
   for frame in tfs["frames"]:
     img = load_image(os.path.join(dir, frame['file_path'] + '.png'), resize=(size, size))
     if white_bg: img = img[..., :3]*img[..., -1:] + (1-img[..., -1:])
-    exp_imgs.append(img[..., :3])
+    exp_imgs.append(img[..., :channels])
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
     if normalize:
       tf_mat[:3, 3] = F.normalize(tf_mat[:3, 3], dim=-1)
