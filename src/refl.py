@@ -19,9 +19,10 @@ class BasicReflectance(Reflectance):
     super().__init__()
     self.mlp = SkipConnMLP(
       in_size = 5, out = 3,
-      enc=NNEncoder(input_dims=3),
+      enc=NNEncoder(input_dims=5),
       xavier_init=True,
     )
-  def forward(self, _x, r_d):
+  def forward(self, x, r_d):
     elaz_rd = dir_to_elev_azim(r_d)
-    return self.mlp(torch.cat([x, elaz_rd], dim=-1))
+    v = torch.cat([x, elaz_rd], dim=-1)
+    return self.mlp(v)

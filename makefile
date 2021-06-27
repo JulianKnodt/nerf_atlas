@@ -32,15 +32,16 @@ dnerf_dyn: clean
 dnerfae: clean
 	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --render-size 128 \
 	--crop --epochs 40_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
-	--crop-size 32 --near 2 --far 6 -lr 3e-4 --no-sched --valid-freq 499 \
+	--crop-size 32 --near 2 --far 6 -lr 2e-4 --no-sched --valid-freq 499 \
 	--dnerfae --time-gamma --loss-window 750 --loss-fns rmse \
 	--sigmoid-kind thin --load models/djj_ae_gamma.pt  #--omit-bg #--serial-idxs
 
 sdf: clean
-	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original --sdf \
-	--render-size 128 --crop --epochs 50_000 --save models/lego.pt --crop-size 8 \
-	--near 2 --far 6 --batch-size 24  --decay 5e-7 --model ae \
-  --load models/lego.pt --n-sparsify-alpha 100 -lr 2e-3 # --mip cylinder --nerf-eikonal
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--render-size 64 --crop --epochs 10_000 --save models/lego_sdf.pt --crop-size 48 \
+	--near 2 --far 6 --batch-size 12 --model sdf \
+  -lr 5e-4 --no-sched --loss-window 750 --valid-freq 499 \
+  --sigmoid-kind thin --nosave
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

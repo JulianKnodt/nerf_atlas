@@ -10,7 +10,7 @@ from .refl import ( BasicReflectance )
 
 def load(args):
   if args.sdf_kind == "spheres":
-    model = SmoothSpheres()
+    model = SmoothedSpheres()
   elif args.sdf_kind == "siren":
     raise NotImplementedError()
   else: raise NotImplementedError()
@@ -46,20 +46,23 @@ class SDF(nn.Module):
     reflectance: "fn(x, dir) -> RGB",
     t_near: float,
     t_far: float,
+    alpha:int = 100,
   ):
     super().__init__()
     assert(isinstance(underlying, SDFModel))
     self.underlying = underlying
     self.refl = reflectance
-    self.t_far = t_far
+    self.far = t_far
+    self.near = t_near
+    self.alpha = alpha
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t = sphere_march(self.underlying, r_o, r_d)
     out = self.refl(pts, r_d)
-    out[~hit] = 0
+    out[~hit.squeeze(-1)] = 0
     if with_throughput:
-      tput = throughput(self.underlying, r_o, r_d, self.t_far)
-      out = torch.cat([out, tput], dim=-1)
+      tput, _best_pos = throughput(self.underlying, r_o, r_d, self.far, self.near)
+      out = torch.cat([out, -self.alpha*tput.unsqueeze(-1)], dim=-1)
     return out
 
 @torch.jit.script
@@ -72,10 +75,10 @@ class SmoothedSpheres(SDFModel):
     n:int=32,
   ):
     super().__init__()
-    self.centers = nn.Parameter(0.3 * torch.rand(n,3,device=device, requires_grad=True) - 0.15)
-    self.radii = nn.Parameter(0.2 * torch.rand(n, device=device, requires_grad=True) - 0.1)
+    self.centers = nn.Parameter(0.3 * torch.rand(n,3, requires_grad=True) - 0.15)
+    self.radii = nn.Parameter(0.2 * torch.rand(n, requires_grad=True) - 0.1)
 
-    self.tfs = nn.Parameter(torch.zeros(n, 3, 3, device=device, requires_grad=True))
+    self.tfs = nn.Parameter(torch.zeros(n, 3, 3, requires_grad=True))
 
   @torch.jit.export
   def transform(self, p):
@@ -122,7 +125,7 @@ def sphere_march(
   self,
   r_o, r_d,
   iters: int = 64,
-  eps: float = 1e-4,
+  eps: float = 1e-3,
   near: float = 0, far: float = 1,
 ):
   device = r_o.device
@@ -130,7 +133,7 @@ def sphere_march(
   curr_dist = torch.full_like(hits, near, dtype=torch.float)
   for i in range(iters):
     curr = r_o + r_d * curr_dist
-    dist = self(curr)
+    dist = self(curr).reshape_as(curr_dist)
     hits = hits | ((dist < eps) & (curr_dist >= near) & (curr_dist <= far))
     curr_dist = torch.where(~hits, curr_dist + dist, curr_dist)
     if hits.all(): break
@@ -141,14 +144,15 @@ def sphere_march(
 def throughput(
   self,
   r_o, r_d,
-  t_far: float,
+  far: float,
+  near: float,
   batch_size:int =64,
 ):
   # some random jitter I guess?
-  max_t = t_far+random.random()*(2/batch_size)
+  max_t = far+random.random()*(2/batch_size)
   step = max_t/batch_size
   with torch.no_grad():
-    sd = self.sdf(r_o).squeeze(-1)
+    sd = self(r_o).squeeze(-1)
     curr_min = sd
     idxs = torch.zeros_like(sd, dtype=torch.long, device=r_d.device)
     for i in range(batch_size):
@@ -157,7 +161,7 @@ def throughput(
       idxs = torch.where(sd < curr_min, i+1, idxs)
       curr_min = torch.minimum(curr_min, sd)
   idxs = idxs.unsqueeze(-1)
-  best_pos = r_o  + idxs.unsqueeze(-1) * step * r_d
+  best_pos = r_o  + idxs * step * r_d
   return self(best_pos), best_pos
 
 #@torch.jit.script
@@ -165,7 +169,7 @@ def masked_loss(
   # got and exp have 4 channels, where the last are got_mask and exp_mask
   got,
   exp,
-  mask_weight:float=1,
+  mask_weight:float=15,
 ):
   got, got_mask = got.split([3,1],dim=-1)
   exp, exp_mask = exp.split([3,1],dim=-1)
@@ -176,15 +180,13 @@ def masked_loss(
   if active.any():
     got_active = got * active[..., None]
     exp_active = exp * active[..., None]
-    l2_loss = F.mse_loss(got_active, exp_active)
+    color_loss = F.mse_loss(got_active, exp_active)
 
   # This case is hit if the mask intersects nothing
   mask_loss = 0
   if misses.any():
     loss_fn = F.binary_cross_entropy_with_logits
     mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
-  print("masked_loss was fine")
-  exit()
   return mask_weight * mask_loss + color_loss
 
 # Use loss from IDR, taking max occupancy along NeRF as segmentation.

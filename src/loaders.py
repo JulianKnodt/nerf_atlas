@@ -37,6 +37,8 @@ def original(
 
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
+  if with_mask:
+    exp_imgs[..., -1] = (exp_imgs[..., -1] - 1e-5).ceil()
 
   return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal)
 

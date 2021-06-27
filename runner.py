@@ -57,7 +57,7 @@ def arguments():
     choices=["normal", "fat", "thin", "cyclic", "softmax", "curr"],
   )
   a.add_argument("--sparsify-alpha", help="Weight for sparsifying alpha",type=float,default=0)
-  a.add_argument("--sdf", help="Use a backing SDF", action="store_true")
+  a.add_argument("--backing-sdf", help="Use a backing SDF", action="store_true")
   a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
   a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
   a.add_argument("--sharpen", help="Sharpen before loss comparison", action="store_true")
@@ -226,7 +226,7 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = 0
       for fn in loss_fns: loss = loss + fn(x, ref)
       return loss
-  if args.model == "sdf": loss_fn = masked_loss
+  if args.model == "sdf": loss_fn = sdf.masked_loss
 
 
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
@@ -278,7 +278,7 @@ def train(model, cam, labels, opt, args, sched=None):
       "refresh": False,
     }
     if sched is not None: display["lr"] = f"{sched.get_last_lr()[0]:.1e}"
-    if args.sdf:
+    if args.backing_sdf:
       eik = sdf.eikonal_loss(model.sdf.normals)
       s = sdf.sigmoid_loss(model.min_along_rays, model.nerf.acc())
       loss = loss + eik + s
@@ -293,7 +293,8 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.sparsify_alpha > 0: loss = loss + args.sparsify_alpha * (model.nerf.alpha).square().mean()
     if args.dnerf_tf_smooth_weight > 0:
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
-    if model.nerf.unisurf_loss > 0: loss = loss + model.nerf.unisurf_loss
+    if hasattr(model, "nerf") and model.nerf.unisurf_loss > 0:
+      loss = loss + model.nerf.unisurf_loss
 
     update(display)
     losses.append(l2_loss)
@@ -304,15 +305,18 @@ def train(model, cam, labels, opt, args, sched=None):
     if sched is not None: sched.step()
     if i % args.valid_freq == 0:
       with torch.no_grad():
-        ref0 = ref[0]
-        acc = model.nerf.acc()[0,...,None].expand_as(ref0)
-        acc2 = model.nerf.acc_smooth()[0,...].expand_as(ref0)
-        save_plot(
-          f"outputs/valid_{i:05}.png",
-          ref0, out[0].clamp(min=0, max=1),
-          acc.clamp(min=0, max=1),
-          acc2.clamp(min=0,max=1),
-        )
+        ref0 = ref[0,...,:3]
+        items = [
+          ref0,
+          out[0,...,:3].clamp(min=0, max=1),
+        ]
+        if hasattr(model, "nerf"):
+          items.append(model.nerf.acc()[0,...,None].expand_as(ref0))
+          items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0))
+        elif args.model == "sdf":
+          items.append(ref[0,...,-1,None].expand_as(ref0))
+          items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
+        save_plot(f"outputs/valid_{i:05}.png", *items)
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
       save_losses(losses, args.loss_window)
@@ -332,7 +336,7 @@ def test(model, cam, labels, args, training: bool = True):
       exp = labels[i]
       got = torch.zeros_like(exp)
       acc = torch.zeros_like(got)
-      if args.sdf: got_sdf = torch.zeros_like(got)
+      if args.backing_sdf: got_sdf = torch.zeros_like(got)
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
         for y in range(N):
@@ -367,11 +371,13 @@ def load_mip(args):
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
+  if args.model == "sdf": return
+
   model.nerf.set_bg(args.bg)
   if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
 
 def load_model(args):
-  if args.model == "sdf": return sdf.load(args)
+  if args.model == "sdf": return sdf.load(args).to(device)
   if not args.neural_upsample: args.feature_space = 3
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   if args.model != "ae": args.latent_l2_weight = 0
@@ -383,7 +389,7 @@ def load_model(args):
     "t_near": args.near,
     "t_far": args.far,
     "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0,
-    "per_point_latent_size": (1 + 3 + 64) if args.sdf else 0,
+    "per_point_latent_size": (1 + 3 + 64) if args.backing_sdf else 0,
     "sigmoid_kind": args.sigmoid_kind,
     "eikonal_loss": args.nerf_eikonal,
     "unisurf_loss": args.unisurf_loss,
@@ -421,7 +427,7 @@ def load_model(args):
     model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
 
   og_model = model
-  if args.sdf: model = sdf.SDFNeRF(model, sdf.SDF()).to(device)
+  if args.backing_sdf: model = sdf.SDFNeRF(model, sdf.SDF()).to(device)
   # tack on neural upsampling if specified
   if args.neural_upsample:
     upsampler =  Upsampler(
