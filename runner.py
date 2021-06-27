@@ -75,6 +75,9 @@ def arguments():
     choices=["spheres", "siren"], default="spheres",
   )
   a.add_argument(
+    "--sdf-eikonal", help="weight of SDF eikonal loss", type=float, default=0,
+  )
+  a.add_argument(
     "--bg", help="What kind of background to use for NeRF", type=str,
     choices=["black", "white", "mlp", "noise"], default="black",
   )
@@ -293,6 +296,10 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
     if hasattr(model, "nerf") and model.nerf.unisurf_loss > 0:
       loss = loss + model.nerf.unisurf_loss
+    if args.sdf_eikonal > 0 and args.model == "sdf":
+      # TODO this is untested
+      loss = loss + args.sdf_eikonal * \
+        utils.eikonal_loss(5*model.underlying.normals(torch.randn(1024, 3, device=device)))
 
     update(display)
     losses.append(l2_loss)
@@ -345,14 +352,17 @@ def test(model, cam, labels, args, training: bool = True):
             with_noise=False, times=ts, args=args,
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
-          acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = model.nerf.acc()[..., None]
+          if hasattr(model, "nerf"):
+            acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = model.nerf.acc()[..., None]
 
       loss = F.mse_loss(got, exp)
       psnr = utils.mse2psnr(loss).item()
       ts = "" if ts is None else f",t={ts.item():.02f}"
       print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
       name = f"outputs/train_{i:03}.png" if training else f"outputs/test_{i:03}.png"
-      save_plot(name, exp, got.clamp(min=0, max=1), acc)
+      items = [exp, got.clamp(min=0, max=1)]
+      if hasattr(model, "nerf"): items.append(acc)
+      save_plot(name, *items)
       ls.append(psnr)
   print(f"""[Summary ({"training" if training else "test"})]:
           mean {np.mean(ls):.03f}

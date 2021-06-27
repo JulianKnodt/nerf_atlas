@@ -25,4 +25,4 @@ class BasicReflectance(Reflectance):
   def forward(self, x, r_d):
     elaz_rd = dir_to_elev_azim(r_d)
     v = torch.cat([x, elaz_rd], dim=-1)
-    return self.mlp(v)
+    return self.mlp(v).sigmoid()

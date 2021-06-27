@@ -12,7 +12,7 @@ def load(args):
   if args.sdf_kind == "spheres":
     model = SmoothedSpheres()
   elif args.sdf_kind == "siren":
-    raise NotImplementedError()
+    model = SIREN()
   else: raise NotImplementedError()
   # TODO need to add BSDF model and lighting here
   sdf = SDF(
@@ -27,17 +27,16 @@ def load(args):
 class SDFModel(nn.Module):
   def __init__(self):
     super().__init__()
-    self.normals = None
   def forward(self, _pts): raise NotImplementedError()
   def normals(self, pts, values = None):
     with torch.enable_grad():
       if not pts.requires_grad: autograd_pts = pts.requires_grad_()
       else: autograd_pts = pts
 
-      if values is None: values = self.mlp(autograd_pts)
-      self.normals = autograd(autograd_pts, values)
-      assert(self.normals.isfinite().all())
-    return self.normals
+      if values is None: values = self(autograd_pts)
+      normals = autograd(autograd_pts, values)
+      assert(normals.isfinite().all())
+    return normals
 
 class SDF(nn.Module):
   def __init__(
@@ -57,9 +56,9 @@ class SDF(nn.Module):
     self.alpha = alpha
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hit, t = sphere_march(self.underlying, r_o, r_d)
-    out = self.refl(pts, r_d)
-    out[~hit.squeeze(-1)] = 0
+    pts, hit, t = sphere_march(self.underlying, r_o, r_d, near=self.near, far=self.far)
+    rgb = self.refl(pts, r_d)
+    out = torch.where(hit, rgb, torch.zeros_like(rgb))
     if with_throughput:
       tput, _best_pos = throughput(self.underlying, r_o, r_d, self.far, self.near)
       out = torch.cat([out, -self.alpha*tput.unsqueeze(-1)], dim=-1)
@@ -89,7 +88,22 @@ class SmoothedSpheres(SDFModel):
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
     out = smooth_min(sd, k=32.).reshape(p.shape[:-1])
     return out
-  def sphere_march(self, r_o, r_d): sphere_march(self, r_o, r_d)
+
+def sirenActivation(v): return (3*v).sin()
+class SIREN(SDFModel):
+  def __init__(self):
+    super().__init__()
+    self.siren = SkipConnMLP(
+      in_size=3, out=1,
+      enc=None,
+      activation=sirenActivation,
+      # Do not have skip conns
+      skip=1000,
+    )
+  def forward(self, x):
+    out = self.siren(x).squeeze(-1)
+    assert(out.isfinite().all()), out[~out.isfinite()]
+    return out
 
 class SDFNeRF(nn.Module):
   def __init__(
@@ -124,19 +138,21 @@ class SDFNeRF(nn.Module):
 def sphere_march(
   self,
   r_o, r_d,
-  iters: int = 64,
-  eps: float = 1e-3,
+  iters: int = 32,
+  eps: float = 5e-3,
   near: float = 0, far: float = 1,
 ):
   device = r_o.device
-  hits = torch.zeros(r_o.shape[:-1] + (1,), dtype=torch.bool, device=device)
-  curr_dist = torch.full_like(hits, near, dtype=torch.float)
-  for i in range(iters):
-    curr = r_o + r_d * curr_dist
-    dist = self(curr).reshape_as(curr_dist)
-    hits = hits | ((dist < eps) & (curr_dist >= near) & (curr_dist <= far))
-    curr_dist = torch.where(~hits, curr_dist + dist, curr_dist)
-    if hits.all(): break
+  with torch.no_grad():
+    hits = torch.zeros(r_o.shape[:-1] + (1,), dtype=torch.bool, device=device)
+    curr_dist = torch.full_like(hits, near, dtype=torch.float)
+    for i in range(iters):
+      curr = r_o + r_d * curr_dist
+      dist = self(curr).reshape_as(curr_dist)
+      hits = hits | ((dist < eps) & (curr_dist >= near) & (curr_dist <= far))
+      curr_dist = torch.where(~hits, curr_dist + dist, curr_dist)
+      # this saves some memory? but slows it down?
+      #if hits.all(): break
 
   curr = r_o + r_d * curr_dist
   return curr, hits, curr_dist
@@ -146,7 +162,7 @@ def throughput(
   r_o, r_d,
   far: float,
   near: float,
-  batch_size:int =64,
+  batch_size:int = 32,
 ):
   # some random jitter I guess?
   max_t = far+random.random()*(2/batch_size)
@@ -188,19 +204,3 @@ def masked_loss(
     loss_fn = F.binary_cross_entropy_with_logits
     mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
   return mask_weight * mask_loss + color_loss
-
-# Use loss from IDR, taking max occupancy along NeRF as segmentation.
-def sigmoid_loss(min_along_ray, densities, alpha: int=500):
-  throughput = -min_along_ray.squeeze(-1) * alpha
-  hits = (throughput > 0) & (densities > 0.5)
-  misses = ~hits
-  loss = 0
-  if misses.any():
-    loss = F.binary_cross_entropy_with_logits(
-      throughput[misses].reshape(-1, 1),
-      densities[misses].reshape(-1, 1),
-      # weight points which are far from the rounded value lower
-      #2 * (0.5 - (densities.round() - densities).abs()),
-    )
-    assert(loss.isfinite().all())
-  return loss
