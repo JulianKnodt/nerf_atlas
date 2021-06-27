@@ -89,8 +89,6 @@ def arguments():
     "--loss-fns", help="loss functions to use", nargs="+",
     choices=["l1", "l2", "rmse"], default=["l2"], type=str,
   )
-  a.add_argument("--l1-loss", help="Add l1 loss with output", action="store_true")
-  a.add_argument("--no-l2-loss", help="Remove l2 loss", action="store_true")
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
