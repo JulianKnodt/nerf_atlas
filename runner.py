@@ -189,7 +189,7 @@ def load(args, training=True):
     return src.loaders.original(
       args.data, training=training, normalize=False, size=size,
       white_bg=args.bg=="white",
-      with_mask= args.model == "sdf",
+      with_mask = (args.model == "sdf") and training,
       device=device,
     )
   elif kind == "dnerf":
@@ -319,8 +319,8 @@ def train(model, cam, labels, opt, args, sched=None):
           out[0,...,:3].clamp(min=0, max=1),
         ]
         if hasattr(model, "nerf"):
-          items.append(model.nerf.acc()[0,...,None].expand_as(ref0))
-          items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0))
+          items.append(model.nerf.acc()[0,...,None].expand_as(ref0).clamp(min=0, max=1))
+          items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0).clamp(min=0, max=1))
         elif args.model == "sdf":
           items.append(ref[0,...,-1,None].expand_as(ref0))
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
@@ -341,7 +341,7 @@ def test(model, cam, labels, args, training: bool = True):
   with torch.no_grad():
     for i in range(labels.shape[0]):
       ts = None if times is None else times[i:i+1, ...]
-      exp = labels[i]
+      exp = labels[i,...,:3]
       got = torch.zeros_like(exp)
       acc = torch.zeros_like(got)
       if args.backing_sdf: got_sdf = torch.zeros_like(got)

@@ -56,10 +56,13 @@ class SDF(nn.Module):
     self.alpha = alpha
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hit, t = sphere_march(self.underlying, r_o, r_d, near=self.near, far=self.far)
+    pts, hit, t = sphere_march(
+      self.underlying, r_o, r_d, near=self.near, far=self.far,
+      steps=32 if self.training else 64,
+    )
     rgb = self.refl(pts, r_d)
     out = torch.where(hit, rgb, torch.zeros_like(rgb))
-    if with_throughput:
+    if with_throughput and self.training:
       tput, _best_pos = throughput(self.underlying, r_o, r_d, self.far, self.near)
       out = torch.cat([out, -self.alpha*tput.unsqueeze(-1)], dim=-1)
     return out
