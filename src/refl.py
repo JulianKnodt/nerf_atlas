@@ -8,15 +8,18 @@ from .neural_blocks import ( SkipConnMLP, NNEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim )
 
 def load(args):
+  if args.space_kind == "identity":
+    space = IdentitySpace()
+  elif args.space_kind == "surface":
+    space = SurfaceSpace()
   raise NotImplementedError()
 
 class SurfaceSpace(nn.Module):
   def __init__(self):
     super().__init__()
     self.encode = SkipConnMLP(
-      in_size=3, out=2,
+      in_size=3, out=2, activation=nn.Softplus(),
       num_layers=3, hidden_size=64,
-      activation=nn.Softplus(),
     )
     # TODO see if there can be an activation here?
   def forward(self, x): return self.encode(x)
@@ -24,8 +27,7 @@ class SurfaceSpace(nn.Module):
   def dims(self): return 2
 
 class IdentitySpace(nn.Module):
-  def __init__(self):
-    super().__init__()
+  def __init__(self): super().__init__()
   def forward(self, x): return x
   @property
   def dims(self): return 3

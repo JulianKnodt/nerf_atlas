@@ -135,7 +135,7 @@ class SDFNeRF(nn.Module):
 def sphere_march(
   self,
   r_o, r_d,
-  iters: int = 24,
+  iters: int = 32,
   eps: float = 5e-3,
   near: float = 0, far: float = 1,
 ):
@@ -177,27 +177,32 @@ def throughput(
   best_pos = r_o  + idxs * step * r_d
   return self(best_pos), best_pos
 
+
 #@torch.jit.script
-def masked_loss(
-  # got and exp have 4 channels, where the last are got_mask and exp_mask
-  got,
-  exp,
-  mask_weight:float=15,
-):
-  got, got_mask = got.split([3,1],dim=-1)
-  exp, exp_mask = exp.split([3,1],dim=-1)
-  active = ((got_mask > 0) & (exp_mask > 0)).squeeze(-1)
-  misses = ~active
+def masked_loss(img_loss=F.mse_loss):
+  # masked loss takes some image loss, such as l2, l1 or ssim, and then applies it with an
+  # additional loss on the alpha channel.
+  def aux(
+    # got and exp have 4 channels, where the last are got_mask and exp_mask
+    got,
+    exp,
+    mask_weight:float=15,
+  ):
+    got, got_mask = got.split([3,1],dim=-1)
+    exp, exp_mask = exp.split([3,1],dim=-1)
+    active = ((got_mask > 0) & (exp_mask > 0)).squeeze(-1)
+    misses = ~active
 
-  color_loss = 0
-  if active.any():
-    got_active = got * active[..., None]
-    exp_active = exp * active[..., None]
-    color_loss = F.mse_loss(got_active, exp_active)
+    color_loss = 0
+    if active.any():
+      got_active = got * active[..., None]
+      exp_active = exp * active[..., None]
+      color_loss = img_loss(got_active, exp_active)
 
-  # This case is hit if the mask intersects nothing
-  mask_loss = 0
-  if misses.any():
-    loss_fn = F.binary_cross_entropy_with_logits
-    mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
-  return mask_weight * mask_loss + color_loss
+    # this case is hit if the mask intersects nothing
+    mask_loss = 0
+    if misses.any():
+      loss_fn = F.binary_cross_entropy_with_logits
+      mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
+    return mask_weight * mask_loss + color_loss
+  return aux

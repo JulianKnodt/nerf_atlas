@@ -38,10 +38,10 @@ dnerfae: clean
 
 sdf: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--render-size 128 --crop --epochs 5_000 --save models/lego_sdf.pt --crop-size 64 \
-	--near 2 --far 6 --batch-size 40 --model sdf --sdf-kind siren \
+	--render-size 128 --crop --epochs 25_000 --save models/lego_sdf.pt --crop-size 64 \
+	--near 2 --far 6 --batch-size 6 --model sdf --sdf-kind siren \
   -lr 5e-4 --no-sched --loss-window 750 --valid-freq 100 \
-  --nosave --sdf-eikonal 0.1
+  --nosave --sdf-eikonal 0.1 --loss-fns l1
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

@@ -223,14 +223,14 @@ def train(model, cam, labels, opt, args, sched=None):
   if args.epochs == 0: return
 
   loss_fns = [loss_map[lfn] for lfn in args.loss_fns]
-  assert(len(loss_fns) > 0)
+  assert(len(loss_fns) > 0), "must provide at least 1 loss function"
   if len(loss_fns) == 1: loss_fn = loss_fns[0]
   else:
     def loss_fn(x, ref):
       loss = 0
       for fn in loss_fns: loss = loss + fn(x, ref)
       return loss
-  if args.model == "sdf": loss_fn = sdf.masked_loss
+  if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
 
 
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
