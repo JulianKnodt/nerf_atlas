@@ -89,21 +89,18 @@ class SmoothedSpheres(SDFModel):
     out = smooth_min(sd, k=32.).reshape(p.shape[:-1])
     return out
 
-def sirenActivation(v): return (3*v).sin()
+def siren_act(v): return (3*v).sin()
 class SIREN(SDFModel):
   def __init__(self):
     super().__init__()
     self.siren = SkipConnMLP(
-      in_size=3, out=1,
-      enc=None,
-      activation=sirenActivation,
+      in_size=3, out=1, enc=None,
+      hidden_size=96,
+      activation=siren_act,
       # Do not have skip conns
       skip=1000,
     )
-  def forward(self, x):
-    out = self.siren(x).squeeze(-1)
-    assert(out.isfinite().all()), out[~out.isfinite()]
-    return out
+  def forward(self, x): return self.siren(x).squeeze(-1)
 
 class SDFNeRF(nn.Module):
   def __init__(
@@ -138,7 +135,7 @@ class SDFNeRF(nn.Module):
 def sphere_march(
   self,
   r_o, r_d,
-  iters: int = 32,
+  iters: int = 24,
   eps: float = 5e-3,
   near: float = 0, far: float = 1,
 ):

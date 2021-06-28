@@ -71,13 +71,6 @@ def arguments():
     choices=["tiny", "plain", "ae", "unisurf", "sdf"], default="plain",
   )
   a.add_argument(
-    "--sdf-kind", help="which SDF model to use", type=str,
-    choices=["spheres", "siren"], default="spheres",
-  )
-  a.add_argument(
-    "--sdf-eikonal", help="weight of SDF eikonal loss", type=float, default=0,
-  )
-  a.add_argument(
     "--bg", help="What kind of background to use for NeRF", type=str,
     choices=["black", "white", "mlp", "noise"], default="black",
   )
@@ -89,12 +82,22 @@ def arguments():
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
   a.add_argument(
-    "--loss-fns", help="loss functions to use", nargs="+",
-    choices=["l1", "l2", "rmse"], default=["l2"], type=str,
+    "--loss-fns", help="loss functions to use", nargs="+", type=str,
+    choices=["l1", "l2", "rmse"], default=["l2"],
   )
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
+  # TODO really fix MPIs
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
+
+  sdfa = a.add_argument_group("sdf")
+  sdfa.add_argument(
+    "--sdf-eikonal", help="weight of SDF eikonal loss", type=float, default=0,
+  )
+  sdfa.add_argument(
+    "--sdf-kind", help="which SDF model to use", type=str,
+    choices=["spheres", "siren"], default="siren",
+  )
 
   dnerf = a.add_argument_group("dnerf")
   dnerf.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
@@ -128,7 +131,7 @@ def arguments():
 
   ae = a.add_argument_group("auto encoder parameters")
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
-  ae.add_argument("--normalize-latent", help="Ensure latent space has norm 1", action="store_true")
+  ae.add_argument("--normalize-latent", help="L2 normalize latent space", action="store_true")
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
 
   return a.parse_args()

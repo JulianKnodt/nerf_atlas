@@ -37,11 +37,11 @@ dnerfae: clean
 	--sigmoid-kind thin --load models/djj_ae_gamma.pt  #--omit-bg #--serial-idxs
 
 sdf: clean
-	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--render-size 128 --crop --epochs 5_000 --save models/lego_sdf.pt --crop-size 64 \
 	--near 2 --far 6 --batch-size 40 --model sdf --sdf-kind siren \
-  -lr 5e-4 --no-sched --loss-window 750 --valid-freq 250 \
-  --sigmoid-kind thin --nosave --sdf-eikonal 0.1
+  -lr 5e-4 --no-sched --loss-window 750 --valid-freq 100 \
+  --nosave --sdf-eikonal 0.1
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
