@@ -3,6 +3,13 @@ PHONY:
 clean:
 	-@rm outputs/*.png
 
+volsdf: clean
+	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--render-size 64 --crop --epochs 30_000 --crop-size 32 \
+	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind siren \
+	-lr 5e-4 --no-sched --loss-window 750 --valid-freq 100 \
+	--nosave --sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500 --sigmoid-kind fat
+
 food: clean
 	python3 runner.py -d data/food/ --data-kind shiny --render-size 64 \
 	--crop --epochs 50_000  --save models/food.pt --model ae --crop --batch-size 4 \

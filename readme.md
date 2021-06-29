@@ -70,6 +70,9 @@ Model Level:
 - NeRFAE (NeRF Auto Encoder): Our extension, which encodes every point in space as a vector in a
   latent material space, and derives density and RGB from this latent space. In theory this
   should allow for similar points to be learned more effectively.
+- [VolSDF](https://arxiv.org/pdf/2106.12052.pdf) Extends NeRF by volume rendering an SDF.
+  This is probably one of the most practical ways to do volume rendering, i.e. seems like the
+  most promising method because it merges both volumetric and surface rendering.
 - [D-NeRF](https://arxiv.org/abs/2011.13961) for dynamic scenes, using an MLP to encode a
   positional change.
   - Convolutional Update Operator based off of [RAFT's](https://arxiv.org/pdf/2003.12039.pdf).

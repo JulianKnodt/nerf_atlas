@@ -237,7 +237,6 @@ class CommonNeRF(nn.Module):
 
     return curr
 
-
 class TinyNeRF(CommonNeRF):
   # No frills, single MLP NeRF
   def __init__(
@@ -421,6 +420,50 @@ class NeRFAE(CommonNeRF):
     sky = self.sky_color(elev_azim_r_d, self.weights)
     return color + sky
 
+# https://arxiv.org/pdf/2106.12052.pdf
+class VolSDF(CommonNeRF):
+  def __init__(
+    self,
+    sdf,
+    # how many features to pass from density to RGB
+    intermediate_size: int = 32,
+    out_features: int = 3,
+    device: torch.device = "cuda",
+    **kwargs,
+  ):
+    super().__init__(**kwargs, device=device)
+    self.sdf = sdf
+    self.second = SkipConnMLP(
+      in_size=5, out=out_features,
+      enc=NNEncoder(input_dims=5, device=device),
+      num_layers=5, hidden_size=64, xavier_init=True,
+    )
+    self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
+  def forward(self, rays):
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+    )
+    return self.from_pts(pts, ts, r_o, r_d)
+  def from_pts(self, pts, ts, r_o, r_d):
+    latent = self.curr_latent(pts.shape)
+    mip_enc = self.mip_encoding(r_o, r_d, ts)
+    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+
+    density = self.scale.reciprocal() * self.laplace_cdf(-self.sdf.from_pts(pts))
+    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
+    self.alpha, self.weights = alpha_from_density(density, ts, r_d)
+    rgb = self.feat_act(self.second(torch.cat([pts, elev_azim_r_d], dim=-1)))
+    return volumetric_integrate(self.weights, rgb)
+  def laplace_cdf(self, sdf_vals):
+    scaled = sdf_vals/self.scale
+    return torch.where(
+      scaled <= 0,
+      scaled.exp()/2,
+      1 - scaled.neg().exp()/2
+    )
+
+
+
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
   def __init__(self, canonical: CommonNeRF, gru_flow:bool=False, device="cuda"):
@@ -511,6 +554,7 @@ class DynamicNeRFAE(nn.Module):
     # TODO is this best as a sum, or is some other kind of tform better?
     return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
 
+
 class Unisurf(CommonNeRF):
   def __init__(
     self,
@@ -538,7 +582,6 @@ class Unisurf(CommonNeRF):
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, ts, r_o, r_d)
-
   def from_pts(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
     mip_enc = self.mip_encoding(r_o, r_d, ts)

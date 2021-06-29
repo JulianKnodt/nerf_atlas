@@ -54,6 +54,7 @@ class SDF(nn.Module):
     self.far = t_far
     self.near = t_near
     self.alpha = alpha
+  def from_pts(self, pts): return self.underlying(pts)
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t = sphere_march(

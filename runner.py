@@ -68,7 +68,7 @@ def arguments():
   )
   a.add_argument(
     "--model", help="which model do we want to use", type=str,
-    choices=["tiny", "plain", "ae", "unisurf", "sdf"], default="plain",
+    choices=["tiny", "plain", "ae", "unisurf", "volsdf", "sdf"], default="plain",
   )
   a.add_argument(
     "--bg", help="What kind of background to use for NeRF", type=str,
@@ -413,6 +413,9 @@ def load_model(args):
     constructor = nerf.NeRFAE
     kwargs["normalize_latent"] = args.normalize_latent
     kwargs["encoding_size"] = args.encoding_size
+  elif args.model == "volsdf":
+    constructor = nerf.VolSDF
+    kwargs["sdf"] = sdf.load(args)
   elif args.model == "unisurf": constructor = nerf.Unisurf
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
