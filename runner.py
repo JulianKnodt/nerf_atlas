@@ -17,7 +17,7 @@ from datetime import datetime
 from tqdm import trange
 from itertools import chain
 
-import src.loaders
+import src.loaders as loaders
 import src.nerf as nerf
 import src.utils as utils
 import src.sdf as sdf
@@ -29,7 +29,7 @@ def arguments():
   a.add_argument("-d", "--data", help="path to data", required=True)
   a.add_argument(
     "--data-kind", help="Kind of data to load", default="original",
-    choices=["original", "single_video", "dnerf", "pixel-single", "shiny"],
+    choices=["original", "single_video", "dnerf", "dtu", "pixel-single", "shiny"],
   )
   a.add_argument(
     "--derive-kind", help="Attempt to derive the kind if a single file is given",
@@ -184,26 +184,32 @@ def load(args, training=True):
   if not args.neural_upsample: args.render_size = args.size
   size = args.size
   if kind == "original":
-    return src.loaders.original(
+    return loaders.original(
+      args.data, training=training, size=size,
+      with_mask = (args.model == "sdf") and training,
+      device=device,
+    )
+  elif kind == "dtu":
+    return loaders.dtu(
       args.data, training=training, normalize=False, size=size,
       white_bg=args.bg=="white",
       with_mask = (args.model == "sdf") and training,
       device=device,
     )
   elif kind == "dnerf":
-    return src.loaders.dnerf(
+    return loaders.dnerf(
       args.data, training=training, size=size, time_gamma=args.time_gamma,
       white_bg=args.bg=="white", device=device,
     )
   elif kind == "single_video":
-    return src.loaders.single_video(args.data)
+    return loaders.single_video(args.data)
   elif kind == "pixel-single":
-    img, cam = src.loaders.single_image(args.data)
+    img, cam = loaders.single_image(args.data)
     setattr(args, "img", img)
     args.batch_size = 1
     return img, cam
   elif kind == "shiny":
-    src.loaders.shiny(args.data)
+    loaders.shiny(args.data)
     raise NotImplementedError()
   else: raise NotImplementedError(kind)
 

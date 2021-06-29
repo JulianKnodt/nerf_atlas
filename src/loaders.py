@@ -79,6 +79,53 @@ def dnerf(
 
   return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal)
 
+def dtu(path=".", training=True, size=256, with_mask=False, device="cuda"):
+  import cv2
+
+  num_imgs = 0
+  exp_imgs = []
+  image_dir = os.path.join(path, "image")
+  for f in sorted(os.listdir(image_dir)):
+    if f.startswith("._"): continue
+    num_imgs += 1
+    img = load_image(os.path.join(image_dir, f), resize=(SIZE, SIZE)).to(device)
+    exp_imgs.append(img)
+
+  exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
+
+  if with_mask:
+    exp_masks = []
+    mask_dir = os.path.join(path, "mask")
+    for f in sorted(os.listdir(mask_dir)):
+      if f.startswith("._"): continue
+      mask = load_image(os.path.join(mask_dir, f), resize=(SIZE, SIZE)).to(device)
+      exp_masks.append(mask.max(dim=-1)[0].ceil())
+    exp_masks = torch.stack(exp_masks, dim=0).to(device)
+    exp_imgs = torch.cat([exp_imgs, exp_masks], dim=-1)
+  tfs = np.load(os.path.join(DIR, "cameras.npz"))
+  Ps = [tfs[f"world_mat_{i}"] @ tfs[f"scale_mat_{i}"]  for i in range(num_imgs)]
+  def KRt_from_P(P):
+    K, R, t, _, _, _, _ = cv2.decomposeProjectionMatrix(P)
+    K = K/K[2,2]
+    intrinsics = np.eye(4)
+    intrinsics[:3, :3] = K
+
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, :3] = R.transpose()
+    pose[:3,3] = (t[:3] / t[3])[:,0]
+    return torch.from_numpy(intrinsics).float().to(device),\
+      torch.from_numpy(pose).float().to(device)
+  intrinsics, poses = list(zip(*[KRt_from_P(p[:3, :4]) for p in Ps]))
+  poses = torch.stack(poses, dim=0)
+  # normalize distance to be at most 1 for convenience
+  #max_dist = torch.linalg.norm(poses[:, :3, 3], dim=-1).max()
+  #poses[:, :3, 3] /= max_dist
+  intrinsics = torch.stack(intrinsics, dim=0)
+
+  return exp_imgs, cameras.DTUCamera(pose=poses, intrinsic=intrinsics)
+
+
+
 # taken from https://github.com/nex-mpi/nex-code/blob/main/utils/load_llff.py#L59
 def shiny(path, training=True, size=256, device="cuda"):
   #tfs = open(os.path.join(path, "poses_bounds.npy"))

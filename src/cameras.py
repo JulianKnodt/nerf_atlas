@@ -10,8 +10,6 @@ import random
 # General Camera interface
 @dataclass
 class Camera(nn.Module):
-  camera_to_world = None
-  world_to_camera = None
   # samples from positions in [0,1] screen space to global
   def sample_positions(self, positions): raise NotImplementedError()
 
@@ -170,3 +168,68 @@ class NeRFMMTimeCamera(Camera):
   ):
     raise NotImplementedError()
     ...
+
+def lift(x,y,z,intrinsics, size):
+    total_shape = x.shape
+    fx = intrinsics[..., 0, 0, None].expand(total_shape)
+    fy = intrinsics[..., 1, 1, None].expand(total_shape)
+    cx = intrinsics[..., 0, 2, None].expand(total_shape) # size of image
+    cy = intrinsics[..., 1, 2, None].expand(total_shape) # size of image
+    sk = intrinsics[..., 0, 1, None].expand(total_shape)
+    x = x.expand(total_shape)
+    y = y.expand(total_shape)
+    z = z.expand(total_shape)
+
+    x_lift = (x - cx + cy*sk/fy - sk*y/fy) / fx * z
+    y_lift = (y - cy) / fy * z
+
+    # homogeneous
+    return torch.stack([x_lift, y_lift, z, torch.ones_like(z)], dim=-1)
+
+# A camera specifically for rendering DTU scenes as described in IDR.
+@dataclass
+class DTUCamera(Camera):
+  pose: torch.Tensor = None
+  intrinsic: torch.Tensor = None
+  device: str = "cuda"
+  def __len__(self): return self.pose.shape[0]
+  # support indexing to get sub components of a camera
+  def __getitem__(self, v):
+    return DTUCamera(pose=self.pose[v], intrinsic=self.intrinsic[v], device=self.device)
+  def sample_positions(
+    self,
+    position_samples,
+    size:int=512,
+    with_noise:bool=False,
+  ):
+    device = self.device
+    pose = self.pose
+    intrinsic = self.intrinsic
+    # copied directly from https://github.com/lioryariv/idr/blob/main/code/utils/rend_util.py#L48
+    if pose.shape[1] == 7: #In case of quaternion vector representation
+      raise NotImplementedError()
+    # In case of pose matrix representation
+    else: r_o = pose[:, :3, 3]
+
+    W, H, _ = position_samples.shape
+    N = len(self)
+
+    # 1600, 1200 is magical because it's the size of the original images given to us
+    # In theory it would need to be changed if training on a different image set.
+    normalize= torch.tensor([1600, 1200], device=device, dtype=torch.float)/size
+    u,v = (position_samples * normalize)\
+      .reshape(-1, 2)\
+      .split([1,1], dim=-1)
+    u = u.reshape(1, -1).expand(N, -1)
+    v = v.reshape(1, -1).expand(N, -1)
+
+    points = lift(u, v, torch.ones_like(u), intrinsics=intrinsic, size=size)
+
+    world_coords = torch.bmm(pose, points.permute(0,2,1)).permute(0,2,1)[..., :3]
+    print(r_o.shape)
+    exit()
+
+    r_o = r_o[:, None, :].expand_as(world_coords)
+    r_d = F.normalize(world_coords - r_o, dim=-1)
+
+    return torch.cat([r_o, r_d], dim=-1).reshape(N, W, H, 6)
