@@ -294,10 +294,9 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
     if hasattr(model, "nerf") and model.nerf.unisurf_loss > 0:
       loss = loss + model.nerf.unisurf_loss
-    if args.sdf_eikonal > 0 and args.model == "sdf":
-      # TODO this is untested
+    if args.sdf_eikonal > 0 and hasattr(model, "sdf"):
       loss = loss + args.sdf_eikonal * \
-        utils.eikonal_loss(5*model.underlying.normals(torch.randn(1024, 3, device=device)))
+        utils.eikonal_loss(model.sdf.normals(5*torch.randn(1024, 3, device=device)))
 
     update(display)
     losses.append(l2_loss)
