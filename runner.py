@@ -36,13 +36,11 @@ def arguments():
     action="store_false",
   )
   # various size arguments
-  a.add_argument("--size", help="size to train at w/ upsampling", type=int, default=32)
-  a.add_argument(
-    "--render-size", help="size to render images at w/o upsampling", type=int, default=16
-  )
+  a.add_argument("--size", help="post-upsampling size", type=int, default=32)
+  a.add_argument("--render-size", help="pre-upsampling size", type=int, default=16)
 
   a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
-  a.add_argument("--batch-size", help="size of each training batch", type=int, default=8)
+  a.add_argument("--batch-size", help="# views for each training batch", type=int, default=8)
   a.add_argument("--neural-upsample", help="add neural upsampling", action="store_true")
   a.add_argument("--crop", help="train with cropping", action="store_true")
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
@@ -50,7 +48,6 @@ def arguments():
   a.add_argument(
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
-  a.add_argument("--nerf-eikonal", help="Add eikonal loss for NeRF", action="store_true")
   a.add_argument("--unisurf-loss", help="Add unisurf loss", action="store_true")
   a.add_argument(
     "--sigmoid-kind", help="What sigmoid to use, curr keeps old", default="thin",
@@ -83,6 +80,7 @@ def arguments():
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
   a.add_argument(
     "--loss-fns", help="loss functions to use", nargs="+", type=str,
+    # TODO add SSIM here? Or LPIPS?
     choices=["l1", "l2", "rmse"], default=["l2"],
   )
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
@@ -183,7 +181,7 @@ def load(args, training=True):
     if args.data.endswith(".mp4"): kind = "single_video"
     elif args.data.endswith(".jpg"): kind = "pixel-single"
 
-  if not args.neural_upsample: args.size = args.render_size
+  if not args.neural_upsample: args.render_size = args.size
   size = args.size
   if kind == "original":
     return src.loaders.original(
@@ -242,7 +240,7 @@ def train(model, cam, labels, opt, args, sched=None):
     times = labels[-1]
     labels = labels[0]
 
-  get_crop = lambda: (0,0, args.render_size, args.render_size)
+  get_crop = lambda: (0,0, args.size, args.size)
   cs = args.crop_size
   if args.crop:
     get_crop = lambda: (
@@ -288,9 +286,6 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = loss + eik + s
       #display["eik"] = f"{eik:.02f}"
       #display["s"] = f"{s:.02f}"
-    if args.nerf_eikonal:
-      loss = loss + 1e-3 * model.nerf.eikonal_loss
-      display["n-eik"] = f"{model.nerf.eikonal_loss:.02f}"
     if args.latent_l2_weight > 0:
       loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
     # experiment with emptying the model at the beginning
@@ -383,6 +378,7 @@ def load_mip(args):
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
   if args.model == "sdf": return
+  if not hasattr(model, "nerf"): return
 
   model.nerf.set_bg(args.bg)
   if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
@@ -402,7 +398,6 @@ def load_model(args):
     "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0,
     "per_point_latent_size": (1 + 3 + 64) if args.backing_sdf else 0,
     "sigmoid_kind": args.sigmoid_kind,
-    "eikonal_loss": args.nerf_eikonal,
     "unisurf_loss": args.unisurf_loss,
     "sigmoid_kind": args.sigmoid_kind if args.sigmoid_kind != "curr" else "thin",
     "bg": args.bg,

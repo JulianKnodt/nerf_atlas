@@ -6,7 +6,7 @@ import random
 from .neural_blocks import (
   SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder
 )
-from .utils import ( dir_to_elev_azim, autograd, eikonal_loss )
+from .utils import ( dir_to_elev_azim, autograd )
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -40,11 +40,11 @@ def compute_pts_ts(
 @torch.jit.script
 def alpha_from_density(
   density, ts, r_d,
-  shifted_softplus: bool = True,
+  softplus: bool = True,
 ):
   device=density.device
 
-  if shifted_softplus: sigma_a = F.softplus(density-1)
+  if softplus: sigma_a = F.softplus(density-1)
   else: sigma_a = F.relu(density)
 
   end_val = torch.tensor([1e10], device=device, dtype=torch.float)
@@ -93,7 +93,6 @@ class CommonNeRF(nn.Module):
     instance_latent_size: int = 0,
     per_pixel_latent_size: int = 0,
     per_point_latent_size: int = 0,
-    eikonal_loss: bool = False,
     unisurf_loss: bool = False,
 
     sigmoid_kind: str = "thin",
@@ -123,9 +122,6 @@ class CommonNeRF(nn.Module):
     self.alpha = None
     self.noise_std = 0.2
     # TODO add activation for using sigmoid or fat sigmoid
-
-    self.rec_eikonal_loss = eikonal_loss
-    self.eikonal_loss = 0
 
     self.rec_unisurf_loss = unisurf_loss
     self.unisurf_loss = 0
@@ -162,11 +158,6 @@ class CommonNeRF(nn.Module):
     else: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
   def sky_from_mlp(self, elaz_r_d, weights):
     return (1-weights.sum(dim=0)).unsqueeze(-1) * fat_sigmoid(self.sky_mlp(elaz_r_d))
-  def record_eikonal_loss(self, pts, density):
-    if not self.rec_eikonal_loss or not self.training: return
-    self.eikonal_loss = eikonal_loss(autograd(pts, density))
-    return self.eikonal_loss
-
   def record_unisurf_loss(self, pts, alpha):
     if not self.rec_unisurf_loss or not self.training: return
     alpha = alpha.unsqueeze(-1)
@@ -267,7 +258,6 @@ class TinyNeRF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
-    self.record_eikonal_loss(pts, density)
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, self.feat_act(feats)) + \
@@ -320,7 +310,6 @@ class PlainNeRF(CommonNeRF):
     first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
 
     density = first_out[..., 0]
-    self.record_eikonal_loss(pts, density)
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
@@ -405,7 +394,6 @@ class NeRFAE(CommonNeRF):
     if self.normalize_latent: encoded = F.normalize(encoded, dim=-1)
 
     density = self.density_tform(encoded).squeeze(-1)
-    self.record_eikonal_loss(pts, density)
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
@@ -423,11 +411,9 @@ class NeRFAE(CommonNeRF):
 # https://arxiv.org/pdf/2106.12052.pdf
 class VolSDF(CommonNeRF):
   def __init__(
-    self,
-    sdf,
+    self, sdf,
     # how many features to pass from density to RGB
-    intermediate_size: int = 32,
-    out_features: int = 3,
+    intermediate_size: int = 32, out_features: int = 3,
     device: torch.device = "cuda",
     **kwargs,
   ):
@@ -451,7 +437,7 @@ class VolSDF(CommonNeRF):
 
     density = self.scale.reciprocal() * self.laplace_cdf(-self.sdf.from_pts(pts))
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
-    self.alpha, self.weights = alpha_from_density(density, ts, r_d)
+    self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
     rgb = self.feat_act(self.second(torch.cat([pts, elev_azim_r_d], dim=-1)))
     return volumetric_integrate(self.weights, rgb)
   def laplace_cdf(self, sdf_vals):
@@ -540,7 +526,7 @@ class DynamicNeRFAE(nn.Module):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
     )
-    if self.canon.rec_eikonal_loss or self.canon.rec_unisurf_loss: pts.requires_grad_()
+    if self.canon.rec_unisurf_loss: pts.requires_grad_()
     # small deviation for regularization
     if self.training and self.time_noise_std > 0: t = t + self.time_noise_std * torch.randn_like(t)
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))

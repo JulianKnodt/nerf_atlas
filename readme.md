@@ -95,10 +95,10 @@ Training/Efficiency:
 - Train on cropped regions of the image for smaller GPUs.
 - Neural Upsampling with latent spaces inspired by
   [GIRAFFE](https://arxiv.org/pdf/2011.12100.pdf). The results don't look great, but to be fair
-  the paper also has some artifacts. \*I accidentally broke this while working on other things,
-  but will fix it... eventually.
+  the paper also has some artifacts.
 
-Note: NeRF is stupid slow.
+Note: NeRF is stupid slow. Writing out one of these extensions takes about half an hour,
+training it takes about a day, and my GPU is much smaller than any used in the papers.
 
 ---
 

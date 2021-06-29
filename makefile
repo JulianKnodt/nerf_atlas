@@ -14,7 +14,6 @@ food: clean
 	python3 runner.py -d data/food/ --data-kind shiny --render-size 64 \
 	--crop --epochs 50_000  --save models/food.pt --model ae --crop --batch-size 4 \
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-  #--load models/food.pt --decay 1e-6
 
 # note: l1 loss completely breaks dnerf
 dnerf: clean
@@ -86,9 +85,9 @@ single-video: clean
 # TODO fix this, neural upsampling is broken now
 og_upsample: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--render-size 64 --crop --epochs 80_000 --save models/lego_up.pt \
-	--near 2 --far 6 --batch-size 5 --crop-size 26 --model plain -lr 5e-4 \
-	--l1-loss --valid-freq 499 --no-sched --neural-upsample #--load models/lego_up.pt #--omit-bg
+	--render-size 32 --size 64 --epochs 80_000 --save models/lego_up.pt \
+	--near 2 --far 6 --batch-size 4 --model plain -lr 5e-4 \
+	--loss-fns l1 --valid-freq 499 --no-sched --neural-upsample
 
 
 # [WIP]
