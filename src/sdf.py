@@ -6,7 +6,7 @@ import random
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP )
 from .utils import ( autograd, eikonal_loss )
-from .refl import ( BasicReflectance )
+from .refl import ( Basic )
 
 def load(args):
   if args.sdf_kind == "spheres":
@@ -17,7 +17,7 @@ def load(args):
   # TODO need to add BSDF model and lighting here
   sdf = SDF(
     model,
-    BasicReflectance(),
+    Basic(),
     t_near=args.near,
     t_far=args.far,
   )

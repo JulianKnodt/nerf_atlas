@@ -312,7 +312,7 @@ def train(model, cam, labels, opt, args, sched=None):
           ref0,
           out[0,...,:3].clamp(min=0, max=1),
         ]
-        if hasattr(model, "nerf"):
+        if hasattr(model, "nerf") and args.model != "volsdf":
           items.append(model.nerf.acc()[0,...,None].expand_as(ref0).clamp(min=0, max=1))
           items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0).clamp(min=0, max=1))
         elif args.model == "sdf":

@@ -419,11 +419,8 @@ class VolSDF(CommonNeRF):
   ):
     super().__init__(**kwargs, device=device)
     self.sdf = sdf
-    self.second = SkipConnMLP(
-      in_size=5, out=out_features,
-      enc=NNEncoder(input_dims=5, device=device),
-      num_layers=5, hidden_size=64, xavier_init=True,
-    )
+    # the reflectance model is in the SDF, so don't encode it here.
+    # TODO add a bounding radius here for preventing spheres reaching infinite length?
     self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
@@ -436,9 +433,11 @@ class VolSDF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     density = self.scale.reciprocal() * self.laplace_cdf(-self.sdf.from_pts(pts))
-    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
-    rgb = self.feat_act(self.second(torch.cat([pts, elev_azim_r_d], dim=-1)))
+
+    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
+    rgb = self.sdf.refl(pts, r_d.unsqueeze(0).expand_as(pts))
+    #rgb = self.feat_act(self.second(torch.cat([pts, elev_azim_r_d], dim=-1)))
     return volumetric_integrate(self.weights, rgb)
   def laplace_cdf(self, sdf_vals):
     scaled = sdf_vals/self.scale
