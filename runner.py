@@ -94,7 +94,7 @@ def arguments():
   )
   sdfa.add_argument(
     "--sdf-kind", help="which SDF model to use", type=str,
-    choices=["spheres", "siren"], default="siren",
+    choices=["spheres", "siren", "local"], default="siren",
   )
 
   dnerf = a.add_argument_group("dnerf")
@@ -185,14 +185,14 @@ def load(args, training=True):
   size = args.size
   if kind == "original":
     return loaders.original(
-      args.data, training=training, size=size,
+      args.data, training=training, normalize=False, size=size,
+      white_bg=args.bg=="white",
       with_mask = (args.model == "sdf") and training,
       device=device,
     )
   elif kind == "dtu":
     return loaders.dtu(
-      args.data, training=training, normalize=False, size=size,
-      white_bg=args.bg=="white",
+      args.data, training=training, size=size,
       with_mask = (args.model == "sdf") and training,
       device=device,
     )
@@ -280,6 +280,7 @@ def train(model, cam, labels, opt, args, sched=None):
       out = TVF.adjust_sharpness(out.permute(0,3,1,2),1.5).permute(0,2,3,1)
       ref = TVF.adjust_sharpness(ref.permute(0,3,1,2),1.5).permute(0,2,3,1) # TODO cache sharpen?
     loss = loss_fn(out, ref)
+    assert(loss.isfinite()), f"Got {loss.item()} loss"
     l2_loss = loss.item()
     display = {
       "l2": f"{l2_loss:.04f}",

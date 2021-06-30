@@ -9,10 +9,9 @@ from .utils import ( autograd, eikonal_loss )
 from .refl import ( Basic )
 
 def load(args):
-  if args.sdf_kind == "spheres":
-    model = SmoothedSpheres()
-  elif args.sdf_kind == "siren":
-    model = SIREN()
+  if args.sdf_kind == "spheres": model = SmoothedSpheres()
+  elif args.sdf_kind == "siren": model = SIREN()
+  elif args.sdf_kind == "local": model = Local()
   else: raise NotImplementedError()
   # TODO need to add BSDF model and lighting here
   sdf = SDF(
@@ -71,7 +70,7 @@ class SDF(nn.Module):
       out = torch.cat([out, -self.alpha*tput.unsqueeze(-1)], dim=-1)
     return out
 
-@torch.jit.script
+#@torch.jit.script
 def smooth_min(v, k:float=32, dim:int=0):
   return -torch.exp(-k * v).sum(dim).clamp(min=1e-6).log()/k
 
@@ -96,18 +95,37 @@ class SmoothedSpheres(SDFModel):
     out = smooth_min(sd, k=32.).reshape(p.shape[:-1])
     return out
 
-def siren_act(v): return (3*v).sin()
+#def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):
   def __init__(self):
     super().__init__()
     self.siren = SkipConnMLP(
       in_size=3, out=1, enc=None,
       hidden_size=96,
-      activation=siren_act,
+      activation=torch.sin,
       # Do not have skip conns
       skip=1000,
     )
-  def forward(self, x): return self.siren(x).squeeze(-1)
+  def forward(self, x):
+    out = self.siren((30*x).sin()).squeeze(-1)
+    assert(out.isfinite().all())
+    return out
+
+class Local(SDFModel):
+  def __init__(
+    self,
+    partition_sz: int = 0.5,
+    latent_sz:int = 16,
+  ):
+    super().__init__()
+    self.part_sz = partition_sz
+    self.latent = SkipConnMLP(in_size=3,out=latent_sz,skip=4)
+    self.tform = SkipConnMLP(in_size=3, out=1, latent_size=latent_sz)
+  def forward(self, x):
+    local = x % self.part_sz
+    latent = self.latent(x//self.part_sz)
+    out = self.tform(local, latent)
+    return out.squeeze(-1)
 
 class SDFNeRF(nn.Module):
   def __init__(

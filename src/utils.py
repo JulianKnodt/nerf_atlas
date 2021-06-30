@@ -180,7 +180,7 @@ def elev_azim_to_dir(elev_azim):
   return direction
 
 
-@torch.jit.script
+#@torch.jit.script
 def dir_to_elev_azim(direc):
   x, y, z = F.normalize(direc, dim=-1).clamp(min=-1+1e-10, max=1-1e-10).split([1,1,1], dim=-1)
   elev = z.asin()

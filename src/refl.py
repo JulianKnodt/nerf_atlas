@@ -8,26 +8,28 @@ from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector )
 
 def load(args):
-  if args.space_kind == "identity":
-    space = IdentitySpace()
-  elif args.space_kind == "surface":
-    space = SurfaceSpace()
+  if args.space_kind == "identity": space = IdentitySpace
+  elif args.space_kind == "surface": space = SurfaceSpace
 
   if args.refl_kind == "basic": cons = Basic
-  elif args.refl_kind == "rusin": cons = Rusin
+  elif args.refl_kind == "rusin": conacts = Rusin
 
   # TODO assign view, normal, lighting here?
-  return cons(space=space)
+  return cons(space=space())
 
 class SurfaceSpace(nn.Module):
-  def __init__(self):
+  def __init__(
+    self,
+    act=nn.LeakyReLU(),
+    final_act=torch.sin,
+  ):
     super().__init__()
     self.encode = SkipConnMLP(
-      in_size=3, out=2, activation=nn.Softplus(),
-      num_layers=3, hidden_size=64,
+      in_size=3, out=2, activation=act,
+      num_layers=5, hidden_size=64,
     )
-    # TODO see if there can be an activation here?
-  def forward(self, x): return self.encode(x)
+    self.act = activation
+  def forward(self, x): return self.act(self.encode(x))
   @property
   def dims(self): return 2
 
@@ -37,11 +39,9 @@ class IdentitySpace(nn.Module):
   @property
   def dims(self): return 3
 
+def fat_sigmoid(x, eps:float=1e-3): return x.sigmoid * (1+2*eps) - eps
 class Reflectance(nn.Module):
-  def __init__(
-    self,
-    activation=torch.sigmoid,
-  ):
+  def __init__(self, activation=fat_sigmoid):
     super().__init__()
     self.act = activation
   def forward(self, r_d): raise NotImplementedError()
@@ -52,14 +52,16 @@ def enc_norm_dir(kind=None):
   if kind is None: return 0, empty
   elif kind == "raw": return 3, ident
   elif kind == "elaz": return 2, dir_to_elev_azim
-  else:
-    raise NotImplementedError()
+  else: raise NotImplementedError()
 
 # basic reflectance takes a position and a direction
 class Basic(Reflectance):
   def __init__(
     self,
     space=None,
+
+    # latent size for rendering
+    latent_size:int=0,
 
     view="elaz",
     normal=None,
@@ -70,18 +72,17 @@ class Basic(Reflectance):
     normal_dims, self.normal_enc = enc_norm_dir(normal)
     in_size = view_dims + normal_dims + space.dims
     self.mlp = SkipConnMLP(
-      in_size = in_size, out = 3,
+      in_size=in_size, out=3, latent_size=latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=3, hidden_size=64,
-      xavier_init=True,
+      num_layers=5, hidden_size=128, xavier_init=True,
     )
     self.space = space
-  def forward(self, x, view, normal=None):
+  def forward(self, x, view, normal=None, light=None, latent=None):
     view = self.view_enc(view)
     normal = self.normal_enc(normal)
     x = self.space(x)
     v = torch.cat([v for v in [x, view, normal] if v is not None], dim=-1)
-    return self.act(self.mlp(v))
+    return self.act(self.mlp(v, latent))
 
 
 class Diffuse(Reflectance):
@@ -114,7 +115,7 @@ def Rusin(Reflectance):
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
       in_size = in_size, out=3,
-      enc=NNEncoder(input_dims=in_size),
+      enc=FourierEncoder(input_dims=in_size),
       xavier_init=True,
     )
     self.space = space
@@ -134,7 +135,7 @@ def nonzero_eps(v, eps: float=1e-7):
   return torch.where(v.abs() < eps, torch.full_like(v, eps), v)
 
 # assumes wo and wi are already in local coordinates
-@torch.jit.script
+#@torch.jit.script
 def rusin_params(wo, wi):
   wo = F.normalize(wo, dim=-1)
   wi = F.normalize(wi, dim=-1)
@@ -164,7 +165,7 @@ def rusin_params(wo, wi):
 # https://github.com/mitsuba-renderer/mitsuba2/blob/main/include/mitsuba/core/vector.h#L116
 # had to be significantly modified in order to add numerical stability while back-propagating.
 # returns a frame to be used for normalization
-@torch.jit.script
+#@torch.jit.script
 def coordinate_system(n):
   n = F.normalize(n, eps=1e-7, dim=-1)
   x, y, z = n.split(1, dim=-1)
@@ -186,7 +187,7 @@ def coordinate_system(n):
   return torch.stack([s, t, n], dim=-1)
 
 # frame: [..., 3, 3], wo: [..., 3], return a vector of wo in the reference frame
-@torch.jit.script
+#@torch.jit.script
 def to_local(frame, wo):
   wo = wo.unsqueeze(-1)#.expand_as(frame) # TODO see if commenting out this expand_as works
   out = F.normalize((frame * wo).sum(dim=-2), eps=1e-7, dim=-1)

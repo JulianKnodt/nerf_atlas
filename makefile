@@ -49,11 +49,18 @@ sdf: clean
   -lr 5e-4 --no-sched --loss-window 750 --valid-freq 100 \
   --nosave --sdf-eikonal 0.1 --loss-fns l1 --save-freq 2500
 
+dtu: clean
+	python3 runner.py -d data/DTU/scan105/ --data-kind dtu \
+	--size 64 --crop --epochs 25_000 --save models/dtu105.pt --nosave \
+	--near 0.1 --far 2 --batch-size 4 --crop-size 32 --model plain -lr 5e-4 \
+	--loss-fns l2 --valid-freq 499 --no-sched --sdf-kind local \
+  #--load models/dtu105.pt #--omit-bg
+
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --crop --epochs 80_000 --save models/lego.pt \
 	--near 2 --far 6 --batch-size 5 --crop-size 26 --model plain -lr 5e-4 \
-	--l1-loss --valid-freq 499 --no-sched #--load models/lego.pt #--omit-bg
+	--loss-fns l2 --valid-freq 499 --no-sched #--load models/lego.pt #--omit-bg
 
 unisurf: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

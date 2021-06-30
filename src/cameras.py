@@ -226,8 +226,6 @@ class DTUCamera(Camera):
     points = lift(u, v, torch.ones_like(u), intrinsics=intrinsic, size=size)
 
     world_coords = torch.bmm(pose, points.permute(0,2,1)).permute(0,2,1)[..., :3]
-    print(r_o.shape)
-    exit()
 
     r_o = r_o[:, None, :].expand_as(world_coords)
     r_d = F.normalize(world_coords - r_o, dim=-1)
