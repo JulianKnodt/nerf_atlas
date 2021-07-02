@@ -7,21 +7,27 @@ from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector )
 
-def load(args):
+def load(args, latent_size=0):
   if args.space_kind == "identity": space = IdentitySpace
   elif args.space_kind == "surface": space = SurfaceSpace
+  else: raise NotImplementedError()
 
+  kwargs = {
+    "latent_size": latent_size,
+  }
   if args.refl_kind == "basic": cons = Basic
-  elif args.refl_kind == "rusin": conacts = Rusin
+  elif args.refl_kind == "rusin": cons = Rusin
+  elif args.refl_kind == "view_dir": cons = View
+  else: raise NotImplementedError()
 
   # TODO assign view, normal, lighting here?
-  return cons(space=space())
+  return cons(space=space(), **kwargs)
 
 class SurfaceSpace(nn.Module):
   def __init__(
     self,
     act=nn.LeakyReLU(),
-    final_act=torch.sin,
+    final_act=nn.Identity(),
   ):
     super().__init__()
     self.encode = SkipConnMLP(
@@ -39,12 +45,16 @@ class IdentitySpace(nn.Module):
   @property
   def dims(self): return 3
 
-def fat_sigmoid(x, eps:float=1e-3): return x.sigmoid * (1+2*eps) - eps
+def fat_sigmoid(x, eps:float=1e-3): return x.sigmoid() * (1+2*eps) - eps
 class Reflectance(nn.Module):
-  def __init__(self, activation=fat_sigmoid):
+  def __init__(
+    self,
+    activation=fat_sigmoid,
+    #latent_size:int = 0,
+  ):
     super().__init__()
     self.act = activation
-  def forward(self, r_d): raise NotImplementedError()
+  def forward(self, x, r_d, normal=None, light=None, latent=None): raise NotImplementedError()
 
 def ident(x): return x
 def empty(_): return None
@@ -54,7 +64,7 @@ def enc_norm_dir(kind=None):
   elif kind == "elaz": return 2, dir_to_elev_azim
   else: raise NotImplementedError()
 
-# basic reflectance takes a position and a direction
+# basic reflectance takes a position and a direction and other components
 class Basic(Reflectance):
   def __init__(
     self,
@@ -65,12 +75,14 @@ class Basic(Reflectance):
 
     view="elaz",
     normal=None,
+    light=None,
   ):
     super().__init__()
     if space is None: space = IdentitySpace()
     view_dims, self.view_enc = enc_norm_dir(view)
     normal_dims, self.normal_enc = enc_norm_dir(normal)
-    in_size = view_dims + normal_dims + space.dims
+    light_dims, self.light_enc = enc_norm_dir(light)
+    in_size = view_dims + normal_dims + light_dims + space.dims
     self.mlp = SkipConnMLP(
       in_size=in_size, out=3, latent_size=latent_size,
       enc=FourierEncoder(input_dims=in_size),
@@ -78,12 +90,38 @@ class Basic(Reflectance):
     )
     self.space = space
   def forward(self, x, view, normal=None, light=None, latent=None):
+    x = self.space(x)
     view = self.view_enc(view)
     normal = self.normal_enc(normal)
-    x = self.space(x)
-    v = torch.cat([v for v in [x, view, normal] if v is not None], dim=-1)
+    self.light_enc = empty
+    light = self.light_enc(light)
+    v = torch.cat([v for v in [x, view, normal, light] if v is not None], dim=-1)
     return self.act(self.mlp(v, latent))
 
+# view reflectance takes a view direction and a latent vector, and nothing else.
+class View(Reflectance):
+  def __init__(
+    self,
+    space=None,
+
+    # latent size for rendering
+    latent_size:int=0,
+
+    view="elaz",
+    normal=None,
+    light=None,
+  ):
+    super().__init__()
+    view_dims, self.view_enc = enc_norm_dir(view)
+    in_size = view_dims
+    self.mlp = SkipConnMLP(
+      in_size=in_size, out=3, latent_size=latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
+    )
+  def forward(self, x, view, normal=None, light=None, latent=None):
+    view = self.view_enc(view)
+    return self.act(self.mlp(v, latent))
 
 class Diffuse(Reflectance):
   def __init__(
@@ -102,6 +140,7 @@ class Diffuse(Reflectance):
     )
   def forward(self, x, _view, normal, light):
     rgb = self.act(self.diffuse_color(self.space(x)))
+    # TODO make this attentuation clamped to 0? Should be for realism.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
     return rgb * attenuation
 

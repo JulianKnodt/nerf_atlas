@@ -47,9 +47,10 @@ def alpha_from_density(
   if softplus: sigma_a = F.softplus(density-1)
   else: sigma_a = F.relu(density)
 
-  end_val = torch.tensor([1e10], device=device, dtype=torch.float)
-  dists = torch.cat([ts[1:] - ts[:-1], end_val], dim=-1)
-  dists = dists[:, None, None, None] * torch.linalg.norm(r_d, dim=-1)
+  end_val = torch.full_like(ts[..., :1], 1e10)
+  dists = torch.cat([ts[..., 1:] - ts[..., :-1], end_val], dim=-1)
+  while len(dists.shape) < 4: dists = dists[..., None]
+  dists = dists * torch.linalg.norm(r_d, dim=-1)
   alpha = 1 - torch.exp(-sigma_a * dists)
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
@@ -196,6 +197,8 @@ class CommonNeRF(nn.Module):
   # produces a segmentation mask of sorts, using the alpha for occupancy.
   def acc(self): return self.alpha.max(dim=0)[0]
   def acc_smooth(self): return torch.sum(self.weights,dim=0).unsqueeze(-1)
+  def set_refl(self, refl):
+    if hasattr(self, "refl"): self.refl = refl
 
   def depths(self, depths):
     with torch.no_grad():
@@ -279,15 +282,13 @@ class PlainNeRF(CommonNeRF):
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
-      #enc=PositionalEncoder(3, 10, N=16),
       enc=FourierEncoder(input_dims=3, device=device),
 
       num_layers = 6, hidden_size = 128, xavier_init=True,
     )
 
-    self.second = SkipConnMLP(
+    self.refl = SkipConnMLP(
       in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
-      #enc=PositionalEncoder(2, 4, N=16),
       enc=FourierEncoder(input_dims=2, device=device),
 
       num_layers=5, hidden_size=64, xavier_init=True,
@@ -297,6 +298,11 @@ class PlainNeRF(CommonNeRF):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
+    #if random.random() < 0.5:
+    #  ts, pts = inverse_sample(lambda pts: self.first(pts)[..., 0], pts, ts, r_o, r_d)
+    #ts, pts = metropolis_sampling(
+    #  lambda pts: self.first(pts)[..., 0, None], ts, r_o, r_d,
+    #)
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -316,7 +322,7 @@ class PlainNeRF(CommonNeRF):
     intermediate = first_out[..., 1:]
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
-    rgb = self.feat_act(self.second(
+    rgb = self.feat_act(self.refl(
       elev_azim_r_d, torch.cat([intermediate, latent], dim=-1)
     ))
 
@@ -350,16 +356,14 @@ class NeRFAE(CommonNeRF):
     )
 
     self.density_tform = SkipConnMLP(
-      # a bit hacky, but pass it in with no encodings since there are no additional inputs.
       in_size=encoding_size, out=1, latent_size=0,
       num_layers=5, hidden_size=64, xavier_init=True,
     )
 
-    self.rgb = SkipConnMLP(
+    self.refl = SkipConnMLP(
       in_size=2, out=out_features, latent_size=encoding_size,
-
-      num_layers=5, hidden_size=64, xavier_init=True,
       enc=FourierEncoder(input_dims=2, device=device),
+      num_layers=5, hidden_size=64, xavier_init=True,
     )
     self.encoding_size = encoding_size
     self.regularize_latent = False
@@ -399,7 +403,7 @@ class NeRFAE(CommonNeRF):
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(encoded.shape[:-1]+(2,))
 
-    rgb = self.feat_act(self.rgb(elev_azim_r_d, encoded))
+    rgb = self.feat_act(self.refl(elev_azim_r_d, encoded))
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     self.record_unisurf_loss(pts, self.alpha)
@@ -432,7 +436,7 @@ class VolSDF(CommonNeRF):
     mip_enc = self.mip_encoding(r_o, r_d, ts)
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
-    density = self.scale.reciprocal() * self.laplace_cdf(-self.sdf.from_pts(pts))
+    density = 1/self.scale * self.laplace_cdf(-self.sdf.from_pts(pts))
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
     elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
@@ -443,8 +447,10 @@ class VolSDF(CommonNeRF):
     scaled = sdf_vals/self.scale
     return torch.where(
       scaled <= 0,
-      scaled.exp()/2,
-      1 - scaled.neg().exp()/2
+      # clamps are necessary to prevent NaNs, even though the values should get filtered out
+      # later. They should be noops.
+      scaled.clamp(max=0).exp()/2,
+      1 - scaled.clamp(min=0).neg().exp()/2
     )
 
 
@@ -556,7 +562,7 @@ class Unisurf(CommonNeRF):
       num_layers = 6, hidden_size = 128, xavier_init=True,
     )
 
-    self.second = SkipConnMLP(
+    self.refl = SkipConnMLP(
       in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
       enc=NNEncoder(input_dims=2, device=device),
       num_layers=5, hidden_size=64, xavier_init=True,
@@ -655,3 +661,61 @@ class MPI(nn.Module):
 
     alpha, weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(weights, self.feat_act(feats))
+
+
+# TODO test this as well
+def metropolis_sampling(
+  density_estimator,
+  ts_init, r_o, r_d,
+  iters: int = 6,
+):
+  # need to make this the shape of r_d exit with last dim 1
+  curr = ts_init
+  print(r_o.shape)
+  exit()
+  with torch.no_grad():
+    candidates = torch.rand_like(curr) + curr
+    curr_density = density_estimator(candidates)
+    for i in range(iters):
+      candidates = torch.randn_like(curr) + curr
+      density = density_estimator(candidates)
+      acceptance = density/curr_density
+      alphas = torch.rand_like(density)
+      mask = acceptance <= alphas
+      curr = torch.where(mask, candidates, curr)
+      curr_density = torch.where(mask, density, curr_density)
+  return curr, r_o + curr * r_d
+
+# TODO need to test this more, doesn't seem to work that well
+def inverse_sample(
+  density_estimator,
+  pts, ts, r_o, r_d,
+):
+  with torch.no_grad():
+    _, weights = alpha_from_density(density_estimator(pts.squeeze(-1)), ts, r_d)
+    weights = weights.clamp(min=1e-10)
+    pdf = weights/weights.sum(dim=0,keepdim=True)
+    cdf = torch.cumsum(pdf, dim=0)
+    N = ts.shape[0]
+    # XXX this only works because we assume that the number of samples (N) is the same.
+    #u = torch.rand_like(cdf)
+    u = torch.linspace(0, 1, N, device=cdf.device)\
+      [..., None, None, None].expand_as(cdf)
+    # XXX this operates on innermost dimension, so need to do this transpose
+    inds = torch.searchsorted(
+      cdf.transpose(0, -1).contiguous(), u.transpose(0, -1).contiguous(), right=True
+    ).transpose(0, -1)
+    below = (inds - 1).clamp(min=0)
+    above = inds.clamp(max=N-1)
+    inds_g = torch.stack([below, above], dim=-1)
+
+    # TODO what is the right dimension to add here?
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand_as(inds_g), 0, inds_g)
+    bins_g = torch.gather(ts[:, None, None, None, None].expand_as(inds_g), 0, inds_g)
+
+    denom = cdf_g[..., 1] - cdf_g[..., 0]
+    denom = torch.where(denom < 1e-5, torch.ones_like(denom), denom)
+    t = (u - cdf_g[..., 0]) / denom
+    samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
+    new_pts = r_o + samples.unsqueeze(-1) * r_d
+  return samples, new_pts

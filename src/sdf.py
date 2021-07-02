@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
-from .neural_blocks import ( SkipConnMLP )
+from .neural_blocks import ( SkipConnMLP, FourierEncoder )
 from .utils import ( autograd, eikonal_loss )
 from .refl import ( Basic )
 
@@ -12,6 +12,7 @@ def load(args):
   if args.sdf_kind == "spheres": model = SmoothedSpheres()
   elif args.sdf_kind == "siren": model = SIREN()
   elif args.sdf_kind == "local": model = Local()
+  elif args.sdf_kind == "mlp": model = MLP()
   else: raise NotImplementedError()
   # TODO need to add BSDF model and lighting here
   sdf = SDF(
@@ -94,6 +95,17 @@ class SmoothedSpheres(SDFModel):
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
     out = smooth_min(sd, k=32.).reshape(p.shape[:-1])
     return out
+
+class MLP(SDFModel):
+  def __init__(self):
+    super().__init__()
+    self.mlp = SkipConnMLP(
+      in_size=3, out=1,
+      enc=FourierEncoder(input_dims=3),
+      num_layers=6, hidden_size=256,
+      xavier_init=True,
+    )
+  def forward(self, x): return self.mlp(x).squeeze(-1)
 
 #def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):

@@ -21,6 +21,7 @@ import src.loaders as loaders
 import src.nerf as nerf
 import src.utils as utils
 import src.sdf as sdf
+import src.refl as refl
 from src.utils import ( save_image, save_plot, CylinderGaussian, ConicGaussian )
 from src.neural_blocks import ( Upsampler, SpatialEncoder )
 
@@ -88,13 +89,19 @@ def arguments():
   # TODO really fix MPIs
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
 
+  a.add_argument(
+    "--refl-kind",
+    choices=["curr", "view_only", "basic", "diffuse", "rusin[wip]"], default="curr",
+    help="What kind of reflectance model to use",
+  )
+
   sdfa = a.add_argument_group("sdf")
   sdfa.add_argument(
     "--sdf-eikonal", help="weight of SDF eikonal loss", type=float, default=0,
   )
   sdfa.add_argument(
     "--sdf-kind", help="which SDF model to use", type=str,
-    choices=["spheres", "siren", "local"], default="siren",
+    choices=["spheres", "siren", "local", "mlp"], default="siren",
   )
 
   dnerf = a.add_argument_group("dnerf")
@@ -146,7 +153,7 @@ if torch.cuda.is_available():
   device = torch.device("cuda:0")
   torch.cuda.set_device(device)
 
-# XXX DEBUG
+# DEBUG
 #torch.autograd.set_detect_anomaly(True)
 
 def render(
@@ -420,6 +427,11 @@ def load_model(args):
   elif args.model == "unisurf": constructor = nerf.Unisurf
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
+
+  # set reflectance kind:
+  if args.refl_kind != "curr":
+    refl_inst = refl.load(args, model.latent_size()).to(device)
+    model.set_refl(refl_inst)
 
   if args.model == "ae" and args.latent_l2_weight > 0:
     model.set_regularize_latent()

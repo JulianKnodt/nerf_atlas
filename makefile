@@ -4,11 +4,12 @@ clean:
 	-@rm outputs/*.png
 
 volsdf: clean
-	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 64 --crop --epochs 30_000 --crop-size 32 \
-	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind siren \
-	-lr 5e-4 --no-sched --loss-window 750 --valid-freq 250 \
-	--nosave --sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 192 --crop --epochs 50_000 --crop-size 25 \
+	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind mlp \
+	-lr 1e-3 --loss-window 750 --valid-freq 250 \
+	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
+	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
 
 food: clean
 	python3 runner.py -d data/food/ --data-kind shiny --size 64 \
@@ -50,17 +51,17 @@ sdf: clean
   --nosave --sdf-eikonal 0.1 --loss-fns l1 --save-freq 2500
 
 dtu: clean
-	python3 runner.py -d data/DTU/scan105/ --data-kind dtu \
-	--size 64 --crop --epochs 25_000 --save models/dtu105.pt --nosave \
-	--near 0.1 --far 2 --batch-size 4 --crop-size 32 --model plain -lr 5e-4 \
-	--loss-fns l2 --valid-freq 499 --no-sched --sdf-kind local \
-  #--load models/dtu105.pt #--omit-bg
+	python3 runner.py -d data/DTU/scan97/ --data-kind dtu \
+	--size 192 --crop --epochs 50000 --save models/dtu97.pt --save-freq 5000 \
+	--near 0.3 --far 1.8 --batch-size 3 --crop-size 28 --model volsdf -lr 1e-3 \
+	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
+	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --crop --epochs 80_000 --save models/lego.pt \
-	--near 2 --far 6 --batch-size 5 --crop-size 26 --model plain -lr 5e-4 \
-	--loss-fns l2 --valid-freq 499 --no-sched #--load models/lego.pt #--omit-bg
+	--near 2 --far 6 --batch-size 2 --crop-size 26 --model plain -lr 1e-3 \
+	--loss-fns l2 --valid-freq 499 --no-sched --nosave #--load models/lego.pt #--omit-bg
 
 unisurf: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
