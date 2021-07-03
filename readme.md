@@ -127,6 +127,15 @@ The visualization is on the training set. On the test set it does not perform as
 it lacks some regularization for temporal consistency, but I'll continue to look for ways to
 make testing better.
 
+##### VolSDF
+
+![VolSDF Lego](examples/volsdf.gif)
+
+Implementation of [VolSDF](https://arxiv.org/abs/2106.12052), which produces better quality
+output on the low sample counts necessary to run on my machine. It also noticeably has much less
+flickering than standard NeRF, because within a region near the surface it is less likely
+(guaranteed?) to not have holes unlike standard NeRF.
+
 ## Contributing
 
 If you would like to contribute, feel free to submit a PR, but I may be somewhat strict,
