@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector )
 
@@ -14,10 +13,14 @@ def load(args, latent_size=0):
 
   kwargs = {
     "latent_size": latent_size,
+    "out_features": args.feature_space,
+    "normal": args.normal_kind,
   }
   if args.refl_kind == "basic": cons = Basic
   elif args.refl_kind == "rusin": cons = Rusin
   elif args.refl_kind == "view_dir": cons = View
+  elif args.refl_kind == "rusin":
+    raise NotImplementedError()
   else: raise NotImplementedError()
 
   # TODO assign view, normal, lighting here?
@@ -50,11 +53,16 @@ class Reflectance(nn.Module):
   def __init__(
     self,
     activation=fat_sigmoid,
-    #latent_size:int = 0,
+    latent_size:int = 0,
+    out_features:int = 3,
   ):
     super().__init__()
     self.act = activation
+    self.latent_size = latent_size
+    self.out_features = out_features
   def forward(self, x, r_d, normal=None, light=None, latent=None): raise NotImplementedError()
+  @property
+  def can_use_normal(self): return False
 
 def ident(x): return x
 def empty(_): return None
@@ -62,7 +70,7 @@ def enc_norm_dir(kind=None):
   if kind is None: return 0, empty
   elif kind == "raw": return 3, ident
   elif kind == "elaz": return 2, dir_to_elev_azim
-  else: raise NotImplementedError()
+  else: raise NotImplementedError(f"enc_norm_dir: {kind}")
 
 # basic reflectance takes a position and a direction and other components
 class Basic(Reflectance):
@@ -70,25 +78,25 @@ class Basic(Reflectance):
     self,
     space=None,
 
-    # latent size for rendering
-    latent_size:int=0,
-
     view="elaz",
     normal=None,
     light=None,
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
     view_dims, self.view_enc = enc_norm_dir(view)
     normal_dims, self.normal_enc = enc_norm_dir(normal)
     light_dims, self.light_enc = enc_norm_dir(light)
     in_size = view_dims + normal_dims + light_dims + space.dims
     self.mlp = SkipConnMLP(
-      in_size=in_size, out=3, latent_size=latent_size,
+      in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
       num_layers=5, hidden_size=128, xavier_init=True,
     )
     self.space = space
+  @property
+  def can_use_normal(self): return self.normal_enc != empty
   def forward(self, x, view, normal=None, light=None, latent=None):
     x = self.space(x)
     view = self.view_enc(view)
@@ -104,18 +112,14 @@ class View(Reflectance):
     self,
     space=None,
 
-    # latent size for rendering
-    latent_size:int=0,
-
     view="elaz",
-    normal=None,
-    light=None,
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
     view_dims, self.view_enc = enc_norm_dir(view)
     in_size = view_dims
     self.mlp = SkipConnMLP(
-      in_size=in_size, out=3, latent_size=latent_size,
+      in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
       num_layers=5, hidden_size=128, xavier_init=True,
     )
@@ -127,17 +131,21 @@ class Diffuse(Reflectance):
   def __init__(
     self,
     space=None,
+    **kwargs,
   ):
+    super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
     self.space = space
 
     in_size = space.dims
     self.diffuse_color = SkipConnMLP(
-      in_size=in_size, out=3,
-      #enc=NNEncoder(input_dims=in_size),
-      num_layers=3, hidden_dims=64,
-      xavier_init=True,
+      in_size=in_size, out=self.out_features,
+      latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=3, hidden_dims=64, xavier_init=True,
     )
+  @property
+  def can_use_normal(self): return True
   def forward(self, x, _view, normal, light):
     rgb = self.act(self.diffuse_color(self.space(x)))
     # TODO make this attentuation clamped to 0? Should be for realism.
@@ -148,14 +156,14 @@ def Rusin(Reflectance):
   def __init__(
     self,
     space=None,
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
-      in_size = in_size, out=3,
-      enc=FourierEncoder(input_dims=in_size),
-      xavier_init=True,
+      in_size=in_size, out=self.out_features, latent=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
     )
     self.space = space
   def forward(self, x, view, normal, light):

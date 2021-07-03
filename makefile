@@ -11,6 +11,15 @@ volsdf: clean
 	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
 	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
 
+volsdf_with_normal: clean
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 192 --crop --epochs 50_000 --crop-size 16 \
+	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind mlp \
+	-lr 1e-3 --loss-window 750 --valid-freq 250 --nosave \
+	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
+	--save models/lego_norm_volsdf.pt --refl basic --normal-kind elaz
+
+# TODO fix this dataset, using it is a complete trash-fire
 food: clean
 	python3 runner.py -d data/food/ --data-kind shiny --size 64 \
 	--crop --epochs 50_000  --save models/food.pt --model ae --crop --batch-size 4 \
@@ -55,7 +64,7 @@ dtu: clean
 	--size 192 --crop --epochs 50000 --save models/dtu97.pt --save-freq 5000 \
 	--near 0.3 --far 1.8 --batch-size 3 --crop-size 28 --model volsdf -lr 1e-3 \
 	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
-	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat
+	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat --load models/dtu97.pt
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

@@ -7,6 +7,7 @@ from .neural_blocks import (
   SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder
 )
 from .utils import ( dir_to_elev_azim, autograd )
+from .refl import ( View )
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -234,8 +235,8 @@ class CommonNeRF(nn.Module):
 class TinyNeRF(CommonNeRF):
   # No frills, single MLP NeRF
   def __init__(
-    self, out_features: int = 3,
-
+    self,
+    out_features: int = 3,
     device="cuda",
     **kwargs,
   ):
@@ -243,7 +244,7 @@ class TinyNeRF(CommonNeRF):
     self.estim = SkipConnMLP(
       in_size=3, out=1 + out_features,
       latent_size = self.total_latent_size(),
-      num_layers=6, hidden_size=80,
+      num_layers=6, hidden_size=128,
 
       xavier_init=True,
     )
@@ -287,22 +288,15 @@ class PlainNeRF(CommonNeRF):
       num_layers = 6, hidden_size = 128, xavier_init=True,
     )
 
-    self.refl = SkipConnMLP(
-      in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
-      enc=FourierEncoder(input_dims=2, device=device),
-
-      num_layers=5, hidden_size=64, xavier_init=True,
+    self.refl = refl.View(
+      out_features=out_features,
+      latent_size=self.latent_size+intermediate_size,
     )
 
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
-    #if random.random() < 0.5:
-    #  ts, pts = inverse_sample(lambda pts: self.first(pts)[..., 0], pts, ts, r_o, r_d)
-    #ts, pts = metropolis_sampling(
-    #  lambda pts: self.first(pts)[..., 0, None], ts, r_o, r_d,
-    #)
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -321,9 +315,9 @@ class PlainNeRF(CommonNeRF):
 
     intermediate = first_out[..., 1:]
 
-    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
     rgb = self.feat_act(self.refl(
-      elev_azim_r_d, torch.cat([intermediate, latent], dim=-1)
+      x=pts, view=r_d[None, ...].expand_as(pts),
+      latent=torch.cat([latent, intermediate], dim=-1),
     ))
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
@@ -356,14 +350,13 @@ class NeRFAE(CommonNeRF):
     )
 
     self.density_tform = SkipConnMLP(
-      in_size=encoding_size, out=1, latent_size=0,
+      in_size=encoding_size, out=1+intermediate_size, latent_size=0,
       num_layers=5, hidden_size=64, xavier_init=True,
     )
 
-    self.refl = SkipConnMLP(
-      in_size=2, out=out_features, latent_size=encoding_size,
-      enc=FourierEncoder(input_dims=2, device=device),
-      num_layers=5, hidden_size=64, xavier_init=True,
+    self.refl = refl.View(
+      out_features=out_features,
+      latent_size=encoding_size+intermediate_size,
     )
     self.encoding_size = encoding_size
     self.regularize_latent = False
@@ -397,13 +390,17 @@ class NeRFAE(CommonNeRF):
   def from_encoded(self, encoded, ts, r_d, pts):
     if self.normalize_latent: encoded = F.normalize(encoded, dim=-1)
 
-    density = self.density_tform(encoded).squeeze(-1)
+    first_out = self.density_tform(encoded)
+    density = first_out[..., 0]
+    intermediate = first_out[..., 1:]
+
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
-    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(encoded.shape[:-1]+(2,))
-
-    rgb = self.feat_act(self.refl(elev_azim_r_d, encoded))
+    rgb = self.feat_act(self.refl(
+      x=pts, view=r_d[None,...].expand_as(pts),
+      latent=torch.cat([encoded,intermediate],dim=-1),
+    ))
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     self.record_unisurf_loss(pts, self.alpha)
@@ -431,6 +428,7 @@ class VolSDF(CommonNeRF):
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, ts, r_o, r_d)
+  def set_refl(self, refl): self.sdf.refl = refl
   def from_pts(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
     mip_enc = self.mip_encoding(r_o, r_d, ts)
@@ -439,8 +437,11 @@ class VolSDF(CommonNeRF):
     density = 1/self.scale * self.laplace_cdf(-self.sdf.from_pts(pts))
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
-    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
-    rgb = self.sdf.refl(pts, r_d.unsqueeze(0).expand_as(pts))
+    rgb = self.sdf.refl(
+      x=pts, view=r_d.unsqueeze(0).expand_as(pts),
+      normal=self.sdf.normals(pts) if self.sdf.refl.can_use_normal else None,
+      # TODO figure out how to get latent here from SDF?
+    )
     #rgb = self.feat_act(self.second(torch.cat([pts, elev_azim_r_d], dim=-1)))
     return volumetric_integrate(self.weights, rgb)
   def laplace_cdf(self, sdf_vals):
@@ -562,10 +563,9 @@ class Unisurf(CommonNeRF):
       num_layers = 6, hidden_size = 128, xavier_init=True,
     )
 
-    self.refl = SkipConnMLP(
-      in_size=2, out=out_features, latent_size=self.latent_size + intermediate_size,
-      enc=NNEncoder(input_dims=2, device=device),
-      num_layers=5, hidden_size=64, xavier_init=True,
+    self.refl = refl.View(
+      out_features=out_features,
+      latent_size=self.latent_size+intermediate_size,
     )
 
   def forward(self, rays):
@@ -583,9 +583,9 @@ class Unisurf(CommonNeRF):
     self.alpha = fat_sigmoid(first_out[..., 0])
     intermediate = first_out[..., 1:]
 
-    elev_azim_r_d = dir_to_elev_azim(r_d)[None, ...].expand(pts.shape[:-1]+(2,))
     rgb = self.feat_act(self.second(
-      elev_azim_r_d, torch.cat([intermediate, latent], dim=-1)
+      x=pts, view=r_d.squeeze(0).expand_as(pts),
+      latent=torch.cat([intermediate, latent], dim=-1),
     ))
     self.weights = self.alpha * cumuprod_exclusive(1.0 - self.alpha + 1e-10)
     return volumetric_integrate(self.weights, rgb)

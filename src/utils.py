@@ -180,11 +180,12 @@ def elev_azim_to_dir(elev_azim):
   return direction
 
 
+lim = 1 - 1e-6
 #@torch.jit.script
 def dir_to_elev_azim(direc):
-  x, y, z = F.normalize(direc, dim=-1).clamp(min=-1+1e-10, max=1-1e-10).split([1,1,1], dim=-1)
+  x, y, z = F.normalize(direc, dim=-1).clamp(min=-lim, max=lim).split([1,1,1], dim=-1)
   elev = z.asin()
-  azim = torch.atan2(x, (1 - x.square() - z.square()).clamp(min=1e-10).sqrt())
+  azim = torch.atan2(x, (1 - x.square() - z.square()).clamp(min=1e-6).sqrt())
   return torch.cat([elev, azim], dim=-1)
 
 # [-1, 1]x2 -> [-1, 1]x3 (direction) sum (component of dir)^2 = 1

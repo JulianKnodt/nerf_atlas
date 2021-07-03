@@ -89,10 +89,20 @@ def arguments():
   # TODO really fix MPIs
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
 
-  a.add_argument(
+  refla = a.add_argument_group("reflectance")
+  refla.add_argument(
     "--refl-kind",
-    choices=["curr", "view_only", "basic", "diffuse", "rusin[wip]"], default="curr",
+    choices=["curr", "view_only", "basic", "diffuse", "rusin"], default="curr",
     help="What kind of reflectance model to use",
+  )
+  refla.add_argument(
+    "--normal-kind",
+    choices=[None, "elaz", "raw"], default="None",
+    help="How to include normals in reflectance model. Not all surface models support normals",
+  )
+  refla.add_argument(
+    "--space-kind", choices=["identity", "surface"], default="identity",
+    help="What space to encode reflectance: surface builds a map from 3 (identity) to 2 space",
   )
 
   sdfa = a.add_argument_group("sdf")
@@ -139,7 +149,12 @@ def arguments():
   ae.add_argument("--normalize-latent", help="L2 normalize latent space", action="store_true")
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
 
-  return a.parse_args()
+  args = a.parse_args()
+  # runtime checks
+  if not args.neural_upsample:
+    args.render_size = args.size
+    args.feature_space = 3
+  return args
 
 loss_map = {
   "l2": F.mse_loss,
@@ -188,7 +203,6 @@ def load(args, training=True):
     if args.data.endswith(".mp4"): kind = "single_video"
     elif args.data.endswith(".jpg"): kind = "pixel-single"
 
-  if not args.neural_upsample: args.render_size = args.size
   size = args.size
   if kind == "original":
     return loaders.original(
@@ -398,7 +412,6 @@ def set_per_run(model, args):
 
 def load_model(args):
   if args.model == "sdf": return sdf.load(args).to(device)
-  if not args.neural_upsample: args.feature_space = 3
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   if args.model != "ae": args.latent_l2_weight = 0
   kwargs = {
@@ -430,7 +443,7 @@ def load_model(args):
 
   # set reflectance kind:
   if args.refl_kind != "curr":
-    refl_inst = refl.load(args, model.latent_size()).to(device)
+    refl_inst = refl.load(args, model.total_latent_size()).to(device)
     model.set_refl(refl_inst)
 
   if args.model == "ae" and args.latent_l2_weight > 0:
@@ -489,6 +502,7 @@ def seed(s):
   torch.manual_seed(s)
   random.seed(s)
   np.random.seed(s)
+
 
 def main():
   args = arguments()

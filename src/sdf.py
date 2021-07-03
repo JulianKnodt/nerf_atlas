@@ -6,7 +6,7 @@ import random
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder )
 from .utils import ( autograd, eikonal_loss )
-from .refl import ( Basic )
+from .refl import ( Reflectance, View )
 
 def load(args):
   if args.sdf_kind == "spheres": model = SmoothedSpheres()
@@ -17,7 +17,7 @@ def load(args):
   # TODO need to add BSDF model and lighting here
   sdf = SDF(
     model,
-    Basic(),
+    View(),
     t_near=args.near,
     t_far=args.far,
   )
@@ -35,14 +35,14 @@ class SDFModel(nn.Module):
 
       if values is None: values = self(autograd_pts)
       normals = autograd(autograd_pts, values)
-      assert(normals.isfinite().all())
+      #assert(normals.isfinite().all())
     return normals
 
 class SDF(nn.Module):
   def __init__(
     self,
     underlying: SDFModel,
-    reflectance: "fn(x, dir) -> RGB",
+    reflectance: Reflectance,
     t_near: float,
     t_far: float,
     alpha:int = 100,
@@ -64,7 +64,10 @@ class SDF(nn.Module):
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       steps=32 if self.training else 64,
     )
-    rgb = self.refl(pts, r_d)
+    rgb = self.refl(
+      x=pts, view=r_d,
+      normal=self.normals(pts) if self.refl.can_use_normal else None,
+    )
     out = torch.where(hit, rgb, torch.zeros_like(rgb))
     if with_throughput and self.training:
       tput, _best_pos = throughput(self.underlying, r_o, r_d, self.far, self.near)
