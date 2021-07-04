@@ -5,6 +5,7 @@ import random
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector )
+import src.lights as lights
 
 def load(args, latent_size=0):
   if args.space_kind == "identity": space = IdentitySpace
@@ -16,15 +17,35 @@ def load(args, latent_size=0):
     "out_features": args.feature_space,
     "normal": args.normal_kind,
   }
-  if args.refl_kind == "basic": cons = Basic
+  if args.refl_kind == "basic":
+    cons = Basic
+    if args.light_kind is not None: kwargs["light"] = "elaz"
   elif args.refl_kind == "rusin": cons = Rusin
   elif args.refl_kind == "view_dir": cons = View
-  elif args.refl_kind == "rusin":
-    raise NotImplementedError()
+  elif args.refl_kind == "diffuse": cons = Diffuse
   else: raise NotImplementedError()
-
   # TODO assign view, normal, lighting here?
-  return cons(space=space(), **kwargs)
+  refl = cons(space=space(), **kwargs)
+
+  if args.light_kind is not None and refl.can_use_light:
+    light = lights.load(args)
+    refl = LightAndRefl(refl=refl,light=light)
+
+  return refl
+
+# a combination of light and reflectance models
+class LightAndRefl(nn.Module):
+  def __init__(self, refl, light):
+    super().__init__()
+    self.refl = refl
+    self.light = light
+    self.spectrum = None
+
+  @property
+  def can_use_normal(self): return self.refl.can_use_normal
+  def forward(self, x, view=None, normal=None, latent=None):
+    light_dir, _spectrum = self.light(x)
+    return self.refl(x, view, normal, light_dir)
 
 class SurfaceSpace(nn.Module):
   def __init__(
@@ -52,17 +73,19 @@ def fat_sigmoid(x, eps:float=1e-3): return x.sigmoid() * (1+2*eps) - eps
 class Reflectance(nn.Module):
   def __init__(
     self,
-    activation=fat_sigmoid,
+    act=fat_sigmoid,
     latent_size:int = 0,
     out_features:int = 3,
   ):
     super().__init__()
-    self.act = activation
+    self.act = act
     self.latent_size = latent_size
     self.out_features = out_features
-  def forward(self, x, r_d, normal=None, light=None, latent=None): raise NotImplementedError()
+  def forward(self, x, view,normal=None,light=None,latent=None): raise NotImplementedError()
   @property
   def can_use_normal(self): return False
+  @property
+  def can_use_light(self): return False
 
 def ident(x): return x
 def empty(_): return None
@@ -95,9 +118,13 @@ class Basic(Reflectance):
       num_layers=5, hidden_size=128, xavier_init=True,
     )
     self.space = space
+
   @property
   def can_use_normal(self): return self.normal_enc != empty
-  def forward(self, x, view, normal=None, light=None, latent=None):
+  @property
+  def can_use_light(self): return self.light_enc != empty
+
+  def forward(self,x,view,normal=None,light=None,latent=None):
     x = self.space(x)
     view = self.view_enc(view)
     normal = self.normal_enc(normal)
@@ -124,7 +151,7 @@ class View(Reflectance):
       num_layers=5, hidden_size=128, xavier_init=True,
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
-    view = self.view_enc(view)
+    v = self.view_enc(view)
     return self.act(self.mlp(v, latent))
 
 class Diffuse(Reflectance):
@@ -144,9 +171,13 @@ class Diffuse(Reflectance):
       enc=FourierEncoder(input_dims=in_size),
       num_layers=3, hidden_dims=64, xavier_init=True,
     )
+
   @property
   def can_use_normal(self): return True
-  def forward(self, x, _view, normal, light):
+  @property
+  def can_use_light(self): return True
+
+  def forward(self, x, view, normal, light):
     rgb = self.act(self.diffuse_color(self.space(x)))
     # TODO make this attentuation clamped to 0? Should be for realism.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
@@ -166,6 +197,11 @@ def Rusin(Reflectance):
       enc=FourierEncoder(input_dims=in_size), xavier_init=True,
     )
     self.space = space
+  @property
+  def can_use_normal(self): return True
+  @property
+  def can_use_light(self): return True
+
   def forward(self, x, view, normal, light):
     frame = coordinate_system(normal)
     wo = to_local(frame, view)

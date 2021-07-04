@@ -98,6 +98,13 @@ class CylinderGaussian(nn.Module):
     mean = mean + r_o
     return integrated_pos_enc_diag(mean, cov, self.min_deg, self.max_deg)
 
+def load_mip(args):
+  if args.mip is None: return None
+  elif args.mip == "cone": return ConicGaussian()
+  elif args.mip == "cylinder": return CylinderGaussian()
+
+  raise NotImplementedError(f"Unknown mip kind {args.mip}")
+
 class ConicGaussian(nn.Module):
   def __init__(
     self,

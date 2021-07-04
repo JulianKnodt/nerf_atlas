@@ -22,7 +22,7 @@ import src.nerf as nerf
 import src.utils as utils
 import src.sdf as sdf
 import src.refl as refl
-from src.utils import ( save_image, save_plot, CylinderGaussian, ConicGaussian )
+from src.utils import ( save_image, save_plot, )
 from src.neural_blocks import ( Upsampler, SpatialEncoder )
 
 def arguments():
@@ -97,20 +97,36 @@ def arguments():
   )
   refla.add_argument(
     "--normal-kind",
-    choices=[None, "elaz", "raw"], default="None",
+    choices=[None, "elaz", "raw"], default=None,
     help="How to include normals in reflectance model. Not all surface models support normals",
   )
   refla.add_argument(
     "--space-kind", choices=["identity", "surface"], default="identity",
-    help="What space to encode reflectance: surface builds a map from 3 (identity) to 2 space",
+    help="Space to encode texture: surface builds a map from 3D (identity) to 2D",
+  )
+
+  rdra = a.add_argument_group("integrator")
+  rdra.add_argument(
+    "--integrator-kind", choices=[None, "direct", "path"], default=None,
+    help="Integrator to use for surface rendering",
+  )
+  rdra.add_argument(
+    "--occ-kind", choices=[None, "hard"], default=None,
+    help="Occlusion method for shadows to use in integration",
+  )
+
+  lighta = a.add_argument_group("light")
+  lighta.add_argument(
+    "--light-kind", help="Kind of light to use while rendering",
+    choices=[None, "point", "mlp"], default=None,
   )
 
   sdfa = a.add_argument_group("sdf")
   sdfa.add_argument(
-    "--sdf-eikonal", help="weight of SDF eikonal loss", type=float, default=0,
+    "--sdf-eikonal", help="Weight of SDF eikonal loss", type=float, default=0,
   )
   sdfa.add_argument(
-    "--sdf-kind", help="which SDF model to use", type=str,
+    "--sdf-kind", help="Which SDF model to use", type=str,
     choices=["spheres", "siren", "local", "mlp"], default="siren",
   )
 
@@ -148,6 +164,7 @@ def arguments():
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
   ae.add_argument("--normalize-latent", help="L2 normalize latent space", action="store_true")
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
+
 
   args = a.parse_args()
   # runtime checks
@@ -395,13 +412,6 @@ def test(model, cam, labels, args, training: bool = True):
           max {max(ls):.03f}
           var {np.var(ls):.03f}""")
 
-def load_mip(args):
-  if args.mip is None: return None
-  elif args.mip == "cone": return ConicGaussian()
-  elif args.mip == "cylinder": return CylinderGaussian()
-
-  raise NotImplementedError(f"Unknown mip kind {args.mip}")
-
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
   if args.model == "sdf": return
@@ -414,15 +424,20 @@ def load_model(args):
   if args.model == "sdf": return sdf.load(args).to(device)
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   if args.model != "ae": args.latent_l2_weight = 0
+  mip = utils.load_mip(args)
+  per_pixel_latent_size = 64 if args.data_kind == "pixel-single" else 0
+  per_pt_latent_size = (1 + 3 + 64) if args.backing_sdf else 0
+  instance_latent_size = 0
   kwargs = {
-    "mip": load_mip(args),
+    "mip": mip,
     "out_features": args.feature_space,
     "device": device,
     "steps": args.steps,
     "t_near": args.near,
     "t_far": args.far,
-    "per_pixel_latent_size": 64 if args.data_kind == "pixel-single" else 0,
-    "per_point_latent_size": (1 + 3 + 64) if args.backing_sdf else 0,
+    "per_pixel_latent_size": per_pixel_latent_size,
+    "per_point_latent_size": per_pt_latent_size,
+    "instance_latent_size": instance_latent_size,
     "sigmoid_kind": args.sigmoid_kind,
     "unisurf_loss": args.unisurf_loss,
     "sigmoid_kind": args.sigmoid_kind if args.sigmoid_kind != "curr" else "thin",

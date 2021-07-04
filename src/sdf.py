@@ -6,7 +6,7 @@ import random
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder )
 from .utils import ( autograd, eikonal_loss )
-from .refl import ( Reflectance, View )
+import src.refl as refl
 
 def load(args):
   if args.sdf_kind == "spheres": model = SmoothedSpheres()
@@ -14,10 +14,11 @@ def load(args):
   elif args.sdf_kind == "local": model = Local()
   elif args.sdf_kind == "mlp": model = MLP()
   else: raise NotImplementedError()
-  # TODO need to add BSDF model and lighting here
+  # refl inst may also have a nested light
+  refl_inst = refl.load(args, 0)
+
   sdf = SDF(
-    model,
-    View(),
+    model, refl_inst,
     t_near=args.near,
     t_far=args.far,
   )
@@ -42,7 +43,7 @@ class SDF(nn.Module):
   def __init__(
     self,
     underlying: SDFModel,
-    reflectance: Reflectance,
+    reflectance: refl.Reflectance,
     t_near: float,
     t_far: float,
     alpha:int = 100,
@@ -54,10 +55,22 @@ class SDF(nn.Module):
     self.far = t_far
     self.near = t_near
     self.alpha = alpha
+
   @property
   def sdf(self): return self
   def normals(self, pts, values = None): return self.underlying.normals(pts, values)
   def from_pts(self, pts): return self.underlying(pts)
+  def intersect_w_n(self, r_o, r_d):
+    pts, hit, t = sphere_march(
+      self.underlying, r_o, r_d, near=self.near, far=self.far,
+      steps=32 if self.training else 64,
+    )
+    return pts, hit, t, self.normals(pts)
+  def intersect_mask(self, r_o, r_d):
+    return sphere_march(
+      self.underlying, r_o, r_d, near=self.near, far=self.far,
+      steps=32 if self.training else 64,
+    )[1]
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t = sphere_march(

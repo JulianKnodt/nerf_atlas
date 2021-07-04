@@ -17,7 +17,7 @@ volsdf_with_normal: clean
 	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind mlp \
 	-lr 1e-3 --loss-window 750 --valid-freq 250 --nosave \
 	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
-	--save models/lego_norm_volsdf.pt --refl basic --normal-kind elaz
+	--refl basic --normal-kind elaz --light-kind point
 
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean
@@ -69,8 +69,8 @@ dtu: clean
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --crop --epochs 80_000 --save models/lego.pt \
-	--near 2 --far 6 --batch-size 2 --crop-size 26 --model plain -lr 1e-3 \
-	--loss-fns l2 --valid-freq 499 --no-sched --nosave #--load models/lego.pt #--omit-bg
+	--near 2 --far 6 --batch-size 4 --crop-size 26 --model plain -lr 1e-3 \
+	--loss-fns l2 --valid-freq 499 --nosave #--load models/lego.pt #--omit-bg
 
 unisurf: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

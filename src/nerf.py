@@ -7,7 +7,7 @@ from .neural_blocks import (
   SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder
 )
 from .utils import ( dir_to_elev_azim, autograd )
-from .refl import ( View )
+import src.refl as refl
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -38,6 +38,8 @@ def compute_pts_ts(
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
   return pts, ts, r_o, r_d
 
+# given a set of densities, and distances between the densities,
+# compute alphas from them.
 @torch.jit.script
 def alpha_from_density(
   density, ts, r_d,
@@ -55,6 +57,8 @@ def alpha_from_density(
   alpha = 1 - torch.exp(-sigma_a * dists)
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
+
+# TODO probably move sigmoids to utils
 
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,
 # or prevent it from representing full density items.
@@ -77,6 +81,7 @@ def white(_, weights): 1-weights.sum(dim=0).unsqueeze(-1)
 # having a random color will probably help prevent any background
 def random_color(_elaz_r_d, weights):
   # TODO need to think this through more
+  # This will make it so that there never is a background.
   summed = (1-weights.sum(dim=0).unsqueeze(-1))
   return torch.rand_like(summed) * summed
 
@@ -289,7 +294,7 @@ class PlainNeRF(CommonNeRF):
     )
 
     self.refl = refl.View(
-      out_features=out_features,
+      out_features=out_features, act=self.feat_act,
       latent_size=self.latent_size+intermediate_size,
     )
 
@@ -315,14 +320,14 @@ class PlainNeRF(CommonNeRF):
 
     intermediate = first_out[..., 1:]
 
-    rgb = self.feat_act(self.refl(
-      x=pts, view=r_d[None, ...].expand_as(pts),
+    view = r_d[None, ...].expand_as(pts)
+    rgb = self.refl(
+      x=pts, view=view,
       latent=torch.cat([latent, intermediate], dim=-1),
-    ))
+    )
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
-    return volumetric_integrate(self.weights, rgb) + \
-      self.sky_color(elev_azim_r_d, self.weights)
+    return volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
 
 # NeRF with a thin middle layer, for encoding information
 class NeRFAE(CommonNeRF):
@@ -355,7 +360,7 @@ class NeRFAE(CommonNeRF):
     )
 
     self.refl = refl.View(
-      out_features=out_features,
+      out_features=out_features, act=self.feat_act,
       latent_size=encoding_size+intermediate_size,
     )
     self.encoding_size = encoding_size
@@ -397,10 +402,10 @@ class NeRFAE(CommonNeRF):
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
-    rgb = self.feat_act(self.refl(
+    rgb = self.refl(
       x=pts, view=r_d[None,...].expand_as(pts),
       latent=torch.cat([encoded,intermediate],dim=-1),
-    ))
+    )
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     self.record_unisurf_loss(pts, self.alpha)
@@ -434,7 +439,8 @@ class VolSDF(CommonNeRF):
     mip_enc = self.mip_encoding(r_o, r_d, ts)
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
-    density = 1/self.scale * self.laplace_cdf(-self.sdf.from_pts(pts))
+    sdf_vals = self.sdf.from_pts(pts)
+    density = 1/self.scale * self.laplace_cdf(-sdf_vals)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
     rgb = self.sdf.refl(
@@ -547,6 +553,7 @@ class DynamicNeRFAE(nn.Module):
     return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
 
 
+# unisurf, currently doesn't really work because no secant search
 class Unisurf(CommonNeRF):
   def __init__(
     self,
@@ -564,7 +571,7 @@ class Unisurf(CommonNeRF):
     )
 
     self.refl = refl.View(
-      out_features=out_features,
+      out_features=out_features, act=self.feat_act,
       latent_size=self.latent_size+intermediate_size,
     )
 
@@ -583,10 +590,10 @@ class Unisurf(CommonNeRF):
     self.alpha = fat_sigmoid(first_out[..., 0])
     intermediate = first_out[..., 1:]
 
-    rgb = self.feat_act(self.second(
+    rgb = self.refl(
       x=pts, view=r_d.squeeze(0).expand_as(pts),
       latent=torch.cat([intermediate, latent], dim=-1),
-    ))
+    )
     self.weights = self.alpha * cumuprod_exclusive(1.0 - self.alpha + 1e-10)
     return volumetric_integrate(self.weights, rgb)
 

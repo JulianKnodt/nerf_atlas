@@ -4,9 +4,36 @@ import torch.nn.functional as F
 import random
 import math
 
-from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, elev_azim_to_dir )
+from .refl import ( LightAndRefl )
+
+def load(args, shape, light_and_refl: LightAndRefl):
+  assert(isinstance(light_and_refl, LightAndRefl)), "Need light and reflectance for integrator"
+
+  if args.integrator_kind is None: return None
+  elif args.integrator_kind == "direct": cons = Direct
+  elif args.integrator_kind == "path": cons = Path
+  else: raise NotImplementedError(f"load integrator: {args.integrator_kind}")
+
+  if args.occ_kind is None: occ = lighting_wo_isect
+  elif args.occ_kind is "hard": occ = lighting_w_isect
+  else: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
+
+  integ = cons(shape, bsdf=light_and_refl.refl, light=light_and_refl.refl, occlusion=occ)
+
+  return integ
+
+# hard shadow lighting
+def lighting_w_isect(pts, lights, isect_fn):
+  dir, spectrum = lights(pts)
+  rays = torch.cat([pts, dir], dim=-1)
+  visible = isect_fn(rays)
+  spectrum[~visible] = 0
+  return dir, spectrum
+
+# no shadow
+def lighting_wo_isect(pts, lights, isect_fn): return lights(pts)
 
 class Renderer(nn.Module):
   def __init__(
@@ -14,34 +41,37 @@ class Renderer(nn.Module):
     shape,
     bsdf,
     light,
+
+    occlusion=lighting_w_isect,
   ):
     super().__init__()
     self.shape = shape
-    self.light = light
     self.bsdf = bsdf
+    self.light = light
+    self.occ = occlusion
   def forward(self, _rays): raise NotImplementedError()
-
-def sample_emitter_dir_w_isect(it, shapes, lights, sampler, active=True):
-  ds, spectrum = lights.sample_direction(it, sampler=sampler, active=active)
-
-  # ds.d is already in world space
-  rays = torch.cat([it.p, ds.d], dim=-1)
-  not_blocked = \
-    shapes.intersect_test(rays, max_t=ds.dist.reshape_as(active)[..., None], active=active)
-  spectrum[~not_blocked | ~active] = 0
-  return ds, spectrum
 
 class Direct(Renderer):
   def __init__(self, **kwargs):
-    super(**kwargs).__init__()
+    super().__init__(**kwargs)
   def forward(self, rays):
-    # TODO define this intersect function
     r_o, r_d = rays.split([3, 3], dim=-1)
-    pts = self.shape.intersect(rays)
-    spectrum, light_dir = self.light(pts)
-    blocked =
-    bsdf_val = self.bsdf(pts, r_d)
-    raise NotImplementedError()
+
+    pts, hits, _t, n = self.shape.intersect_w_n(rays)
+    # fast path no hits, a sync is painful but storing a bunch more memory for grads
+    # for all 0s is worse.
+    if not hits.any(): return torch.zeros_like(pts)
+
+    light_dir, light_val = self.occ(pts, lights, self.shape.intersect_mask)
+    bsdf_val = self.bsdf(x=pts, view=r_d, normal=n,light=light_dir)
+    # TODO check this is valid
+    print(hits.shape, bsdf_val.shape, light_val.shape)
+    exit()
+    return torch.where(
+      hits,
+      bsdf_val * light_val,
+      torch.zeros_like(bsdf_val)
+    )
 
 class Path(Renderer):
   def __init__(
@@ -49,7 +79,7 @@ class Path(Renderer):
     bounces:int=1,
     **kwargs,
   ):
-    super(**kwargs).__init__()
-    self.bounces = 1
+    super().__init__(**kwargs)
+    self.bounces = bounces
   def forward(self, rays):
     raise NotImplementedError()
