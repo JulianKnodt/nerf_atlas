@@ -130,14 +130,15 @@ def arguments():
     choices=["spheres", "siren", "local", "mlp"], default="siren",
   )
 
-  dnerf = a.add_argument_group("dnerf")
-  dnerf.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
-  dnerf.add_argument(
+  dnerfa = a.add_argument_group("dnerf")
+  dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
+  dnerfa.add_argument(
     "--dnerf-tf-smooth-weight", help="L2 smooth dnerf tf", type=float, default=0,
   )
-  dnerf.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
-  dnerf.add_argument("--gru-flow", help="Use GRU for Δx", action="store_true")
-  dnerf.add_argument("--nicepath", help="Render a nice path for DNeRF", action="store_true")
+  dnerfa.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
+  dnerfa.add_argument("--gru-flow", help="Use GRU for Δx", action="store_true")
+  dnerfa.add_argument("--nicepath", help="Render a nice path for DNeRF", action="store_true")
+  dnerfa.add_argument("--with-canon", help="Preload a canonical NeRF", type=str, default=None)
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -456,7 +457,7 @@ def load_model(args):
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
 
-  # set reflectance kind:
+  # set reflectance kind only for new models:
   if args.refl_kind != "curr":
     refl_inst = refl.load(args, model.total_latent_size()).to(device)
     model.set_refl(refl_inst)
@@ -468,6 +469,11 @@ def load_model(args):
 
   # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":
+    if args.with_canon is not None:
+      model = torch.load(args.with_canon, map_location=device)
+      assert(isinstance(model, nerf.CommonNeRF)), f"Can only use NeRF subtype, got {type(model)}"
+      assert((not args.dnerfae) or isinstance(model, nerf.NeRFAE)), \
+        f"Can only use NeRFAE canonical with DNeRFAE, got {type(model)}"
     constructor = nerf.DynamicNeRFAE if args.dnerfae else nerf.DynamicNeRF
     model = constructor(
       canonical=model,
@@ -529,7 +535,7 @@ def main():
     else: labels = labels[:args.train_imgs, ...]
     cam = cam[:args.train_imgs, ...]
 
-  model = load_model(args) if args.load is None else torch.load(args.load)
+  model = load_model(args) if args.load is None else torch.load(args.load, map_location=device)
   set_per_run(model, args)
 
   parameters = model.parameters()
