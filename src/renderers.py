@@ -33,7 +33,21 @@ def lighting_w_isect(pts, lights, isect_fn):
   return dir, spectrum
 
 # no shadow
-def lighting_wo_isect(pts, lights, isect_fn): return lights(pts)
+def lighting_wo_isect(pts, lights, _isect_fn): return lights(pts)
+
+class LearnedLighting(nn.Module):
+  def __init__(self):
+    self.attenuation = SkipConnMLP(
+      in_size=5, out=1,
+      xavier_init=True,
+    )
+  def forward(self, pts, lights, isect_fn):
+    dir, spectrum = lights(pts)
+    rays = torch.cat([pts, dir], dim=-1)
+    visible = isect_fn(rays)
+    att = self.attenuation(torch.cat([pts, elev_azim_to_dir(dir)], dim=-1))
+    spectrum = torch.where(visible, spectrum, spectrum * att)
+    return dir, spectrum
 
 class Renderer(nn.Module):
   def __init__(

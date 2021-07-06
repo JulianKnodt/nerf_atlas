@@ -118,7 +118,7 @@ def arguments():
   lighta = a.add_argument_group("light")
   lighta.add_argument(
     "--light-kind", help="Kind of light to use while rendering",
-    choices=[None, "point", "mlp"], default=None,
+    choices=[None, "point", "field"], default=None,
   )
 
   sdfa = a.add_argument_group("sdf")

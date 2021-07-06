@@ -16,6 +16,7 @@ def load(args, latent_size=0):
     "latent_size": latent_size,
     "out_features": args.feature_space,
     "normal": args.normal_kind,
+    "space": space(),
   }
   if args.refl_kind == "basic":
     cons = Basic
@@ -25,7 +26,7 @@ def load(args, latent_size=0):
   elif args.refl_kind == "diffuse": cons = Diffuse
   else: raise NotImplementedError()
   # TODO assign view, normal, lighting here?
-  refl = cons(space=space(), **kwargs)
+  refl = cons(**kwargs)
 
   if args.light_kind is not None and refl.can_use_light:
     light = lights.load(args)
@@ -76,6 +77,10 @@ class Reflectance(nn.Module):
     act=fat_sigmoid,
     latent_size:int = 0,
     out_features:int = 3,
+
+    # delete unused
+    normal=None,
+    light=None,
   ):
     super().__init__()
     self.act = act
@@ -183,7 +188,7 @@ class Diffuse(Reflectance):
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
     return rgb * attenuation
 
-def Rusin(Reflectance):
+class Rusin(Reflectance):
   def __init__(
     self,
     space=None,
@@ -193,7 +198,7 @@ def Rusin(Reflectance):
     if space is None: space = IdentitySpace()
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
-      in_size=in_size, out=self.out_features, latent=self.latent_size,
+      in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size), xavier_init=True,
     )
     self.space = space

@@ -8,6 +8,7 @@ from .neural_blocks import (
 )
 from .utils import ( dir_to_elev_azim, autograd )
 import src.refl as refl
+from .renderers import ( lighting_w_isect )
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -320,6 +321,9 @@ class PlainNeRF(CommonNeRF):
 
     intermediate = first_out[..., 1:]
 
+    #n = None
+    #if self.refl.can_use_normal: n = autograd(pts, density)
+
     view = r_d[None, ...].expand_as(pts)
     rgb = self.refl(
       x=pts, view=view,
@@ -414,6 +418,7 @@ class NeRFAE(CommonNeRF):
     sky = self.sky_color(elev_azim_r_d, self.weights)
     return color + sky
 
+
 # https://arxiv.org/pdf/2106.12052.pdf
 class VolSDF(CommonNeRF):
   def __init__(
@@ -421,6 +426,8 @@ class VolSDF(CommonNeRF):
     # how many features to pass from density to RGB
     intermediate_size: int = 32, out_features: int = 3,
     device: torch.device = "cuda",
+
+    direct_lighting=False,
     **kwargs,
   ):
     super().__init__(**kwargs, device=device)
@@ -428,6 +435,16 @@ class VolSDF(CommonNeRF):
     # the reflectance model is in the SDF, so don't encode it here.
     # TODO add a bounding radius here for preventing spheres reaching infinite length?
     self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
+    self.secondary = None
+    if direct_lighting:
+      assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
+        "Must use light w/ direct illumination"
+      self.secondary = self.direct
+  def direct(self, pts, view, normal):
+    light = self.sdf.refl.light
+    light_dir, light_val = lighting_w_isect(pts, light, self.sdf.intersect_mask)
+    bsdf_val = self.sdf.refl(x=pts,view=view, normal=normal, light=light_dir)
+    return bsdf_val * light_val
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
@@ -439,17 +456,20 @@ class VolSDF(CommonNeRF):
     mip_enc = self.mip_encoding(r_o, r_d, ts)
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
-    sdf_vals = self.sdf.from_pts(pts)
+    sdf_vals, latent = self.sdf.from_pts(pts)
     density = 1/self.scale * self.laplace_cdf(-sdf_vals)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
-    rgb = self.sdf.refl(
-      x=pts, view=r_d.unsqueeze(0).expand_as(pts),
-      normal=self.sdf.normals(pts) if self.sdf.refl.can_use_normal else None,
-      # TODO figure out how to get latent here from SDF?
-    )
-    #rgb = self.feat_act(self.second(torch.cat([pts, elev_azim_r_d], dim=-1)))
+    n = None
+    if self.sdf.refl.can_use_normal or self.secondary is not None:
+      n = self.sdf.normals(pts)
+
+    view = r_d.unsqueeze(0).expand_as(pts)
+    if self.secondary is None:rgb = self.sdf.refl(x=pts, view=view, normal=n, latent=latent)
+    else: rgb = self.secondary(pts, view, n)
+
     return volumetric_integrate(self.weights, rgb)
+
   def laplace_cdf(self, sdf_vals):
     scaled = sdf_vals/self.scale
     return torch.where(

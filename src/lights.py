@@ -9,8 +9,8 @@ from .utils import ( autograd, elev_azim_to_dir )
 
 def load(args):
   if args.light_kind == "field": cons = Field
-  if args.light_kind == "point": cons = Point
-  else: raise NotImplementedError()
+  elif args.light_kind == "point": cons = Point
+  else: raise NotImplementedError(f"light kind: {args.light_kind}")
 
   return cons()
 

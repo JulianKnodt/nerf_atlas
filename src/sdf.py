@@ -29,6 +29,9 @@ class SDFModel(nn.Module):
   def __init__(self):
     super().__init__()
   def forward(self, _pts): raise NotImplementedError()
+
+  def latent_size(self): raise NotImplementedError()
+
   def normals(self, pts, values = None):
     with torch.enable_grad():
       if not pts.requires_grad: autograd_pts = pts.requires_grad_()
@@ -58,8 +61,12 @@ class SDF(nn.Module):
 
   @property
   def sdf(self): return self
+
   def normals(self, pts, values = None): return self.underlying.normals(pts, values)
-  def from_pts(self, pts): return self.underlying(pts)
+  def from_pts(self, pts):
+    raw = self.underlying(pts)
+    return raw[..., 0], raw[..., 1:]
+
   def intersect_w_n(self, r_o, r_d):
     pts, hit, t = sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
@@ -106,6 +113,9 @@ class SmoothedSpheres(SDFModel):
   def transform(self, p):
     tfs = self.tfs + torch.eye(3, device=p.device).unsqueeze(0)
     return torch.einsum("ijk,ibk->ibj", tfs, p.expand(tfs.shape[0], -1, -1))
+
+  def latent_size(self): return 0
+
   def forward(self, p):
     q = self.transform(p.reshape(-1, 3).unsqueeze(0)) - self.centers.unsqueeze(1)
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
@@ -113,27 +123,37 @@ class SmoothedSpheres(SDFModel):
     return out
 
 class MLP(SDFModel):
-  def __init__(self):
+  def __init__(
+    self,
+    latent_size:int=32,
+  ):
     super().__init__()
     self.mlp = SkipConnMLP(
-      in_size=3, out=1,
+      in_size=3, out=1+latent_size,
       enc=FourierEncoder(input_dims=3),
       num_layers=6, hidden_size=256,
       xavier_init=True,
     )
+    self.latent_size = latent_size
+  def latent_size(self): return self.latent_size
   def forward(self, x): return self.mlp(x).squeeze(-1)
 
 #def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):
-  def __init__(self):
+  def __init__(
+    self,
+    latent_size:int=32,
+  ):
     super().__init__()
     self.siren = SkipConnMLP(
-      in_size=3, out=1, enc=None,
+      in_size=3, out=1+latent_size, enc=None,
       hidden_size=96,
       activation=torch.sin,
       # Do not have skip conns
       skip=1000,
     )
+    self.latent_size = latent_size
+  def latent_size(self): return self.latent_size
   def forward(self, x):
     out = self.siren((30*x).sin()).squeeze(-1)
     assert(out.isfinite().all())
@@ -143,7 +163,7 @@ class Local(SDFModel):
   def __init__(
     self,
     partition_sz: int = 0.5,
-    latent_sz:int = 16,
+    latent_sz:int = 32,
   ):
     super().__init__()
     self.part_sz = partition_sz
@@ -237,8 +257,7 @@ def masked_loss(img_loss=F.mse_loss):
   # additional loss on the alpha channel.
   def aux(
     # got and exp have 4 channels, where the last are got_mask and exp_mask
-    got,
-    exp,
+    got, exp,
     mask_weight:float=15,
   ):
     got, got_mask = got.split([3,1],dim=-1)
