@@ -5,7 +5,7 @@ import random
 import math
 
 from .neural_blocks import ( SkipConnMLP, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, elev_azim_to_dir )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim )
 from .refl import ( LightAndRefl )
 
 def load(args, shape, light_and_refl: LightAndRefl):
@@ -32,8 +32,7 @@ def load_occlusion_kind(kind=None):
 # hard shadow lighting
 def lighting_w_isect(pts, lights, isect_fn):
   dir, spectrum = lights(pts)
-  rays = torch.cat([pts, dir], dim=-1)
-  visible = isect_fn(rays)
+  visible = isect_fn(pts, dir)
   spectrum[~visible] = 0
   return dir, spectrum
 
@@ -42,15 +41,15 @@ def lighting_wo_isect(pts, lights, _isect_fn): return lights(pts)
 
 class LearnedLighting(nn.Module):
   def __init__(self):
+    super().__init__()
     self.attenuation = SkipConnMLP(
       in_size=5, out=1,
       xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn):
     dir, spectrum = lights(pts)
-    rays = torch.cat([pts, dir], dim=-1)
-    visible = isect_fn(rays)
-    att = self.attenuation(torch.cat([pts, elev_azim_to_dir(dir)], dim=-1))
+    visible = isect_fn(pts, dir)
+    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1))
     spectrum = torch.where(visible, spectrum, spectrum * att)
     return dir, spectrum
 

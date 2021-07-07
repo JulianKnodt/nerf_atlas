@@ -44,9 +44,9 @@ class LightAndRefl(nn.Module):
 
   @property
   def can_use_normal(self): return self.refl.can_use_normal
-  def forward(self, x, view=None, normal=None, latent=None):
-    light_dir, _spectrum = self.light(x)
-    return self.refl(x, view, normal, light_dir)
+  def forward(self, x, view=None, normal=None, light=None, latent=None):
+    if light is None: light, _spectrum = self.light(x)
+    return self.refl(x, view, normal, light, latent)
 
 class SurfaceSpace(nn.Module):
   def __init__(
@@ -207,7 +207,7 @@ class Rusin(Reflectance):
   @property
   def can_use_light(self): return True
 
-  def forward(self, x, view, normal, light):
+  def forward(self, x, view, normal, light, latent=None):
     frame = coordinate_system(normal)
     wo = to_local(frame, view)
     wi = to_local(frame, light)

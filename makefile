@@ -21,11 +21,11 @@ volsdf_with_normal: clean
 
 rusin: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 64 --crop --epochs 50_000 --crop-size 16 \
-	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind mlp \
+	--size 64 --crop --epochs 50_000 --crop-size 25 \
+	--near 2 --far 6 --batch-size 3 --model volsdf --sdf-kind mlp \
 	-lr 1e-3 --loss-window 750 --valid-freq 250 \
 	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
-	--nosave --light-kind field --refl-kind rusin --occ-kind learned
+	--nosave --light-kind field --refl-kind rusin
 
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean

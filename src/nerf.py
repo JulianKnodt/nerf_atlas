@@ -452,7 +452,6 @@ class VolSDF(CommonNeRF):
     return self.from_pts(pts, ts, r_o, r_d)
   def set_refl(self, refl): self.sdf.refl = refl
   def from_pts(self, pts, ts, r_o, r_d):
-    self.secondary = None
     latent = self.curr_latent(pts.shape)
     mip_enc = self.mip_encoding(r_o, r_d, ts)
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)

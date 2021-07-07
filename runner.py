@@ -111,7 +111,7 @@ def arguments():
     help="Integrator to use for surface rendering",
   )
   rdra.add_argument(
-    "--occ-kind", choices=[None, "hard"], default=None,
+    "--occ-kind", choices=[None, "hard", "learned"], default=None,
     help="Occlusion method for shadows to use in integration",
   )
 
