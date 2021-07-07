@@ -15,14 +15,19 @@ def load(args, shape, light_and_refl: LightAndRefl):
   elif args.integrator_kind == "direct": cons = Direct
   elif args.integrator_kind == "path": cons = Path
   else: raise NotImplementedError(f"load integrator: {args.integrator_kind}")
-
-  if args.occ_kind is None: occ = lighting_wo_isect
-  elif args.occ_kind is "hard": occ = lighting_w_isect
-  else: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
+  occ = load_occlusion_kind(args.occ_kind)
 
   integ = cons(shape, bsdf=light_and_refl.refl, light=light_and_refl.refl, occlusion=occ)
 
   return integ
+
+def load_occlusion_kind(kind=None):
+  if kind is None: occ = lighting_wo_isect
+  elif kind == "hard": occ = lighting_w_isect
+  elif kind == "learned": occ = LearnedLighting()
+  else: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
+
+  return occ
 
 # hard shadow lighting
 def lighting_w_isect(pts, lights, isect_fn):

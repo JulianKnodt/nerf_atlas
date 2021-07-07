@@ -25,7 +25,7 @@ rusin: clean
 	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind mlp \
 	-lr 1e-3 --loss-window 750 --valid-freq 250 \
 	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
-	--nosave --light-kind field --refl-kind rusin
+	--nosave --light-kind field --refl-kind rusin --occ-kind learned
 
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean
@@ -36,15 +36,15 @@ food: clean
 # note: l1 loss completely breaks dnerf
 dnerf: clean
 	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --size 32 \
-	--crop --epochs 30_000  --save models/djj_ae.pt --model ae --crop --batch-size 4 \
-	--crop-size 20 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-  --dnerf-tf-smooth-weight 1e-4 --load models/djj_ae.pt
+	--crop --epochs 30_000  --save models/djj_ae.pt --model ae --crop --batch-size 3 \
+	--crop-size 20 --near 2 --far 6 -lr 1e-3 --no-sched --valid-freq 499 \
+	#--load models/djj_ae.pt
 
 dnerf_gru: clean
 	python3 runner.py -d data/data/bouncingballs/ --data-kind dnerf --size 64 \
 	--crop --epochs 80_000  --save models/djj_gru_ae.pt --model ae --crop --batch-size 2 \
-	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
-  --gru-flow --load models/djj_gru_ae.pt
+	--crop-size 24 --near 2 --far 6 -lr 1e-3 --no-sched --valid-freq 499 \
+  --gru-flow #--load models/djj_gru_ae.pt
 
 # testing out dnerfae dataset on dnerf
 dnerf_dyn: clean
@@ -85,7 +85,7 @@ unisurf: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --crop --epochs 80_000 --save models/lego_us.pt \
 	--near 2 --far 6 --batch-size 5 --crop-size 26 --model unisurf -lr 5e-4 \
-	--l1-loss --valid-freq 499 --no-sched --load models/lego_us.pt #--omit-bg
+	--loss-fns l1 --valid-freq 499 --no-sched --load models/lego_us.pt #--omit-bg
 
 test_original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -95,12 +95,8 @@ test_original: clean
 ae: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --crop --epochs 80_000 --save models/lego_ae.pt \
-	--near 2 --far 6 --batch-size 5 --crop-size 26 --model ae -lr 5e-4 \
-	--valid-freq 499 --no-sched --l1-loss #--load models/lego_ae.pt #--omit-bg
-test_ae: clean
-	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 64 --crop --epochs 0 --near 2 --far 6 --batch-size 5 \
-  --crop-size 26 --load models/lego_ae.pt
+	--near 2 --far 6 --batch-size 5 --crop-size 20 --model ae -lr 1e-3 \
+	--valid-freq 499 --no-sched --loss-fns l2 #--load models/lego_ae.pt #--omit-bg
 
 single-video: clean
 	python3 runner.py -d data/video/fencing.mp4 \

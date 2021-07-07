@@ -453,6 +453,7 @@ def load_model(args):
   elif args.model == "volsdf":
     constructor = nerf.VolSDF
     kwargs["sdf"] = sdf.load(args)
+    kwargs["occ_kind"] = args.occ_kind
   elif args.model == "unisurf": constructor = nerf.Unisurf
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)

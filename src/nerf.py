@@ -8,7 +8,7 @@ from .neural_blocks import (
 )
 from .utils import ( dir_to_elev_azim, autograd )
 import src.refl as refl
-from .renderers import ( lighting_w_isect )
+from .renderers import ( load_occlusion_kind )
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -41,7 +41,7 @@ def compute_pts_ts(
 
 # given a set of densities, and distances between the densities,
 # compute alphas from them.
-@torch.jit.script
+#@torch.jit.script
 def alpha_from_density(
   density, ts, r_d,
   softplus: bool = True,
@@ -415,7 +415,7 @@ class NeRFAE(CommonNeRF):
     self.record_unisurf_loss(pts, self.alpha)
 
     color = volumetric_integrate(self.weights, rgb)
-    sky = self.sky_color(elev_azim_r_d, self.weights)
+    sky = self.sky_color(None, self.weights)
     return color + sky
 
 
@@ -427,7 +427,7 @@ class VolSDF(CommonNeRF):
     intermediate_size: int = 32, out_features: int = 3,
     device: torch.device = "cuda",
 
-    direct_lighting=False,
+    occ_kind=None,
     **kwargs,
   ):
     super().__init__(**kwargs, device=device)
@@ -436,13 +436,13 @@ class VolSDF(CommonNeRF):
     # TODO add a bounding radius here for preventing spheres reaching infinite length?
     self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
     self.secondary = None
-    if direct_lighting:
-      assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
-        "Must use light w/ direct illumination"
+    if occ_kind is not None:
+      assert(isinstance(self.sdf.refl, refl.LightAndRefl)), "Must have light w/ volsdf integration"
+      self.occ = load_occlusion_kind(occ_kind)
       self.secondary = self.direct
   def direct(self, pts, view, normal):
     light = self.sdf.refl.light
-    light_dir, light_val = lighting_w_isect(pts, light, self.sdf.intersect_mask)
+    light_dir, light_val = self.occ(pts, light, self.sdf.intersect_mask)
     bsdf_val = self.sdf.refl(x=pts,view=view, normal=normal, light=light_dir)
     return bsdf_val * light_val
   def forward(self, rays):
@@ -452,6 +452,7 @@ class VolSDF(CommonNeRF):
     return self.from_pts(pts, ts, r_o, r_d)
   def set_refl(self, refl): self.sdf.refl = refl
   def from_pts(self, pts, ts, r_o, r_d):
+    self.secondary = None
     latent = self.curr_latent(pts.shape)
     mip_enc = self.mip_encoding(r_o, r_d, ts)
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)

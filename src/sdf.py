@@ -65,24 +65,25 @@ class SDF(nn.Module):
   def normals(self, pts, values = None): return self.underlying.normals(pts, values)
   def from_pts(self, pts):
     raw = self.underlying(pts)
-    return raw[..., 0], raw[..., 1:]
+    latent = raw[..., 1:]
+    return raw[..., 0], latent if latent.shape[-1] != 0 else None
 
   def intersect_w_n(self, r_o, r_d):
     pts, hit, t = sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      steps=32 if self.training else 64,
+      iters=32 if self.training else 64,
     )
     return pts, hit, t, self.normals(pts)
   def intersect_mask(self, r_o, r_d):
     return sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      steps=32 if self.training else 64,
+      iters=32 if self.training else 64,
     )[1]
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t = sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      steps=32 if self.training else 64,
+      iters=32 if self.training else 64,
     )
     rgb = self.refl(
       x=pts, view=r_d,
@@ -119,7 +120,7 @@ class SmoothedSpheres(SDFModel):
   def forward(self, p):
     q = self.transform(p.reshape(-1, 3).unsqueeze(0)) - self.centers.unsqueeze(1)
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
-    out = smooth_min(sd, k=32.).reshape(p.shape[:-1])
+    out = smooth_min(sd, k=32.).reshape(p.shape[:-1] + (1,))
     return out
 
 class MLP(SDFModel):
@@ -136,7 +137,7 @@ class MLP(SDFModel):
     )
     self.latent_size = latent_size
   def latent_size(self): return self.latent_size
-  def forward(self, x): return self.mlp(x).squeeze(-1)
+  def forward(self, x): return self.mlp(x)
 
 #def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):
@@ -155,7 +156,7 @@ class SIREN(SDFModel):
     self.latent_size = latent_size
   def latent_size(self): return self.latent_size
   def forward(self, x):
-    out = self.siren((30*x).sin()).squeeze(-1)
+    out = self.siren((30*x).sin())
     assert(out.isfinite().all())
     return out
 
@@ -173,7 +174,7 @@ class Local(SDFModel):
     local = x % self.part_sz
     latent = self.latent(x//self.part_sz)
     out = self.tform(local, latent)
-    return out.squeeze(-1)
+    return out
 
 class SDFNeRF(nn.Module):
   def __init__(
@@ -218,7 +219,7 @@ def sphere_march(
     curr_dist = torch.full_like(hits, near, dtype=torch.float)
     for i in range(iters):
       curr = r_o + r_d * curr_dist
-      dist = self(curr).reshape_as(curr_dist)
+      dist = self(curr)[...,0].reshape_as(curr_dist)
       hits = hits | ((dist < eps) & (curr_dist >= near) & (curr_dist <= far))
       curr_dist = torch.where(~hits, curr_dist + dist, curr_dist)
       # this saves some memory? but slows it down?
@@ -238,17 +239,17 @@ def throughput(
   max_t = far+random.random()*(2/batch_size)
   step = max_t/batch_size
   with torch.no_grad():
-    sd = self(r_o).squeeze(-1)
+    sd = self(r_o)[...,0]
     curr_min = sd
     idxs = torch.zeros_like(sd, dtype=torch.long, device=r_d.device)
     for i in range(batch_size):
       t = step * (i+1)
-      sd = self(r_o + t * r_d).squeeze(-1)
+      sd = self(r_o + t * r_d)[..., 0]
       idxs = torch.where(sd < curr_min, i+1, idxs)
       curr_min = torch.minimum(curr_min, sd)
   idxs = idxs.unsqueeze(-1)
   best_pos = r_o  + idxs * step * r_d
-  return self(best_pos), best_pos
+  return self(best_pos)[...,0], best_pos
 
 
 #@torch.jit.script

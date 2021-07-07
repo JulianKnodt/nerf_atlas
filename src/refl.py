@@ -22,9 +22,9 @@ def load(args, latent_size=0):
     cons = Basic
     if args.light_kind is not None: kwargs["light"] = "elaz"
   elif args.refl_kind == "rusin": cons = Rusin
-  elif args.refl_kind == "view_dir": cons = View
+  elif args.refl_kind == "view_dir" or args.refl_kind == "curr": cons = View
   elif args.refl_kind == "diffuse": cons = Diffuse
-  else: raise NotImplementedError()
+  else: raise NotImplementedError(f"refl kind: {args.refl_kind}")
   # TODO assign view, normal, lighting here?
   refl = cons(**kwargs)
 
