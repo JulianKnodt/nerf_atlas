@@ -35,26 +35,34 @@ food: clean
 
 # note: l1 loss completely breaks dnerf
 dnerf: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --size 32 \
+	python3 runner.py -d data/dynamic/jumpingjacks/ --data-kind dnerf --size 32 \
 	--crop --epochs 30_000  --save models/djj_ae.pt --model ae --crop --batch-size 3 \
 	--crop-size 20 --near 2 --far 6 -lr 1e-3 --no-sched --valid-freq 499 \
 	#--load models/djj_ae.pt
 
+vsd_dataset := bouncingballs
+volsdf_dnerf: clean
+	python3 runner.py -d data/dynamic/$(vsd_dataset)/ --data-kind dnerf --size 32 \
+	--crop --epochs 80_000  --save models/dvs_$(vsd_dataset).pt --model volsdf --crop \
+  --batch-size 3 --crop-size 22 --near 2 --far 6 -lr 3e-4 --valid-freq 499 \
+  --loss-fns l2 --sdf-kind mlp --loss-window 1000 --sdf-eikonal 0.1 \
+  #--load models/dvs_$(vsd_dataset).pt
+
 dnerf_gru: clean
-	python3 runner.py -d data/data/bouncingballs/ --data-kind dnerf --size 64 \
+	python3 runner.py -d data/dynamic/bouncingballs/ --data-kind dnerf --size 64 \
 	--crop --epochs 80_000  --save models/djj_gru_ae.pt --model ae --crop --batch-size 2 \
 	--crop-size 24 --near 2 --far 6 -lr 1e-3 --no-sched --valid-freq 499 \
   --gru-flow #--load models/djj_gru_ae.pt
 
 # testing out dnerfae dataset on dnerf
 dnerf_dyn: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --size 64 \
+	python3 runner.py -d data/dynamic/jumpingjacks/ --data-kind dnerf --size 64 \
 	--crop --epochs 80_000  --save models/djj_gamma.pt --model ae --crop --batch-size 1 \
 	--crop-size 40 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 	--serial-idxs --time-gamma --loss-window 750 #--load models/djj_gamma.pt
 
 dnerfae: clean
-	python3 runner.py -d data/data/jumpingjacks/ --data-kind dnerf --size 128 \
+	python3 runner.py -d data/dynamic/jumpingjacks/ --data-kind dnerf --size 128 \
 	--crop --epochs 40_000  --save models/djj_ae_gamma.pt --model ae --crop --batch-size 2 \
 	--crop-size 32 --near 2 --far 6 -lr 2e-4 --no-sched --valid-freq 499 \
 	--dnerfae --time-gamma --loss-window 750 --loss-fns rmse \
@@ -74,6 +82,13 @@ dtu: clean
 	--near 0.3 --far 1.8 --batch-size 3 --crop-size 28 --model volsdf -lr 1e-3 \
 	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
 	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat --load models/dtu$(scan_number).pt
+
+nerv: clean
+	python3 -O runner.py -d data/nerv_public_release/hotdogs/ \
+  --data-kind nerv_point \
+	--size 64 --crop --epochs 80_000 --save models/nerv_hotdog.pt \
+	--near 2 --far 6 --batch-size 4 --crop-size 26 --model plain -lr 5e-4 \
+	--loss-fns l2 --valid-freq 499 --nosave #--load models/lego.pt #--omit-bg
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

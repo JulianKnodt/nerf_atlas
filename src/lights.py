@@ -42,12 +42,24 @@ class Point(Light):
     train_intensity=False,
   ):
     super().__init__()
-    self.center = nn.Parameter(torch.tensor(
-      center, requires_grad=train_center, dtype=torch.float,
-    ))
-    self.intensity = nn.Parameter(torch.tensor(
-      intensity, requires_grad=train_intensity, dtype=torch.float,
-    ))
+    if type(center) == torch.Tensor: self.center = center
+    else:
+      self.center = nn.Parameter(torch.tensor(
+        center, requires_grad=train_center, dtype=torch.float,
+      ))
+    self.train_center = self.train_center
+
+    if type(intensity) == torch.Tensor: self.intensity = intensity
+    else:
+      self.intensity = nn.Parameter(torch.tensor(
+        intensity, requires_grad=train_intensity, dtype=torch.float,
+      ))
+    self.train_intensity = train_intensity
+  def __getitem__(self, v):
+    return Point(
+      center=self.center[v], train_center=self.train_center,
+      intensity=self.intensity[v], train_intensity=self.train_intensity,
+    )
   @property
   def can_sample(self): return True
   def forward(self, x):

@@ -15,7 +15,7 @@ def load(args):
   elif args.sdf_kind == "mlp": model = MLP()
   else: raise NotImplementedError()
   # refl inst may also have a nested light
-  refl_inst = refl.load(args, 0)
+  refl_inst = refl.load(args, model.latent_size)
 
   sdf = SDF(
     model, refl_inst,
@@ -29,8 +29,6 @@ class SDFModel(nn.Module):
   def __init__(self):
     super().__init__()
   def forward(self, _pts): raise NotImplementedError()
-
-  def latent_size(self): raise NotImplementedError()
 
   def normals(self, pts, values = None):
     with torch.enable_grad():
@@ -115,6 +113,7 @@ class SmoothedSpheres(SDFModel):
     tfs = self.tfs + torch.eye(3, device=p.device).unsqueeze(0)
     return torch.einsum("ijk,ibk->ibj", tfs, p.expand(tfs.shape[0], -1, -1))
 
+  @property
   def latent_size(self): return 0
 
   def forward(self, p):
@@ -136,7 +135,6 @@ class MLP(SDFModel):
       xavier_init=True,
     )
     self.latent_size = latent_size
-  def latent_size(self): return self.latent_size
   def forward(self, x): return self.mlp(x)
 
 #def siren_act(v): return (30*v).sin()
@@ -154,7 +152,6 @@ class SIREN(SDFModel):
       skip=1000,
     )
     self.latent_size = latent_size
-  def latent_size(self): return self.latent_size
   def forward(self, x):
     out = self.siren((30*x).sin())
     assert(out.isfinite().all())

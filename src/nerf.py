@@ -457,6 +457,7 @@ class VolSDF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     sdf_vals, latent = self.sdf.from_pts(pts)
+
     density = 1/self.scale * self.laplace_cdf(-sdf_vals)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
@@ -486,7 +487,7 @@ class VolSDF(CommonNeRF):
 class DynamicNeRF(nn.Module):
   def __init__(self, canonical: CommonNeRF, gru_flow:bool=False, device="cuda"):
     super().__init__()
-    self.canonical = canonical.to(device)
+    self.canonical = canonical
 
     if gru_flow:
       self.delta_estim = UpdateOperator(in_size=4, out_size=3, hidden_size=32)
@@ -496,7 +497,7 @@ class DynamicNeRF(nn.Module):
         in_size=4, out=3,
 
         num_layers = 5, hidden_size = 128,
-        enc=NNEncoder(input_dims=4, device=device),
+        enc=NNEncoder(input_dims=4),
         activation=nn.Softplus(),
         zero_init=True,
       )
@@ -506,6 +507,10 @@ class DynamicNeRF(nn.Module):
 
   @property
   def nerf(self): return self.canonical
+
+  @property
+  def sdf(self): return getattr(self.canonical, "sdf", None)
+
   def set_smooth_delta(self): setattr(self, "smooth_delta", True)
   def forward(self, rays_t):
     rays, t = rays_t
@@ -523,8 +528,8 @@ class DynamicNeRF(nn.Module):
     pts_t = torch.cat([pts, t], dim=-1)
     dp = self.delta_estim(pts_t)
     dp = torch.where(t.abs() < 1e-6, torch.zeros_like(pts), dp)
-    if self.training and self.smooth_delta:
-      self.delta_smoothness = self.delta_estim.l2_smoothness(pts_t, dp)
+    #if self.training and self.smooth_delta:
+    #  self.delta_smoothness = self.delta_estim.l2_smoothness(pts_t, dp)
     pts = pts + dp
     return self.canonical.from_pts(pts, ts, r_o, r_d)
 

@@ -30,7 +30,10 @@ def arguments():
   a.add_argument("-d", "--data", help="path to data", required=True)
   a.add_argument(
     "--data-kind", help="Kind of data to load", default="original",
-    choices=["original", "single_video", "dnerf", "dtu", "pixel-single", "shiny"],
+    choices=[
+      "original", "single_video", "dnerf", "dtu", "pixel-single", "nerv_point",
+      "shiny"
+    ],
   )
   a.add_argument(
     "--derive-kind", help="Attempt to derive the kind if a single file is given",
@@ -139,6 +142,7 @@ def arguments():
   dnerfa.add_argument("--gru-flow", help="Use GRU for Δx", action="store_true")
   dnerfa.add_argument("--nicepath", help="Render a nice path for DNeRF", action="store_true")
   dnerfa.add_argument("--with-canon", help="Preload a canonical NeRF", type=str, default=None)
+  dnerfa.add_argument("--fix-canon", help="Do not train canonical NeRF", action="store_true")
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -229,6 +233,12 @@ def load(args, training=True):
       with_mask = (args.model == "sdf") and training,
       device=device,
     )
+  elif kind == "nerv_point":
+    return loaders.nerv_point(
+      args.data, training=training, size=size,
+      with_mask = (args.model == "sdf") and training,
+      device=device,
+    )
   elif kind == "dtu":
     return loaders.dtu(
       args.data, training=training, size=size,
@@ -250,7 +260,7 @@ def load(args, training=True):
   elif kind == "shiny":
     loaders.shiny(args.data)
     raise NotImplementedError()
-  else: raise NotImplementedError(kind)
+  else: raise NotImplementedError(f"load data: {kind}")
 
 def sqr(x): return x * x
 
@@ -340,7 +350,7 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
     if hasattr(model, "nerf") and model.nerf.unisurf_loss > 0:
       loss = loss + model.nerf.unisurf_loss
-    if args.sdf_eikonal > 0 and hasattr(model, "sdf"):
+    if args.sdf_eikonal > 0:
       loss = loss + args.sdf_eikonal * \
         utils.eikonal_loss(model.sdf.normals(5*torch.randn(1024, 3, device=device)))
 

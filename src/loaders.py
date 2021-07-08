@@ -125,8 +125,54 @@ def dtu(path=".", training=True, size=256, with_mask=False, device="cuda"):
 
   return exp_imgs, cameras.DTUCamera(pose=poses, intrinsic=intrinsics)
 
+def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"):
+  import imageio
+  def load_exr(path): return torch.from_numpy(imageio.imread(path))
+
+  if training: path = path + f"train_point/"
+  kind = "train" if training else "test"
+  tfs = json.load(open(path + f"transforms_{kind}.json"))
+  exp_imgs = []
+  exp_masks = []
+  light_locs = []
+  focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
+  cam_to_worlds=[]
+  for frame in tfs["frames"]:
+    img = load_exr(os.path.join(path, frame['file_path'] + '.exr'))
+    exp_imgs.append(img[..., :3])
+    exp_masks.append((img[..., 3] - 1e-5).ceil())
+    tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
+
+    # set distance to 1 from origin
+    #n = torch.linalg.norm(tf_mat[:3, 3], dim=-1)
+    #if with_norm: tf_mat[:3, 3] = F.normalize(tf_mat[:3, 3], dim=-1)
+
+    cam_to_worlds.append(tf_mat)
+    # also have to update light positions since normalizing to unit sphere
+    ll = torch.tensor(frame['light_loc'], dtype=torch.float, device=device)
+    light_locs.append(ll)
+    #if with_norm:
+    #  ln = torch.linalg.norm(ll, dim=-1)
+    #  light_locs.append(ln/n * F.normalize(ll, dim=-1))
+    #else:
+  exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
+  if with_mask:
+    exp_masks = torch.stack(exp_masks, dim=0).to(device)
+    exp_imgs = torch.cat([exp_imgs, exp_masks], dim=-1)
+
+  ll = torch.stack(ll, dim=0).to(device)
+  cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
+
+  intensity = [100.]
+  light = light.Point(center=ll, intensity=intensity)
+  print(light)
+  print(light[:1])
+  exit()
+  return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal)
+
 
 # taken from https://github.com/nex-mpi/nex-code/blob/main/utils/load_llff.py#L59
+# holy balls their code is illegible, I don't know how to reproduce it.
 def shiny(path, training=True, size=256, device="cuda"):
   #tfs = open(os.path.join(path, "poses_bounds.npy"))
   poses_file = os.path.join(path, "poses_bounds.npy")

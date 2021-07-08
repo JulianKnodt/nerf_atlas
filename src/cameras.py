@@ -193,7 +193,6 @@ class DTUCamera(Camera):
   intrinsic: torch.Tensor = None
   device: str = "cuda"
   def __len__(self): return self.pose.shape[0]
-  # support indexing to get sub components of a camera
   def __getitem__(self, v):
     return DTUCamera(pose=self.pose[v], intrinsic=self.intrinsic[v], device=self.device)
   def sample_positions(
@@ -231,3 +230,4 @@ class DTUCamera(Camera):
     r_d = F.normalize(world_coords - r_o, dim=-1)
 
     return torch.cat([r_o, r_d], dim=-1).reshape(N, W, H, 6)
+
