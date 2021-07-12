@@ -9,11 +9,59 @@ import os
 import torch
 import torch.nn.functional as F
 import torchvision
+import torchvision.transforms.functional as TVF
 import numpy as np
 import imageio
 
 from . import cameras
 from .utils import load_image
+import src.lights as lights
+
+# loads the dataset
+def load(args, training=True, device="cuda"):
+  assert(args.data is not None)
+  kind = args.data_kind
+  if args.derive_kind:
+    if args.data.endswith(".mp4"): kind = "single_video"
+    elif args.data.endswith(".jpg"): kind = "pixel-single"
+
+  size = args.size
+  if kind == "original":
+    return original(
+      args.data, training=training, normalize=False, size=size,
+      white_bg=args.bg=="white",
+      with_mask = (args.model == "sdf") and training,
+      device=device,
+    )
+  elif kind == "nerv_point":
+    return nerv_point(
+      args.data, training=training, size=size,
+      with_mask = (args.model == "sdf") and training,
+      device=device,
+    )
+  elif kind == "dtu":
+    return dtu(
+      args.data, training=training, size=size,
+      with_mask = (args.model == "sdf") and training,
+      device=device,
+    )
+  elif kind == "dnerf":
+    return dnerf(
+      args.data, training=training, size=size, time_gamma=args.time_gamma,
+      white_bg=args.bg=="white", device=device,
+    )
+  elif kind == "single_video":
+    return single_video(args.data)
+  elif kind == "pixel-single":
+    img, cam = single_image(args.data)
+    setattr(args, "img", img)
+    args.batch_size = 1
+    return img, cam
+  elif kind == "shiny":
+    shiny(args.data)
+    raise NotImplementedError()
+  else: raise NotImplementedError(f"load data: {kind}")
+
 
 def original(
   dir=".", normalize=True, training=True, size=256, white_bg=False, with_mask=False,
@@ -40,7 +88,7 @@ def original(
   if with_mask:
     exp_imgs[..., -1] = (exp_imgs[..., -1] - 1e-5).ceil()
 
-  return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal)
+  return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal), None
 
 def dnerf(
   dir=".", normalize=False, training=True,
@@ -77,7 +125,7 @@ def dnerf(
   if time_gamma:
     exp_imgs = exp_imgs.pow((2 * times[:, None, None, None] - 1).exp())
 
-  return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal)
+  return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal), None
 
 def dtu(path=".", training=True, size=256, with_mask=False, device="cuda"):
   import cv2
@@ -123,8 +171,9 @@ def dtu(path=".", training=True, size=256, with_mask=False, device="cuda"):
   poses[:, :3, 3] /= max_dist
   intrinsics = torch.stack(intrinsics, dim=0)
 
-  return exp_imgs, cameras.DTUCamera(pose=poses, intrinsic=intrinsics)
+  return exp_imgs, cameras.DTUCamera(pose=poses, intrinsic=intrinsics), None
 
+# https://docs.google.com/document/d/1KI7YtWl3nAuS6xH2WFWug87o-1G6PP4GHrnNzZ0LeUk/edit
 def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"):
   import imageio
   def load_exr(path): return torch.from_numpy(imageio.imread(path))
@@ -137,8 +186,12 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
   light_locs = []
   focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
   cam_to_worlds=[]
-  for frame in tfs["frames"]:
-    img = load_exr(os.path.join(path, frame['file_path'] + '.exr'))
+  # only the first 100 frames have correct lighting?
+  for frame in tfs["frames"][100:]:
+    img = load_exr(os.path.join(path, frame['file_path'] + '.exr')).permute(2,0,1)
+    img = TVF.resize(img, size=(size, size))
+    img[:3,...] = TVF.adjust_gamma(img[:3,...], 1/(2.2 * 2.2))
+    img = img.permute(1,2,0)
     exp_imgs.append(img[..., :3])
     exp_masks.append((img[..., 3] - 1e-5).ceil())
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
@@ -155,20 +208,17 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
     #  ln = torch.linalg.norm(ll, dim=-1)
     #  light_locs.append(ln/n * F.normalize(ll, dim=-1))
     #else:
-  exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
+  exp_imgs = torch.stack(exp_imgs, dim=0).to(device).clamp(min=0, max=1)
   if with_mask:
     exp_masks = torch.stack(exp_masks, dim=0).to(device)
     exp_imgs = torch.cat([exp_imgs, exp_masks], dim=-1)
 
-  ll = torch.stack(ll, dim=0).to(device)
+  light_locs = torch.stack(light_locs, dim=0).to(device)
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
 
   intensity = [100.]
-  light = light.Point(center=ll, intensity=intensity)
-  print(light)
-  print(light[:1])
-  exit()
-  return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal)
+  light = lights.Point(center=light_locs, intensity=intensity)
+  return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal), light.to(device)
 
 
 # taken from https://github.com/nex-mpi/nex-code/blob/main/utils/load_llff.py#L59
@@ -196,19 +246,15 @@ def shiny(path, training=True, size=256, device="cuda"):
   ]
   imgs = torch.stack([load_image(f, (size, size)) for f in img_files], dim=0).to(device)
   raise NotImplementedError("TODO get camera from poses, bds")
-  return imgs, cameras.NeRFCamera(poses, focal=fx)
+  return imgs, cameras.NeRFCamera(poses, focal=fx), None
 
 def single_video(path, training=True, size=256, device="cuda"):
   frames, _, _ = torchvision.io.read_video(path, pts_unit='sec')
   frames = (frames[:100]/255).to(device)
-  return frames, cameras.NeRFMMCamera.identity(len(frames), device=device)
+  return frames, cameras.NeRFMMCamera.identity(len(frames), device=device), None
 
 def single_image(path, training=True, size=256, device="cuda"):
   img = torchvision.io.read_image(path).to(device)
   img = torchvision.transforms.functional.resize(img, size=(size, size))
   img = img.permute(1,2,0)/255
-  return img.unsqueeze(0), cameras.NeRFCamera.identity(1, device=device)
-
-def monocular_video(path=".", training=True, size=256, device="cuda"):
-  raise NotImplementedError()
-  return NeRFCamera.empty(len(vid))
+  return img.unsqueeze(0), cameras.NeRFCamera.identity(1, device=device), None

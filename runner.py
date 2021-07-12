@@ -120,8 +120,9 @@ def arguments():
 
   lighta = a.add_argument_group("light")
   lighta.add_argument(
-    "--light-kind", help="Kind of light to use while rendering",
-    choices=[None, "point", "field"], default=None,
+    "--light-kind",
+    help="Kind of light to use while rendering. Dataset indicates light is in dataset",
+    choices=[None, "point", "field", "dataset"], default=None,
   )
 
   sdfa = a.add_argument_group("sdf")
@@ -216,52 +217,6 @@ def render(
   elif args.data_kind == "pixel-single": return model((rays, positions))
   return model(rays)
 
-
-# loads the dataset
-def load(args, training=True):
-  assert(args.data is not None)
-  kind = args.data_kind
-  if args.derive_kind:
-    if args.data.endswith(".mp4"): kind = "single_video"
-    elif args.data.endswith(".jpg"): kind = "pixel-single"
-
-  size = args.size
-  if kind == "original":
-    return loaders.original(
-      args.data, training=training, normalize=False, size=size,
-      white_bg=args.bg=="white",
-      with_mask = (args.model == "sdf") and training,
-      device=device,
-    )
-  elif kind == "nerv_point":
-    return loaders.nerv_point(
-      args.data, training=training, size=size,
-      with_mask = (args.model == "sdf") and training,
-      device=device,
-    )
-  elif kind == "dtu":
-    return loaders.dtu(
-      args.data, training=training, size=size,
-      with_mask = (args.model == "sdf") and training,
-      device=device,
-    )
-  elif kind == "dnerf":
-    return loaders.dnerf(
-      args.data, training=training, size=size, time_gamma=args.time_gamma,
-      white_bg=args.bg=="white", device=device,
-    )
-  elif kind == "single_video":
-    return loaders.single_video(args.data)
-  elif kind == "pixel-single":
-    img, cam = loaders.single_image(args.data)
-    setattr(args, "img", img)
-    args.batch_size = 1
-    return img, cam
-  elif kind == "shiny":
-    loaders.shiny(args.data)
-    raise NotImplementedError()
-  else: raise NotImplementedError(f"load data: {kind}")
-
 def sqr(x): return x * x
 
 def save_losses(losses, window=250):
@@ -272,7 +227,8 @@ def save_losses(losses, window=250):
   plt.close()
 
 # train the model with a given camera and some labels (imgs or imgs+times)
-def train(model, cam, labels, opt, args, sched=None):
+# light is a per instance light.
+def train(model, cam, labels, opt, args, light=None, sched=None):
   if args.epochs == 0: return
 
   loss_fns = [loss_map[lfn] for lfn in args.loss_fns]
@@ -315,6 +271,8 @@ def train(model, cam, labels, opt, args, sched=None):
     ts = None if times is None else times[idxs]
     c0,c1,c2,c3 = crop = get_crop()
     ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
+
+    if light is not None: model.refl.light = light[idxs]
 
     # omit items which are all darker with some likelihood.
     if args.omit_bg and (i % args.save_freq) != 0 and (i % args.valid_freq) != 0 and \
@@ -417,6 +375,7 @@ def test(model, cam, labels, args, training: bool = True):
       if hasattr(model, "nerf"): items.append(acc)
       save_plot(name, *items)
       ls.append(psnr)
+
   print(f"""[Summary ({"training" if training else "test"})]:
           mean {np.mean(ls):.03f}
           min {min(ls):.03f}
@@ -540,7 +499,7 @@ def main():
   args = arguments()
   seed(args.seed)
 
-  labels, cam = load(args)
+  labels, cam, light = loaders.load(args, training=True, device=device)
   if args.train_imgs > 0:
     if type(labels) == tuple: labels = tuple(l[:args.train_imgs, ...] for l in labels)
     else: labels = labels[:args.train_imgs, ...]
@@ -559,7 +518,7 @@ def main():
   # TODO should T_max = -1 or args.epochs
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=5e-5)
   if args.no_sched: sched = None
-  train(model, cam, labels, opt, args, sched=sched)
+  train(model, cam, labels, opt, args, light=light, sched=sched)
 
   if args.epochs != 0: save(model, args)
   if args.notest: return

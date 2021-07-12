@@ -10,6 +10,7 @@ from .utils import ( autograd, elev_azim_to_dir )
 def load(args):
   if args.light_kind == "field": cons = Field
   elif args.light_kind == "point": cons = Point
+  elif args.light_kind == "dataset": cons = lambda **kwargs: None
   else: raise NotImplementedError(f"light kind: {args.light_kind}")
 
   return cons()
@@ -19,7 +20,7 @@ class Light(nn.Module):
     self
   ):
     super().__init__()
-
+  def __getitem__(self, _v): return self
   @property
   def can_sample(self): return False
   def forward(self, x): raise NotImplementedError()
@@ -47,13 +48,14 @@ class Point(Light):
       self.center = nn.Parameter(torch.tensor(
         center, requires_grad=train_center, dtype=torch.float,
       ))
-    self.train_center = self.train_center
+    self.train_center = train_center
 
     if type(intensity) == torch.Tensor: self.intensity = intensity
     else:
-      self.intensity = nn.Parameter(torch.tensor(
+      intensity = torch.tensor(
         intensity, requires_grad=train_intensity, dtype=torch.float,
-      ))
+      ).expand([self.center.shape[0]])
+      self.intensity = nn.Parameter(intensity)
     self.train_intensity = train_intensity
   def __getitem__(self, v):
     return Point(
@@ -63,12 +65,10 @@ class Point(Light):
   @property
   def can_sample(self): return True
   def forward(self, x):
-    print(x.shape, self.center.shape)
-    d = x - self.center
+    d = x - self.center[:, None, None, :]
     dist = torch.linalg.norm(d, dim=-1)
     dir = F.normalize(d, dim=-1)
     decay = dist.square()
-    print(decay.shape, self.intensity.shape)
-    spectrum = F.normalize(self.intensity, dim=-1)/dist.clamp(min=1e-6)
+    spectrum = F.normalize(self.intensity[:, None, None], dim=-1)/decay.clamp(min=1e-6)
 
     return dir, spectrum

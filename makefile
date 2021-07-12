@@ -83,12 +83,14 @@ dtu: clean
 	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
 	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat --load models/dtu$(scan_number).pt
 
-nerv: clean
+nerv_point: clean
 	python3 -O runner.py -d data/nerv_public_release/hotdogs/ \
-  --data-kind nerv_point \
-	--size 64 --crop --epochs 80_000 --save models/nerv_hotdog.pt \
-	--near 2 --far 6 --batch-size 4 --crop-size 26 --model plain -lr 5e-4 \
-	--loss-fns l2 --valid-freq 499 --nosave #--load models/lego.pt #--omit-bg
+	--data-kind nerv_point --model volsdf --sdf-kind mlp \
+	--save models/nerv_hotdog.pt \
+	--size 64 --crop --crop-size 20 --epochs 50_000 --loss-window 750 \
+	--near 2 --far 6 --batch-size 3 -lr 1e-3 --refl-kind rusin \
+	--sdf-eikonal 0.1 --light-kind dataset \
+	--loss-fns l2 --valid-freq 499 #--load models/nerv_hotdog.pt
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
