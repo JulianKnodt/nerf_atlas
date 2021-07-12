@@ -52,9 +52,10 @@ class Point(Light):
 
     if type(intensity) == torch.Tensor: self.intensity = intensity
     else:
+      if len(intensity) == 1: intensity = intensity * 3
       intensity = torch.tensor(
         intensity, requires_grad=train_intensity, dtype=torch.float,
-      ).expand([self.center.shape[0]])
+      ).expand([self.center.shape[0], -1])
       self.intensity = nn.Parameter(intensity)
     self.train_intensity = train_intensity
   def __getitem__(self, v):
@@ -69,6 +70,6 @@ class Point(Light):
     dist = torch.linalg.norm(d, dim=-1)
     dir = F.normalize(d, dim=-1)
     decay = dist.square()
-    spectrum = F.normalize(self.intensity[:, None, None], dim=-1)/decay.clamp(min=1e-6)
+    spectrum = self.intensity[:, None, None, :]/decay.clamp(min=1e-6).unsqueeze(-1)
 
     return dir, spectrum

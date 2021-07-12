@@ -77,15 +77,18 @@ def arguments():
   )
   # this default for LR seems to work pretty well?
   a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
-  a.add_argument("--seed", help="random seed to use", type=int, default=1337)
-  a.add_argument("--decay", help="weight_decay value", type=float, default=0)
-  a.add_argument("--notest", help="do not run test set", action="store_true")
+  a.add_argument("--seed", help="Random seed to use", type=int, default=1337)
+  a.add_argument("--decay", help="Weight_decay value", type=float, default=0)
+  a.add_argument("--notest", help="Do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
   a.add_argument(
-    "--loss-fns", help="loss functions to use", nargs="+", type=str,
+    "--loss-fns", help="Loss functions to use", nargs="+", type=str,
     # TODO add SSIM here? Or LPIPS?
     choices=["l1", "l2", "rmse"], default=["l2"],
+  )
+  a.add_argument(
+    "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action="store_true",
   )
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
@@ -239,6 +242,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       loss = 0
       for fn in loss_fns: loss = loss + fn(x, ref)
       return loss
+  if args.tone_map: loss_fn = utils.tone_map(loss_fn)
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
 
 
@@ -353,6 +357,8 @@ def test(model, cam, labels, args, training: bool = True):
       got = torch.zeros_like(exp)
       acc = torch.zeros_like(got)
       if args.backing_sdf: got_sdf = torch.zeros_like(got)
+      if light is not None: model.refl.light = light[i:i+1]
+
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
         for y in range(N):

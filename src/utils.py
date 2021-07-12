@@ -148,6 +148,11 @@ def rotate_vector(v, axis, c, s):
 
 def mse2psnr(x): return -10 * torch.log10(x)
 
+def tone_map(loss_fn):
+  def tone_mapped_loss(got, ref):
+    return loss_fn(got/(1+got), ref/(1+ref))
+  return tone_mapped_loss
+
 def apply_tf(w, b, v):
   N = v.shape[-1]
   return torch.bmm(w.reshape(-1, N, N), v.reshape(-1, 1, N)).reshape_as(b) + b

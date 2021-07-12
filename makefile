@@ -87,10 +87,10 @@ nerv_point: clean
 	python3 -O runner.py -d data/nerv_public_release/hotdogs/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_hotdog.pt \
-	--size 64 --crop --crop-size 20 --epochs 50_000 --loss-window 750 \
-	--near 2 --far 6 --batch-size 3 -lr 1e-3 --refl-kind rusin \
+	--size 20 --crop --crop-size 18 --epochs 50_000 --loss-window 750 \
+	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l2 --valid-freq 499 #--load models/nerv_hotdog.pt
+	--loss-fns l2 --valid-freq 499 --occ-kind learned #--load models/nerv_hotdog.pt
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

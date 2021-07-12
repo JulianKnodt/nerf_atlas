@@ -470,7 +470,7 @@ class VolSDF(CommonNeRF):
       n = self.sdf.normals(pts)
 
     view = r_d.unsqueeze(0).expand_as(pts)
-    if self.secondary is None:rgb = self.sdf.refl(x=pts, view=view, normal=n, latent=latent)
+    if self.secondary is None: rgb = self.sdf.refl(x=pts, view=view, normal=n, latent=latent)
     else: rgb = self.secondary(pts, view, n)
 
     return volumetric_integrate(self.weights, rgb)

@@ -44,12 +44,14 @@ class LearnedLighting(nn.Module):
     super().__init__()
     self.attenuation = SkipConnMLP(
       in_size=5, out=1,
+      num_layers=3, hidden_size=128,
       xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn):
     dir, spectrum = lights(pts)
     visible = isect_fn(pts, dir)
-    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1))
+    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1))\
+      .sigmoid().sqrt()
     spectrum = torch.where(visible, spectrum, spectrum * att)
     return dir, spectrum
 

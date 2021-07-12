@@ -216,8 +216,7 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
   light_locs = torch.stack(light_locs, dim=0).to(device)
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
 
-  intensity = [100.]
-  light = lights.Point(center=light_locs, intensity=intensity)
+  light = lights.Point(center=light_locs, intensity=[100.])
   return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal), light.to(device)
 
 
