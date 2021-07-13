@@ -100,6 +100,13 @@ Training/Efficiency:
 Note: NeRF is stupid slow. Writing out one of these extensions takes about half an hour,
 training it takes about a day, and my GPU is much smaller than any used in the papers.
 
+**Datasets Supported**:
+
+- NeRF Synthetic
+- Dynamic NeRF
+- NeRV
+- DTU Scans
+
 ---
 
 ### Example outputs
