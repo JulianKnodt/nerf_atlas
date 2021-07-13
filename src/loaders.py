@@ -186,8 +186,10 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
   light_locs = []
   focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
   cam_to_worlds=[]
-  # only the first 100 frames have correct lighting?
-  for frame in tfs["frames"][100:]:
+  frames = tfs["frames"]
+  # TODO the later frames have multiple lights, but I don't have a way to handle that currently.
+  if not training: frames = frames[:100]
+  for frame in frames:
     img = load_exr(os.path.join(path, frame['file_path'] + '.exr')).permute(2,0,1)
     img = TVF.resize(img, size=(size, size))
     img[:3,...] = TVF.adjust_gamma(img[:3,...], 1/(2.2 * 2.2))
@@ -196,18 +198,11 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
     exp_masks.append((img[..., 3] - 1e-5).ceil())
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
 
-    # set distance to 1 from origin
-    #n = torch.linalg.norm(tf_mat[:3, 3], dim=-1)
-    #if with_norm: tf_mat[:3, 3] = F.normalize(tf_mat[:3, 3], dim=-1)
-
     cam_to_worlds.append(tf_mat)
     # also have to update light positions since normalizing to unit sphere
     ll = torch.tensor(frame['light_loc'], dtype=torch.float, device=device)
     light_locs.append(ll)
-    #if with_norm:
-    #  ln = torch.linalg.norm(ll, dim=-1)
-    #  light_locs.append(ln/n * F.normalize(ll, dim=-1))
-    #else:
+
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device).clamp(min=0, max=1)
   if with_mask:
     exp_masks = torch.stack(exp_masks, dim=0).to(device)

@@ -342,7 +342,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       save_losses(losses, args.loss_window)
   save_losses(losses, args.loss_window)
 
-def test(model, cam, labels, args, training: bool = True):
+def test(model, cam, labels, args, training: bool = True, light=None):
   times = None
   model = model.eval()
   if args.data_kind == "dnerf":
@@ -529,10 +529,10 @@ def main():
   if args.epochs != 0: save(model, args)
   if args.notest: return
 
-  if not args.notraintest: test(model, cam, labels, args, training=True)
+  if not args.notraintest: test(model, cam, labels, args, training=True, light=light)
 
-  test_labels, test_cam = load(args, training=False)
-  test(model, test_cam, test_labels, args, training=False)
+  test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
+  test(model, test_cam, test_labels, args, training=False, light=test_light)
 
 if __name__ == "__main__": main()
 
