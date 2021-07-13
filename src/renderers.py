@@ -29,15 +29,15 @@ def load_occlusion_kind(kind=None):
 
   return occ
 
+# no shadow
+def lighting_wo_isect(pts, lights, _isect_fn): return lights(pts)
+
 # hard shadow lighting
 def lighting_w_isect(pts, lights, isect_fn):
   dir, spectrum = lights(pts)
   visible = isect_fn(pts, dir)
-  spectrum[~visible] = 0
+  spectrum = torch.where(visible, spectrum, torch.zeros_like(spectrum))
   return dir, spectrum
-
-# no shadow
-def lighting_wo_isect(pts, lights, _isect_fn): return lights(pts)
 
 class LearnedLighting(nn.Module):
   def __init__(self):

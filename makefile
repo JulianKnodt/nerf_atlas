@@ -83,14 +83,24 @@ dtu: clean
 	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
 	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat --load models/dtu$(scan_number).pt
 
+nerv_dataset := hotdog
 nerv_point: clean
-	python3 -O runner.py -d data/nerv_public_release/hotdogs/ \
+	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
-	--save models/nerv_hotdog.pt \
-	--size 24 --crop --crop-size 8 --epochs 10_000 --loss-window 750 \
-	--near 2 --far 6 --batch-size 8 -lr 3e-4 --refl-kind rusin \
-	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns rmse --valid-freq 499 --occ-kind learned --load models/nerv_hotdog.pt
+	--save models/nerv_${nerv_dataset}.pt \
+	--size 28 --crop --crop-size 8 --epochs 50_000 --loss-window 750 \
+	--near 2 --far 6 --batch-size 6 -lr 3e-4 --refl-kind rusin \
+	--sdf-eikonal 0.1 --light-kind dataset --tone-map \
+	--loss-fns rmse --valid-freq 499 --occ-kind learned --load models/nerv_${nerv_dataset}.pt
+
+nerv_point_sdf: clean
+	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
+	--data-kind nerv_point --model volsdf --sdf-kind mlp \
+	--save models/nerv_sdf_${nerv_dataset}.pt \
+	--size 128 --crop --crop-size 32 --epochs 50_000 --loss-window 750 \
+	--near 2 --far 6 --batch-size 6 -lr 5e-4 --refl-kind rusin \
+	--sdf-eikonal 0.1 --light-kind dataset --tone-map \
+	--loss-fns l2 --valid-freq 499 --occ-kind learned --load models/nerv_sdf_${nerv_dataset}.pt
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

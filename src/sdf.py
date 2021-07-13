@@ -73,10 +73,12 @@ class SDF(nn.Module):
     )
     return pts, hit, t, self.normals(pts)
   def intersect_mask(self, r_o, r_d):
-    return sphere_march(
-      self.underlying, r_o, r_d, near=self.near, far=self.far,
-      iters=32 if self.training else 64,
-    )[1]
+    with torch.no_grad():
+      return sphere_march(
+        self.underlying, r_o, r_d, near=self.near, far=self.far,
+        # since this is just for intersection, better to use fewer steps
+        iters=16 if self.training else 64,
+      )[1]
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t = sphere_march(
@@ -219,8 +221,6 @@ def sphere_march(
       dist = self(curr)[...,0].reshape_as(curr_dist)
       hits = hits | ((dist < eps) & (curr_dist >= near) & (curr_dist <= far))
       curr_dist = torch.where(~hits, curr_dist + dist, curr_dist)
-      # this saves some memory? but slows it down?
-      #if hits.all(): break
 
   curr = r_o + r_d * curr_dist
   return curr, hits, curr_dist

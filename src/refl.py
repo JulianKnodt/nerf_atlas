@@ -198,11 +198,13 @@ class Rusin(Reflectance):
     if space is None: space = IdentitySpace()
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
-      num_layers=4, hidden_size=64,
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+
+      num_layers=4, hidden_size=128,
     )
     self.space = space
+
   @property
   def can_use_normal(self): return True
   @property
@@ -226,27 +228,28 @@ def nonzero_eps(v, eps: float=1e-7):
 # assumes wo and wi are already in local coordinates
 #@torch.jit.script
 def rusin_params(wo, wi):
-  wo = F.normalize(wo, dim=-1)
-  wi = F.normalize(wi, dim=-1)
+  wo = F.normalize(wo, eps=1e-6, dim=-1)
+  wi = F.normalize(wi, eps=1e-6, dim=-1)
   e_1 = torch.tensor([0,1,0], device=wo.device, dtype=torch.float).expand_as(wo)
   e_2 = torch.tensor([0,0,1], device=wo.device, dtype=torch.float).expand_as(wo)
 
-  H = F.normalize((wo + wi), dim=-1)
+  H = F.normalize((wo + wi), eps=1e-6, dim=-1)
 
   cos_theta_h = H[..., 2]
   phi_h = torch.atan2(nonzero_eps(H[..., 1]), nonzero_eps(H[..., 0]))
 
-  # v = -phi_h.unsqueeze(-1)
   r = nonzero_eps(H[..., 1]).hypot(nonzero_eps(H[..., 0])).clamp(min=1e-6)
   c = (H[..., 0]/r).unsqueeze(-1)
   s = -(H[..., 1]/r).unsqueeze(-1)
   tmp = F.normalize(rotate_vector(wi, e_2, c, s), dim=-1)
-  #v = -theta_h.unsqueeze(-1)
+
   c = H[..., 2].unsqueeze(-1)
   s = -(1 - H[..., 2]).clamp(min=1e-6).sqrt().unsqueeze(-1)
-  diff = F.normalize(rotate_vector(tmp, e_1, c, s), dim=-1)
+  diff = F.normalize(rotate_vector(tmp, e_1, c, s), eps=1e-6, dim=-1)
   cos_theta_d = diff[..., 2]
-  # rather than doing fmod, try cos to see if it can capture cyclicity better.
+
+  # rather than do `% pi/2`, take `cos` since both are cyclic but cos has better
+  # properties.
   cos_phi_d = torch.atan2(nonzero_eps(diff[..., 1]), nonzero_eps(diff[..., 0])).cos()
 
   return torch.stack([cos_phi_d, cos_theta_h, cos_theta_d], dim=-1)
@@ -256,7 +259,7 @@ def rusin_params(wo, wi):
 # returns a frame to be used for normalization
 #@torch.jit.script
 def coordinate_system(n):
-  n = F.normalize(n, eps=1e-7, dim=-1)
+  n = F.normalize(n, eps=1e-6, dim=-1)
   x, y, z = n.split(1, dim=-1)
   sign = torch.where(z >= 0, 1., -1.)
   s_z = sign + z
@@ -270,9 +273,9 @@ def coordinate_system(n):
   s = torch.cat([
     (x * x * a * sign) + 1, b * sign, x * -sign,
   ], dim=-1)
-  s = F.normalize(s, eps=1e-7, dim=-1)
-  t = F.normalize(s.cross(n, dim=-1), eps=1e-7, dim=-1)
-  s = F.normalize(n.cross(t, dim=-1), eps=1e-7, dim=-1)
+  s = F.normalize(s, eps=1e-6, dim=-1)
+  t = F.normalize(s.cross(n, dim=-1), eps=1e-6, dim=-1)
+  s = F.normalize(n.cross(t, dim=-1), eps=1e-6, dim=-1)
   return torch.stack([s, t, n], dim=-1)
 
 # frame: [..., 3, 3], wo: [..., 3], return a vector of wo in the reference frame

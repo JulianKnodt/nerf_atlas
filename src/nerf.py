@@ -442,6 +442,7 @@ class VolSDF(CommonNeRF):
       self.secondary = self.direct
   def direct(self, pts, view, normal):
     light = self.sdf.refl.light
+    # TODO multiple samples here
     light_dir, light_val = self.occ(pts, light, self.sdf.intersect_mask)
     bsdf_val = self.sdf.refl(x=pts,view=view, normal=normal, light=light_dir)
     return bsdf_val * light_val
