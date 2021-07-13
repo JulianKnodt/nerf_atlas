@@ -134,6 +134,10 @@ The visualization is on the training set. On the test set it does not perform as
 it lacks some regularization for temporal consistency, but I'll continue to look for ways to
 make testing better.
 
+##### DTU
+
+![DTU shiny cans](examples/dtu.gif)
+
 ##### VolSDF
 
 ![VolSDF Lego](examples/volsdf.gif)
