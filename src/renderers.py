@@ -50,8 +50,7 @@ class LearnedLighting(nn.Module):
   def forward(self, pts, lights, isect_fn):
     dir, spectrum = lights(pts)
     visible = isect_fn(pts, dir)
-    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1))\
-      .sigmoid().sqrt()
+    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1)).sigmoid()
     spectrum = torch.where(visible, spectrum, spectrum * att)
     return dir, spectrum
 

@@ -198,6 +198,7 @@ class Rusin(Reflectance):
     if space is None: space = IdentitySpace()
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
+      num_layers=4, hidden_size=64,
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size), xavier_init=True,
     )
