@@ -98,11 +98,11 @@ nerv_point_sdf: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model sdf --sdf-kind mlp \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
-	--size 64 --crop --crop-size 64 --epochs 50_000 --loss-window 750 \
-	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind rusin \
+	--size 200 --crop --crop-size 64 --epochs 30_000 --loss-window 250 \
+	--near 2 --far 6 --batch-size 3 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l2 --valid-freq 100 --occ-kind learned --save-freq 2500 \
-	--integrator-kind direct # --load models/nerv_sdf_${nerv_dataset}.pt
+	--loss-fns l2 --valid-freq 250 --occ-kind learned --save-freq 2500 \
+	--integrator-kind direct --load models/nerv_sdf_${nerv_dataset}.pt
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

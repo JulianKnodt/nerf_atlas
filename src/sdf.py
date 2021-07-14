@@ -88,7 +88,7 @@ class SDF(nn.Module):
   def intersect_w_n(self, r_o, r_d):
     pts, hit, t = sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      iters=64 if self.training else 128,
+      iters=128 if self.training else 196,
     )
     return pts, hit, t, self.normals(pts)
   def intersect_mask(self, r_o, r_d):
@@ -96,13 +96,13 @@ class SDF(nn.Module):
       return sphere_march(
         self.underlying, r_o, r_d, near=self.near, far=self.far,
         # since this is just for intersection, better to use fewer steps
-        iters=32 if self.training else 64,
+        iters=64 if self.training else 128,
       )[1]
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t = sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      iters=64 if self.training else 128,
+      iters=128 if self.training else 192,
     )
     latent = None if self.underlying.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
     out = torch.zeros_like(r_d)

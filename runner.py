@@ -315,7 +315,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       loss = loss + model.nerf.unisurf_loss
     if args.sdf_eikonal > 0:
       loss = loss + args.sdf_eikonal * \
-        utils.eikonal_loss(model.sdf.normals(5*torch.randn(1024, 3, device=device)))
+        utils.eikonal_loss(model.sdf.normals(5*torch.randn(2048, 3, device=device)))
 
     update(display)
     losses.append(l2_loss)
