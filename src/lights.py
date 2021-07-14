@@ -65,11 +65,15 @@ class Point(Light):
     )
   @property
   def can_sample(self): return True
-  def forward(self, x):
-    d = x - self.center[:, None, None, :]
+  def forward(self, x, mask=None):
+    loc = self.center[:, None, None, :]
+    if mask is not None: loc = loc.expand(mask.shape + (3,))[mask]
+    d = x - loc
     dist = torch.linalg.norm(d, dim=-1)
     dir = F.normalize(d, dim=-1)
     decay = dist.square()
-    spectrum = self.intensity[:, None, None, :]/decay.clamp(min=1e-6).unsqueeze(-1)
+    intn = self.intensity[:, None, None, :]
+    if mask is not None: intn = intn.expand(mask.shape + (3,))[mask]
+    spectrum = intn/decay.clamp(min=1e-6).unsqueeze(-1)
 
     return dir, spectrum

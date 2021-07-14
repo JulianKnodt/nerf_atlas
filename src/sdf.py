@@ -1,12 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder )
 from .utils import ( autograd, eikonal_loss )
 import src.refl as refl
+import src.renderers as renderers
+from tqdm import trange
 
 def load(args):
   if args.sdf_kind == "spheres": model = SmoothedSpheres()
@@ -14,6 +17,8 @@ def load(args):
   elif args.sdf_kind == "local": model = Local()
   elif args.sdf_kind == "mlp": model = MLP()
   else: raise NotImplementedError()
+
+  if args.sphere_init: model.set_to_sphere()
   # refl inst may also have a nested light
   refl_inst = refl.load(args, model.latent_size)
 
@@ -22,6 +27,8 @@ def load(args):
     t_near=args.near,
     t_far=args.far,
   )
+  if args.integrator_kind is not None:
+    return renderers.load(args, sdf, refl_inst)
 
   return sdf
 
@@ -37,8 +44,20 @@ class SDFModel(nn.Module):
 
       if values is None: values = self(autograd_pts)
       normals = autograd(autograd_pts, values)
-      #assert(normals.isfinite().all())
     return normals
+  # will optimize this SDF to be a sphere at the start
+  def set_to_sphere(self, rad:float = 0.5, iters:int=1000):
+    opt = optim.Adam(self.parameters(), lr=5e-5, weight_decay=0)
+    t = trange(iters)
+    for i in t:
+      opt.zero_grad()
+      v = 4*torch.randn(5000, 3)
+      got = self(v)[...,0]
+      exp = v.norm(dim=-1) - rad
+      loss = F.mse_loss(got, exp)
+      t.set_postfix(l=loss.item())
+      loss.backward()
+      opt.step()
 
 class SDF(nn.Module):
   def __init__(
@@ -47,7 +66,7 @@ class SDF(nn.Module):
     reflectance: refl.Reflectance,
     t_near: float,
     t_far: float,
-    alpha:int = 100,
+    alpha:int = 500,
   ):
     super().__init__()
     assert(isinstance(underlying, SDFModel))
@@ -69,7 +88,7 @@ class SDF(nn.Module):
   def intersect_w_n(self, r_o, r_d):
     pts, hit, t = sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      iters=32 if self.training else 64,
+      iters=64 if self.training else 128,
     )
     return pts, hit, t, self.normals(pts)
   def intersect_mask(self, r_o, r_d):
@@ -77,23 +96,29 @@ class SDF(nn.Module):
       return sphere_march(
         self.underlying, r_o, r_d, near=self.near, far=self.far,
         # since this is just for intersection, better to use fewer steps
-        iters=16 if self.training else 64,
+        iters=32 if self.training else 64,
       )[1]
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t = sphere_march(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      iters=32 if self.training else 64,
+      iters=64 if self.training else 128,
     )
-    rgb = self.refl(
-      x=pts, view=r_d,
-      normal=self.normals(pts) if self.refl.can_use_normal else None,
+    latent = None if self.underlying.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
+    out = torch.zeros_like(r_d)
+    # use masking in order to speed up efficiency
+    out[hit] = self.refl(
+      x=pts[hit], view=r_d[hit],
+      normal=self.normals(pts[hit]) if self.refl.can_use_normal else None,
+      latent=latent,
+      mask=hit,
     )
-    out = torch.where(hit, rgb, torch.zeros_like(rgb))
     if with_throughput and self.training:
-      tput, _best_pos = throughput(self.underlying, r_o, r_d, self.far, self.near)
-      out = torch.cat([out, -self.alpha*tput.unsqueeze(-1)], dim=-1)
+      out = torch.cat([out, self.throughput(r_o, r_d)], dim=-1)
     return out
+  def throughput(self, r_o, r_d):
+    tput, _best_pos = throughput(self.underlying, r_o, r_d, self.near, self.far)
+    return -self.alpha*tput.unsqueeze(-1)
 
 #@torch.jit.script
 def smooth_min(v, k:float=32, dim:int=0):
@@ -148,7 +173,7 @@ class SIREN(SDFModel):
     super().__init__()
     self.siren = SkipConnMLP(
       in_size=3, out=1+latent_size, enc=None,
-      hidden_size=96,
+      num_layers=6, hidden_size=256,
       activation=torch.sin,
       # Do not have skip conns
       skip=1000,
@@ -201,36 +226,43 @@ class SDFNeRF(nn.Module):
     pts, hits, ts = self.sdf.sphere_march(r_o, r_d, near=self.nerf.t_near, far=self.nerf.t_far)
     # TODO convert vals to some RGB value
     vals = torch.ones_like(pts)
+    raise NotImplementedError()
     return torch.where(hits, vals, torch.zeros_like(vals))
 
 # sphere_march is a traditional sphere marching algorithm on the SDF.
 # It returns the (pts: R^3s, mask: bools, t: step along rays)
+#
+# note that this implementation is efficient in that it only will compute distance
+# for pts that are still candidates.
 def sphere_march(
   self,
   r_o, r_d,
   iters: int = 32,
-  eps: float = 5e-3,
+  eps: float = 1e-3,
   near: float = 0, far: float = 1,
 ):
   device = r_o.device
   with torch.no_grad():
     hits = torch.zeros(r_o.shape[:-1] + (1,), dtype=torch.bool, device=device)
+    rem = torch.ones_like(hits).squeeze(-1)
     curr_dist = torch.full_like(hits, near, dtype=torch.float)
     for i in range(iters):
-      curr = r_o + r_d * curr_dist
-      dist = self(curr)[...,0].reshape_as(curr_dist)
-      hits = hits | ((dist < eps) & (curr_dist >= near) & (curr_dist <= far))
-      curr_dist = torch.where(~hits, curr_dist + dist, curr_dist)
-
-  curr = r_o + r_d * curr_dist
-  return curr, hits, curr_dist
+      curr = r_o[rem] + r_d[rem] * curr_dist[rem]
+      dist = self(curr)[...,0].reshape_as(curr_dist[rem])
+      hits[rem] |= ((dist < eps) & (curr_dist[rem] >= near) & (curr_dist[rem] <= far))
+      # anything that was hit or is past range no longer need to compute
+      curr_dist[rem] += dist
+      rem[hits.squeeze(-1) | (curr_dist > far).squeeze(-1)] = False
+    curr = r_o + r_d * curr_dist
+  ...
+  return curr, hits.squeeze(-1), curr_dist
 
 def throughput(
   self,
   r_o, r_d,
-  far: float,
   near: float,
-  batch_size:int = 32,
+  far: float,
+  batch_size:int = 64,
 ):
   # some random jitter I guess?
   max_t = far+random.random()*(2/batch_size)
@@ -244,8 +276,8 @@ def throughput(
       sd = self(r_o + t * r_d)[..., 0]
       idxs = torch.where(sd < curr_min, i+1, idxs)
       curr_min = torch.minimum(curr_min, sd)
-  idxs = idxs.unsqueeze(-1)
-  best_pos = r_o  + idxs * step * r_d
+    idxs = idxs.unsqueeze(-1)
+    best_pos = r_o  + idxs * step * r_d
   return self(best_pos)[...,0], best_pos
 
 
@@ -256,7 +288,7 @@ def masked_loss(img_loss=F.mse_loss):
   def aux(
     # got and exp have 4 channels, where the last are got_mask and exp_mask
     got, exp,
-    mask_weight:float=15,
+    mask_weight:int=1
   ):
     got, got_mask = got.split([3,1],dim=-1)
     exp, exp_mask = exp.split([3,1],dim=-1)
@@ -274,5 +306,6 @@ def masked_loss(img_loss=F.mse_loss):
     if misses.any():
       loss_fn = F.binary_cross_entropy_with_logits
       mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
-    return mask_weight * mask_loss + color_loss
+    return mask_weight * mask_loss + 10*color_loss
+
   return aux

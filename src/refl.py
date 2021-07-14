@@ -44,9 +44,9 @@ class LightAndRefl(nn.Module):
 
   @property
   def can_use_normal(self): return self.refl.can_use_normal
-  def forward(self, x, view=None, normal=None, light=None, latent=None):
-    if light is None: light, _spectrum = self.light(x)
-    return self.refl(x, view, normal, light, latent)
+  def forward(self, x, view=None, normal=None, light=None, latent=None, mask=None):
+    if light is None: light, spectrum = self.light(x, mask)
+    return spectrum * self.refl(x, view, normal, light, latent)
 
 class SurfaceSpace(nn.Module):
   def __init__(
@@ -70,11 +70,10 @@ class IdentitySpace(nn.Module):
   @property
   def dims(self): return 3
 
-def fat_sigmoid(x, eps:float=1e-3): return x.sigmoid() * (1+2*eps) - eps
 class Reflectance(nn.Module):
   def __init__(
     self,
-    act=fat_sigmoid,
+    act=torch.sin,
     latent_size:int = 0,
     out_features:int = 3,
 
@@ -199,9 +198,10 @@ class Rusin(Reflectance):
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      enc=NNEncoder(input_dims=in_size),
+      xavier_init=True,
 
-      num_layers=4, hidden_size=128,
+      num_layers=6, hidden_size=512,
     )
     self.space = space
 
@@ -217,8 +217,9 @@ class Rusin(Reflectance):
     # have to move view and light into basis of normal
     rusin = rusin_params(wo, wi)
     x = self.space(x)
-    raw = self.mlp(torch.cat([x, rusin], dim=-1))
-    return self.act(raw)
+    raw = self.mlp(torch.cat([x, rusin], dim=-1), latent)
+    v = (raw.sin() + 1)/2
+    return v #self.act(raw)
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter

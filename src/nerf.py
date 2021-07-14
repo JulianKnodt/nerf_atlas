@@ -59,7 +59,7 @@ def alpha_from_density(
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
 
-# TODO probably move sigmoids to utils
+# TODO delete these for utils
 
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,
 # or prevent it from representing full density items.
@@ -74,6 +74,18 @@ def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
 @torch.jit.script
 def volumetric_integrate(weights, other):
   return torch.sum(weights[..., None] * other, dim=0)
+
+# perform volumetric integration but only using some of other's values where the weights
+# are big enough.
+#
+# TODO the computation of `other` itself should be sparse, so that it doesn't need to be
+# computed in the first place.
+@torch.jit.script
+def sparse_volumetric_integrate(weights, other, eps:float=1e-3):
+  vals = torch.full_like(other, 1e-3)
+  mask = weights > 1e-3
+  vals[mask] = other[mask]
+  return torch.sum(weights[..., None] * vals, dim=0)
 
 
 # bg functions, need to be here for pickling

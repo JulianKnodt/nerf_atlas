@@ -78,7 +78,7 @@ def arguments():
   # this default for LR seems to work pretty well?
   a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
   a.add_argument("--seed", help="Random seed to use", type=int, default=1337)
-  a.add_argument("--decay", help="Weight_decay value", type=float, default=0)
+  a.add_argument("--decay", help="Weight decay value", type=float, default=0)
   a.add_argument("--notest", help="Do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
@@ -136,6 +136,7 @@ def arguments():
     "--sdf-kind", help="Which SDF model to use", type=str,
     choices=["spheres", "siren", "local", "mlp"], default="siren",
   )
+  sdfa.add_argument("--sphere-init", help="Initialize SDF to a sphere", action="store_true")
 
   dnerfa = a.add_argument_group("dnerf")
   dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")

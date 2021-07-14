@@ -35,12 +35,13 @@ class FourierEncoder(nn.Module):
     input_dims: int = 3,
     freqs: int = 16,
     sigma: int = 1 << 5,
-    device="cuda",
+    device="cpu",
   ):
     super().__init__()
     self.input_dims = input_dims
     self.freqs = freqs
     self.basis, _ = create_fourier_basis(freqs, features=input_dims, freq=sigma, device=device)
+    self.basis = nn.Parameter(self.basis, requires_grad=False)
   def output_dims(self): return self.freqs * 2
   def forward(self, x): return fourier(x, self.basis)
 

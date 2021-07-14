@@ -206,7 +206,7 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device).clamp(min=0, max=1)
   if with_mask:
     exp_masks = torch.stack(exp_masks, dim=0).to(device)
-    exp_imgs = torch.cat([exp_imgs, exp_masks], dim=-1)
+    exp_imgs = torch.cat([exp_imgs, exp_masks.unsqueeze(-1)], dim=-1)
 
   light_locs = torch.stack(light_locs, dim=0).to(device)
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)

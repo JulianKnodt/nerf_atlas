@@ -17,7 +17,7 @@ def load(args, shape, light_and_refl: LightAndRefl):
   else: raise NotImplementedError(f"load integrator: {args.integrator_kind}")
   occ = load_occlusion_kind(args.occ_kind)
 
-  integ = cons(shape, bsdf=light_and_refl.refl, light=light_and_refl.refl, occlusion=occ)
+  integ = cons(shape=shape, refl=light_and_refl.refl, occlusion=occ)
 
   return integ
 
@@ -30,13 +30,19 @@ def load_occlusion_kind(kind=None):
   return occ
 
 # no shadow
-def lighting_wo_isect(pts, lights, _isect_fn): return lights(pts)
+def lighting_wo_isect(pts, lights, isect_fn, mask=None):
+  return lights(pts if mask is None else pts[mask], mask=mask)
 
 # hard shadow lighting
-def lighting_w_isect(pts, lights, isect_fn):
-  dir, spectrum = lights(pts)
+def lighting_w_isect(pts, lights, isect_fn, mask=None):
+  pts = pts if mask is None else pts[mask]
+  dir, spectrum = lights(pts, mask=mask)
   visible = isect_fn(pts, dir)
-  spectrum = torch.where(visible, spectrum, torch.zeros_like(spectrum))
+  spectrum = torch.where(
+    visible.reshape(spectrum.shape + (1,)),
+    spectrum,
+    torch.zeros_like(spectrum)
+  )
   return dir, spectrum
 
 class LearnedLighting(nn.Module):
@@ -44,53 +50,50 @@ class LearnedLighting(nn.Module):
     super().__init__()
     self.attenuation = SkipConnMLP(
       in_size=5, out=1,
-      num_layers=3, hidden_size=128,
+      num_layers=5, hidden_size=256,
       xavier_init=True,
     )
-  def forward(self, pts, lights, isect_fn):
-    dir, spectrum = lights(pts)
+  def forward(self, pts, lights, isect_fn, mask=None):
+    pts = pts if mask is None else pts[mask]
+    dir, spectrum = lights(pts, mask=mask)
     visible = isect_fn(pts, dir)
     att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1)).sigmoid()
-    spectrum = torch.where(visible, spectrum, spectrum * att)
+    spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
 
 class Renderer(nn.Module):
   def __init__(
     self,
     shape,
-    bsdf,
-    light,
+    refl,
 
     occlusion=lighting_w_isect,
   ):
     super().__init__()
     self.shape = shape
-    self.bsdf = bsdf
-    self.light = light
+    self.refl = refl
     self.occ = occlusion
+
   def forward(self, _rays): raise NotImplementedError()
 
 class Direct(Renderer):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
+  @property
+  def sdf(self): return self.shape
   def forward(self, rays):
     r_o, r_d = rays.split([3, 3], dim=-1)
 
-    pts, hits, _t, n = self.shape.intersect_w_n(rays)
-    # fast path no hits, a sync is painful but storing a bunch more memory for grads
-    # for all 0s is worse.
-    if not hits.any(): return torch.zeros_like(pts)
+    pts, hits, _t, n = self.shape.intersect_w_n(r_o, r_d)
+    _, latent = self.shape.from_pts(pts[hits])
 
-    light_dir, light_val = self.occ(pts, lights, self.shape.intersect_mask)
-    bsdf_val = self.bsdf(x=pts, view=r_d, normal=n,light=light_dir)
-    # TODO check this is valid
-    print(hits.shape, bsdf_val.shape, light_val.shape)
-    exit()
-    return torch.where(
-      hits,
-      bsdf_val * light_val,
-      torch.zeros_like(bsdf_val)
-    )
+    light_dir, light_val = self.occ(pts, self.refl.light, self.shape.intersect_mask, mask=hits)
+    bsdf_val = self.refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
+    out = torch.zeros_like(r_d)
+    out[hits] = bsdf_val * light_val
+    if self.training:
+      out = torch.cat([out, self.shape.throughput(r_o, r_d)], dim=-1)
+    return out
 
 class Path(Renderer):
   def __init__(

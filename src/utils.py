@@ -149,8 +149,7 @@ def rotate_vector(v, axis, c, s):
 def mse2psnr(x): return -10 * torch.log10(x)
 
 def tone_map(loss_fn):
-  def tone_mapped_loss(got, ref):
-    return loss_fn(got/(1+got), ref/(1+ref))
+  def tone_mapped_loss(got, ref): return loss_fn(got/(1+got), ref/(1+ref))
   return tone_mapped_loss
 
 def apply_tf(w, b, v):
@@ -248,3 +247,21 @@ def spherical_pose(elev, azim, rad):
   c2w = rot_theta(theta/180.*np.pi) @ c2w
   c2w = torch.Tensor([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
   return c2w
+
+
+# sigmoids which shrink or expand the total range to prevent gradient vanishing,
+# or prevent it from representing full density items.
+# fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
+def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
+def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps)
+def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
+  return ((v/period).sin()+1)/2 * (1+2*eps) - eps
+
+def load_sigmoid(kind="thin"):
+  if kind == "thin": act = thin_sigmoid
+  elif kind == "fat": act = fat_sigmoid
+  elif kind == "normal": act = torch.sigmoid
+  elif kind == "cyclic": act = cyclic_sigmoid
+  elif kind == "softmax": act = nn.Softmax(dim=-1)
+  else: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
+  return act
