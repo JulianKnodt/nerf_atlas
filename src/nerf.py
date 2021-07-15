@@ -445,19 +445,23 @@ class VolSDF(CommonNeRF):
     super().__init__(**kwargs, device=device)
     self.sdf = sdf
     # the reflectance model is in the SDF, so don't encode it here.
-    # TODO add a bounding radius here for preventing spheres reaching infinite length?
     self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
     self.secondary = None
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), "Must have light w/ volsdf integration"
       self.occ = load_occlusion_kind(occ_kind)
       self.secondary = self.direct
-  def direct(self, pts, view, normal):
-    light = self.sdf.refl.light
-    # TODO multiple samples here
-    light_dir, light_val = self.occ(pts, light, self.sdf.intersect_mask)
-    bsdf_val = self.sdf.refl(x=pts,view=view, normal=normal, light=light_dir)
-    return bsdf_val * light_val
+  def direct(self, weights, pts, view, normal, latent):
+    mask = weights > 1e-3
+
+    light_dir, light_val = self.occ(pts, self.sdf.refl.light, self.sdf.intersect_mask, mask)
+    bsdf_val = self.sdf.refl(
+      x=pts[mask], view=view[mask], normal=normal[mask], light=light_dir,
+      latent=latent,
+    )
+    out = torch.full_like(pts, 1e-3)
+    out[mask] = bsdf_val * light_val
+    return out
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
@@ -484,7 +488,7 @@ class VolSDF(CommonNeRF):
 
     view = r_d.unsqueeze(0).expand_as(pts)
     if self.secondary is None: rgb = self.sdf.refl(x=pts, view=view, normal=n, latent=latent)
-    else: rgb = self.secondary(pts, view, n)
+    else: rgb = self.secondary(self.weights, pts, view, n, latent)
 
     return volumetric_integrate(self.weights, rgb)
 

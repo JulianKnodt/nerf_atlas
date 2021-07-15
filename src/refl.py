@@ -45,8 +45,8 @@ class LightAndRefl(nn.Module):
   @property
   def can_use_normal(self): return self.refl.can_use_normal
   def forward(self, x, view=None, normal=None, light=None, latent=None, mask=None):
-    if light is None: light, spectrum = self.light(x, mask)
-    return spectrum * self.refl(x, view, normal, light, latent)
+    if light is None: light, _spectrum = self.light(x, mask)
+    return self.refl(x, view, normal, light, latent)
 
 class SurfaceSpace(nn.Module):
   def __init__(
@@ -73,7 +73,7 @@ class IdentitySpace(nn.Module):
 class Reflectance(nn.Module):
   def __init__(
     self,
-    act=torch.sin,
+    act=torch.sigmoid,
     latent_size:int = 0,
     out_features:int = 3,
 
