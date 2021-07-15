@@ -283,3 +283,11 @@ class SpatialEncoder(nn.Module):
     )
     return latents.permute(0,2,3,1)
 
+class Discriminator(nn.Module):
+  def __init__(
+    self,
+  ):
+    super().__init__()
+    ...
+  def forward(self, x, ref):
+    ...

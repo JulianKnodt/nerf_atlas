@@ -23,7 +23,7 @@ def load(args, shape, light_and_refl: LightAndRefl):
 
 def load_occlusion_kind(kind=None):
   if kind is None: occ = lighting_wo_isect
-  elif kind == "hard": occ = lighting_w_isect
+  elif kind == "hard": occ = LightingWIsect()
   elif kind == "learned": occ = LearnedLighting()
   else: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
 
@@ -34,16 +34,18 @@ def lighting_wo_isect(pts, lights, isect_fn, mask=None):
   return lights(pts if mask is None else pts[mask], mask=mask)
 
 # hard shadow lighting
-def lighting_w_isect(pts, lights, isect_fn, mask=None):
-  pts = pts if mask is None else pts[mask]
-  dir, spectrum = lights(pts, mask=mask)
-  visible = isect_fn(pts, dir)
-  spectrum = torch.where(
-    visible.reshape(spectrum.shape + (1,)),
-    spectrum,
-    torch.zeros_like(spectrum)
-  )
-  return dir, spectrum
+class LightingWIsect(nn.Module):
+  def __init__(self): super().__init__()
+  def forward(self, pts, lights, isect_fn, mask=None):
+    pts = pts if mask is None else pts[mask]
+    dir, spectrum = lights(pts, mask=mask)
+    visible = isect_fn(pts, -dir, near=1e-3, far=20)
+    spectrum = torch.where(
+      visible[...,None],
+      spectrum,
+      torch.zeros_like(spectrum)
+    )
+    return dir, spectrum
 
 class LearnedLighting(nn.Module):
   def __init__(self):
@@ -56,7 +58,7 @@ class LearnedLighting(nn.Module):
   def forward(self, pts, lights, isect_fn, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, dir)
+    visible = isect_fn(pts, -dir, near=1e-3, far=20)
     att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1)).sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
@@ -67,7 +69,7 @@ class Renderer(nn.Module):
     shape,
     refl,
 
-    occlusion=lighting_w_isect,
+    occlusion,
   ):
     super().__init__()
     self.shape = shape

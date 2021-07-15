@@ -22,6 +22,7 @@ import src.nerf as nerf
 import src.utils as utils
 import src.sdf as sdf
 import src.refl as refl
+import src.renderers as renderers
 from src.utils import ( save_image, save_plot, )
 from src.neural_blocks import ( Upsampler, SpatialEncoder )
 
@@ -59,7 +60,6 @@ def arguments():
   )
   a.add_argument("--sparsify-alpha", help="Weight for sparsifying alpha",type=float,default=0)
   a.add_argument("--backing-sdf", help="Use a backing SDF", action="store_true")
-  a.add_argument("--train-camera", help="Train camera parameters", action="store_true")
   a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
   a.add_argument("--sharpen", help="Sharpen before loss comparison", action="store_true")
 
@@ -82,6 +82,10 @@ def arguments():
   a.add_argument("--notest", help="Do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
+  a.add_argument(
+    "--train-parts", help="Which parts of the model should be trained",
+    choices=["all", "refl", "[TODO]Camera"], default="all",
+  )
   a.add_argument(
     "--loss-fns", help="Loss functions to use", nargs="+", type=str,
     # TODO add SSIM here? Or LPIPS?
@@ -391,11 +395,15 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
+  if args.occ_kind != None and hasattr(model, "occ"):
+    model.occ = renderers.load_occlusion_kind(args.occ_kind)
+
   if args.model == "sdf": return
   if not hasattr(model, "nerf"): return
 
   model.nerf.set_bg(args.bg)
   if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
+
 
 def load_model(args):
   if args.model == "sdf": return sdf.load(args).to(device)
@@ -515,8 +523,10 @@ def main():
   model = load_model(args) if args.load is None else torch.load(args.load, map_location=device)
   set_per_run(model, args)
 
-  parameters = model.parameters()
-  if args.train_camera: parameters = chain(parameters, cam.parameters())
+  if args.train_parts == "all": parameters = model.parameters()
+  elif args.train_parts == "refl": parameters = model.refl.parameters()
+  elif args.train_parts == "camera": raise NotImplementedError("TODO")
+  else: raise NotImplementedError()
 
   # for some reason AdamW doesn't seem to work here
   # eps = 1e-7 was in the original paper.
