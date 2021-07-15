@@ -98,7 +98,7 @@ nerv_point_sdf: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model sdf --sdf-kind mlp \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 64 --epochs 5000 --loss-window 250 \
+	--size 200 --crop --crop-size 64 --epochs 0 --loss-window 250 \
 	--near 2 --far 6 --batch-size 6 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
 	--loss-fns l2 --valid-freq 100 --save-freq 2500 \

@@ -39,7 +39,7 @@ class LightingWIsect(nn.Module):
   def forward(self, pts, lights, isect_fn, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, -dir, near=1e-3, far=20)
+    visible = isect_fn(pts, -dir, near=0.1, far=20)
     spectrum = torch.where(
       visible[...,None],
       spectrum,
@@ -58,7 +58,7 @@ class LearnedLighting(nn.Module):
   def forward(self, pts, lights, isect_fn, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, -dir, near=1e-3, far=20)
+    visible = isect_fn(pts, -dir, near=0.1, far=20)
     att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1)).sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
@@ -89,9 +89,12 @@ class Direct(Renderer):
     pts, hits, _t, n = self.shape.intersect_w_n(r_o, r_d)
     _, latent = self.shape.from_pts(pts[hits])
 
-    light_dir, light_val = self.occ(pts, self.refl.light, self.shape.intersect_mask, mask=hits)
+    light_dir, light_val = self.occ(
+      pts + n*1e-3, self.refl.light, self.shape.intersect_mask, mask=hits
+    )
     bsdf_val = self.refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
     out = torch.zeros_like(r_d)
+    # out[hits] = 1 # DEBUG
     out[hits] = bsdf_val * light_val
     if self.training:
       out = torch.cat([out, self.shape.throughput(r_o, r_d)], dim=-1)

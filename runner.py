@@ -319,7 +319,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       loss = loss + model.nerf.unisurf_loss
     if args.sdf_eikonal > 0:
       loss = loss + args.sdf_eikonal * \
-        utils.eikonal_loss(model.sdf.normals(5*torch.randn(2048, 3, device=device)))
+        utils.eikonal_loss(model.sdf.normals(16*(torch.rand(1<<13, 3, device=device)-0.5)))
 
     update(display)
     losses.append(l2_loss)
@@ -395,8 +395,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
-  if args.occ_kind != None and hasattr(model, "occ"):
-    model.occ = renderers.load_occlusion_kind(args.occ_kind)
+  #if args.occ_kind != None and hasattr(model, "occ"):
+  #  model.occ = renderers.load_occlusion_kind(args.occ_kind).to(device)
 
   if args.model == "sdf": return
   if not hasattr(model, "nerf"): return

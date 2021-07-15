@@ -70,7 +70,7 @@ class Point(Light):
     if mask is not None: loc = loc.expand(mask.shape + (3,))[mask]
     d = x - loc
     dist = torch.linalg.norm(d, dim=-1)
-    dir = F.normalize(d, dim=-1)
+    dir = F.normalize(d, eps=1e-6, dim=-1)
     decay = dist.square()
     intn = self.intensity[:, None, None, :]
     if mask is not None: intn = intn.expand(mask.shape + (3,))[mask]

@@ -251,7 +251,7 @@ def sphere_march(
     for i in range(iters):
       curr = r_o[rem] + r_d[rem] * curr_dist[rem]
       dist = self(curr)[...,0].reshape_as(curr_dist[rem])
-      hits[rem] |= ((dist < eps) & (curr_dist[rem] >= near) & (curr_dist[rem] <= far))
+      hits[rem] |= ((dist < eps) & (curr_dist[rem] <= far))
       # anything that was hit or is past range no longer need to compute
       curr_dist[rem] += dist
       rem[hits.squeeze(-1) | (curr_dist > far).squeeze(-1)] = False
@@ -264,7 +264,7 @@ def throughput(
   r_o, r_d,
   near: float,
   far: float,
-  batch_size:int = 64,
+  batch_size:int = 128,
 ):
   # some random jitter I guess?
   max_t = far+random.random()*(2/batch_size)
