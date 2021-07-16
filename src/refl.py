@@ -7,7 +7,7 @@ from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector )
 import src.lights as lights
 
-def load(args, latent_size=0):
+def load(args, latent_size):
   if args.space_kind == "identity": space = IdentitySpace
   elif args.space_kind == "surface": space = SurfaceSpace
   else: raise NotImplementedError()

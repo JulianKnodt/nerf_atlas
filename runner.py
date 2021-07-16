@@ -442,9 +442,11 @@ def load_model(args):
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
 
-  # set reflectance kind only for new models:
+  # set reflectance kind for new models (but volsdf handles it differently)
   if args.refl_kind != "curr":
-    refl_inst = refl.load(args, model.total_latent_size()).to(device)
+    ls = model.total_latent_size()
+    if hasattr(model, "sdf"): ls += model.sdf.latent_size
+    refl_inst = refl.load(args, ls).to(device)
     model.set_refl(refl_inst)
 
   if args.model == "ae" and args.latent_l2_weight > 0:

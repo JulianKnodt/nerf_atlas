@@ -79,6 +79,9 @@ class SDF(nn.Module):
   @property
   def sdf(self): return self
 
+  @property
+  def latent_size(self): return self.underlying.latent_size
+
   def normals(self, pts, values = None): return self.underlying.normals(pts, values)
   def from_pts(self, pts):
     raw = self.underlying(pts)

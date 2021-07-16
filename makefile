@@ -84,15 +84,15 @@ dtu: clean
 	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat --load models/dtu$(scan_number).pt
 
 # hotdogs | armadillo, fun datasets :)
-nerv_dataset := hotdogs
+nerv_dataset := armadillo
 nerv_point: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
-	--data-kind nerv_point --model volsdf --sdf-kind spheres \
+	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 12 --epochs 50_000 --loss-window 750 \
-	--near 2 --far 6 --batch-size 7 -lr 3e-4 --refl-kind rusin \
-	--sdf-eikonal 0.1 --light-kind dataset --omit-bg \
-	--loss-fns rmse --valid-freq 499 --occ-kind learned --load models/nerv_${nerv_dataset}.pt
+	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin --tone-map \
+	--sdf-eikonal 0.1 --light-kind dataset --omit-bg --notraintest \
+	--loss-fns rmse --valid-freq 499 --occ-kind learned #--load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
