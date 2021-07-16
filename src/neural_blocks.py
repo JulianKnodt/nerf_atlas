@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+import torchvision.transforms.functional as TVF
 from itertools import chain
 from typing import Optional, Union
 
@@ -286,8 +287,50 @@ class SpatialEncoder(nn.Module):
 class Discriminator(nn.Module):
   def __init__(
     self,
+    in_size=128,
+    in_channels=3,
+    hidden_size=64,
   ):
     super().__init__()
-    ...
+    self.in_size=128,
+    hs = hidden_size
+    ins = in_size
+    assert(ins % 32 == 0)
+    self.main = nn.Sequential(
+      # input is 3 x ins x ins
+      nn.Conv2d(in_channels, hidden_size, 4, 2, 1, bias=False),
+      nn.LeakyReLU(inplace=True),
+      # state size. (hs) x ins/2 x ins/2
+      nn.Conv2d(hs, hs * 2, 4, 2, 1, bias=False),
+      nn.BatchNorm2d(hs * 2),
+      nn.LeakyReLU(inplace=True),
+      # state size. (hs*2) x ins/4 x ins/4
+      nn.Conv2d(hs * 2, hs * 4, 4, 2, 1, bias=False),
+      nn.BatchNorm2d(hs * 4),
+      nn.LeakyReLU(inplace=True),
+      # state size. (hs*4) x ins/8 x ins/8
+      nn.Conv2d(hs * 4, hs * 8, 4, 2, 1, bias=False),
+      nn.BatchNorm2d(hs * 8),
+      nn.LeakyReLU(inplace=True),
+      # state size. (hs*8) x ins/16 x ins/16
+      nn.Conv2d(hs * 8, hs * 16, 4, 2, 1, bias=False),
+    )
+    self.last = nn.Linear(hs * ins * ins / 64, 1)
   def forward(self, x, ref):
+    fake = self.single_image_loss(x)
+    real = self.single_image_loss(ref)
+    raise NotImplementedError()
+  def single_image_loss(self, x):
+    # x: Batch, H, W, 3
+    x = TVF.resize(x.permute(0, 3, 1, 2), size=(self.in_size, self.in_size))
+
+    # out: Batch, 1
+    return self.last(self.main(x))
+
+
+class StyleLoss(nn.Module):
+  def __init__(self, img):
+    super().__init__()
     ...
+  def forward(self, x):
+    raise NotImplementedError()
