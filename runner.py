@@ -23,8 +23,8 @@ import src.utils as utils
 import src.sdf as sdf
 import src.refl as refl
 import src.renderers as renderers
-from src.utils import ( save_image, save_plot, )
-from src.neural_blocks import ( Upsampler, SpatialEncoder )
+from src.utils import ( save_image, save_plot, load_image )
+from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer )
 
 def arguments():
   a = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -77,7 +77,7 @@ def arguments():
   )
   # this default for LR seems to work pretty well?
   a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
-  a.add_argument("--seed", help="Random seed to use", type=int, default=1337)
+  a.add_argument("--seed", help="Random seed to use, -1 is no seed", type=int, default=1337)
   a.add_argument("--decay", help="Weight decay value", type=float, default=0)
   a.add_argument("--notest", help="Do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
@@ -94,10 +94,15 @@ def arguments():
   a.add_argument(
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action="store_true",
   )
+  a.add_argument("--style-img", help="Image to use for style transfer", default=None)
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
   # TODO really fix MPIs
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
+  a.add_argument(
+    "--replace", nargs="*", choices=["refl", "occ", "bg"], default=[], type=str,
+    help="Modules to replace on this run, if any",
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -121,7 +126,7 @@ def arguments():
     help="Integrator to use for surface rendering",
   )
   rdra.add_argument(
-    "--occ-kind", choices=[None, "hard", "learned"], default=None,
+    "--occ-kind", choices=[None, "hard", "learned", "all-learned"], default=None,
     help="Occlusion method for shadows to use in integration",
   )
 
@@ -234,10 +239,9 @@ def save_losses(losses, window=250):
   plt.savefig("outputs/training_loss.png", bbox_inches='tight')
   plt.close()
 
-# train the model with a given camera and some labels (imgs or imgs+times)
-# light is a per instance light.
-def train(model, cam, labels, opt, args, light=None, sched=None):
-  if args.epochs == 0: return
+def load_loss_fn(args):
+  if args.style_img != None:
+    return StyleTransfer(load_image(args.style_img, resize=(args.size, args.size)))
 
   loss_fns = [loss_map[lfn] for lfn in args.loss_fns]
   assert(len(loss_fns) > 0), "must provide at least 1 loss function"
@@ -249,7 +253,14 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       return loss
   if args.tone_map: loss_fn = utils.tone_map(loss_fn)
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
+  return loss_fn
 
+# train the model with a given camera and some labels (imgs or imgs+times)
+# light is a per instance light.
+def train(model, cam, labels, opt, args, light=None, sched=None):
+  if args.epochs == 0: return
+
+  loss_fn = load_loss_fn(args)
 
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
   update = lambda kwargs: iters.set_postfix(**kwargs)
@@ -395,14 +406,23 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
-  #if args.occ_kind != None and hasattr(model, "occ"):
-  #  model.occ = renderers.load_occlusion_kind(args.occ_kind).to(device)
+  if len(args.replace) == 0: return
+  ls = model.total_latent_size()
+  if "occ" in args.replace:
+    if args.occ_kind != None and hasattr(model, "occ"):
+      model.occ = renderers.load_occlusion_kind(args.occ_kind, ls).to(device)
+
+  if "refl" in args.replace:
+    if args.refl_kind != "curr" and hasattr(model, "refl"):
+      refl_inst = refl.load(args, ls).to(device)
+      model.set_refl(refl_inst)
+  if "bg" in args.replace:
+    if isinstance(model, nerf.CommonNeRF): model.set_bg(args.bg)
+    elif hasattr(model, "nerf"): model.nerf.set_bg(args.bg)
 
   if args.model == "sdf": return
   if not hasattr(model, "nerf"): return
-
-  model.nerf.set_bg(args.bg)
-  if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
+  #if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
 
 
 def load_model(args):
@@ -445,7 +465,6 @@ def load_model(args):
   # set reflectance kind for new models (but volsdf handles it differently)
   if args.refl_kind != "curr":
     ls = model.total_latent_size()
-    if hasattr(model, "sdf"): ls += model.sdf.latent_size
     refl_inst = refl.load(args, ls).to(device)
     model.set_refl(refl_inst)
 
@@ -507,6 +526,7 @@ def save(model, args):
       json.dump(args.__dict__, f, indent=2)
 
 def seed(s):
+  if s == -1: return
   torch.manual_seed(s)
   random.seed(s)
   np.random.seed(s)

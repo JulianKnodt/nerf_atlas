@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+import torchvision.models as models
 import torchvision.transforms.functional as TVF
+
 from itertools import chain
 from typing import Optional, Union
 
@@ -328,9 +330,84 @@ class Discriminator(nn.Module):
     return self.last(self.main(x))
 
 
+def gram_matrix(img):
+  batch, c, w, h = img.size()
+  # a=batch size(=1)
+  # b=number of feature maps
+  # (c,d)=dimensions of a f. map (N=c*d)
+
+  features = img.view(batch * c, w * h)  # resise F_XL into \hat F_XL
+
+  G = torch.mm(features, features.t())  # compute the gram product
+
+  # we 'normalize' the values of the gram matrix
+  # by dividing by the number of element in each feature maps.
+  return G.div(img.numels())
+
+
+# create a module to normalize input image so we can easily put it in a
+# nn.Sequential
+class Normalization(nn.Module):
+    def __init__(self):
+        super().__init__()
+        norm_mean = torch.tensor([0.485, 0.456, 0.406])
+        norm_std = torch.tensor([0.229, 0.224, 0.225])
+        # .view the mean and std to make them [C x 1 x 1] so that they can
+        # directly work with image Tensor of shape [B x C x H x W].
+        # B is batch size. C is number of channels. H is height and W is width.
+        self.mean = nn.Parameter(torch.tensor(norm_mean).view(-1, 1, 1), requires_grad=False)
+        self.std = nn.Parameter(torch.tensor(norm_std).view(-1, 1, 1), requires_grad=False)
+    def forward(self, img): return (img - self.mean) / self.std
+
 class StyleLoss(nn.Module):
-  def __init__(self, img):
+  def __init__(self, feats):
     super().__init__()
-    ...
+    self.target = gram_matrix(self.norm(feats)).detach()
   def forward(self, x):
-    raise NotImplementedError()
+    self.loss = F.mse_loss(gram_matrix(x), self.target)
+    return x
+
+class StyleTransfer(nn.Module):
+  def __init__(self, style_img):
+    super().__init__()
+    style_layers = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
+    self.cnn = models.vgg19(pretrained=True).features.eval()
+    model = nn.Sequential(Normalization())
+
+    # list of a bunch of style loss modules
+    style_losses = []
+
+    i = 0
+    for layer in self.cnn.children():
+      if isinstance(layer, nn.Conv2d):
+        i += 1
+        name = 'conv_{}'.format(i)
+      elif isinstance(layer, nn.ReLU):
+        name = 'relu_{}'.format(i)
+        # The in-place version doesn't play very nicely with the ContentLoss
+        # and StyleLoss we insert below. So we replace with out-of-place
+        # ones here.
+        layer = nn.ReLU(inplace=False)
+      elif isinstance(layer, nn.MaxPool2d): name = 'pool_{}'.format(i)
+      elif isinstance(layer, nn.BatchNorm2d): name = 'bn_{}'.format(i)
+      else: raise RuntimeError('Unrecognized layer: {}'.format(layer.__class__.__name__))
+
+      model.add_module(name, layer)
+
+      if name in style_layers:
+        target_feature = model(style_img).detach()
+        style_loss = StyleLoss(target_feature)
+        model.add_module("style_loss_{}".format(i), style_loss)
+        style_losses.append(style_loss)
+    # now we trim off the layers after the last content and style losses
+    for i in range(len(model) - 1, -1, -1):
+      if isinstance(model[i], StyleLoss): break
+
+    self.model = model[:(i + 1)]
+    self.style_losses = nn.ModuleList(style_losses)
+
+  def forward(self, x, ref):
+    self.model(x)
+    loss = 0
+    for sl in self.style_losses: loss += sl.loss
+    return loss

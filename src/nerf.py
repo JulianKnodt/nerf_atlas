@@ -449,11 +449,12 @@ class VolSDF(CommonNeRF):
     self.secondary = None
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), "Must have light w/ volsdf integration"
-      self.occ = load_occlusion_kind(occ_kind)
+      self.occ = load_occlusion_kind(occ_kind, self.sdf.latent_size)
       self.secondary = self.direct
   def direct(self, weights, pts, view, n, latent):
     light_dir, light_val = self.occ(
       pts + 5e-3*F.normalize(n, dim=-1), self.sdf.refl.light, self.sdf.intersect_mask,
+      latent=latent,
     )
     bsdf_val = self.sdf.refl(
       x=pts, view=view, normal=n, light=light_dir, latent=latent,
@@ -464,6 +465,7 @@ class VolSDF(CommonNeRF):
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, ts, r_o, r_d)
+  def total_latent_size(self): return self.sdf.latent_size
   def set_refl(self, refl): self.sdf.refl = refl
 
   @property
@@ -484,7 +486,7 @@ class VolSDF(CommonNeRF):
       n = self.sdf.normals(pts)
 
     view = r_d.unsqueeze(0).expand_as(pts)
-    if self.secondary is None: rgb = self.sdf.refl(x=pts, view=view, n=n, latent=latent)
+    if self.secondary is None: rgb = self.sdf.refl(x=pts, view=view, normal=n, latent=latent)
     else: rgb = self.secondary(self.weights, pts, view, n, latent)
 
     return volumetric_integrate(self.weights, rgb)

@@ -15,28 +15,29 @@ def load(args, shape, light_and_refl: LightAndRefl):
   elif args.integrator_kind == "direct": cons = Direct
   elif args.integrator_kind == "path": cons = Path
   else: raise NotImplementedError(f"load integrator: {args.integrator_kind}")
-  occ = load_occlusion_kind(args.occ_kind)
+  occ = load_occlusion_kind(args.occ_kind, shape.total_latent_size())
 
   integ = cons(shape=shape, refl=light_and_refl.refl, occlusion=occ)
 
   return integ
 
-def load_occlusion_kind(kind=None):
+def load_occlusion_kind(kind=None, latent_size:int=0):
   if kind is None: occ = lighting_wo_isect
   elif kind == "hard": occ = LightingWIsect()
-  elif kind == "learned": occ = LearnedLighting()
+  elif kind == "learned": occ = LearnedLighting(latent_size=latent_size)
+  elif kind == "all-learned": occ = AllLearnedOcc(latent_size=latent_size)
   else: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
 
   return occ
 
 # no shadow
-def lighting_wo_isect(pts, lights, isect_fn, mask=None):
+def lighting_wo_isect(pts, lights, isect_fn, latent=None, mask=None):
   return lights(pts if mask is None else pts[mask], mask=mask)
 
 # hard shadow lighting
 class LightingWIsect(nn.Module):
   def __init__(self): super().__init__()
-  def forward(self, pts, lights, isect_fn, mask=None):
+  def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
     visible = isect_fn(pts, -dir, near=0.1, far=20)
@@ -48,19 +49,48 @@ class LightingWIsect(nn.Module):
     return dir, spectrum
 
 class LearnedLighting(nn.Module):
-  def __init__(self):
+  def __init__(
+    self,
+    latent_size:int=0,
+  ):
     super().__init__()
     self.attenuation = SkipConnMLP(
-      in_size=5, out=1,
+      in_size=5, out=1, latent_size=latent_size,
       num_layers=5, hidden_size=256,
       xavier_init=True,
     )
-  def forward(self, pts, lights, isect_fn, mask=None):
+  def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
     visible = isect_fn(pts, -dir, near=0.1, far=20)
-    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1)).sigmoid()
+    att = self.attenuation(
+      torch.cat([pts, dir_to_elev_azim(dir)], dim=-1),
+      latent
+    ).sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
+    return dir, spectrum
+
+class AllLearnedOcc(nn.Module):
+  def __init__(
+    self,
+    latent_size:int=0,
+  ):
+    super().__init__()
+    self.attenuation = SkipConnMLP(
+      in_size=6, out=1, latent_size=latent_size,
+      num_layers=5, hidden_size=256,
+      xavier_init=True,
+    )
+  def forward(self, pts, lights, isect_fn, latent=None, mask=None):
+    pts = pts if mask is None else pts[mask]
+    dir, spectrum = lights(pts, mask=mask)
+    visible = isect_fn(pts, -dir, near=0.1, far=20).unsqueeze(-1)
+    att = self.attenuation(
+      torch.cat([pts, dir_to_elev_azim(dir), visible], dim=-1),
+      latent
+    )
+    att = (att.sin()+1)/2
+    spectrum = spectrum * att
     return dir, spectrum
 
 class Renderer(nn.Module):
@@ -90,11 +120,11 @@ class Direct(Renderer):
     _, latent = self.shape.from_pts(pts[hits])
 
     light_dir, light_val = self.occ(
-      pts + n*1e-3, self.refl.light, self.shape.intersect_mask, mask=hits
+      pts + n*1e-3, self.refl.light, self.shape.intersect_mask, mask=hits,
+      latent=latent,
     )
     bsdf_val = self.refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
     out = torch.zeros_like(r_d)
-    # out[hits] = 1 # DEBUG
     out[hits] = bsdf_val * light_val
     if self.training:
       out = torch.cat([out, self.shape.throughput(r_o, r_d)], dim=-1)
