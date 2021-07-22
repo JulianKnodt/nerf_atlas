@@ -111,15 +111,28 @@ class SDF(nn.Module):
     )
     latent = None if self.underlying.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
     out = torch.zeros_like(r_d)
+    n = None
+    if self.refl.can_use_normal:
+      self.n = torch.zeros_like(out)
+      n = self.normals(pts[hit])
+      self.n[hit] = n
     # use masking in order to speed up efficiency
     out[hit] = self.refl(
-      x=pts[hit], view=r_d[hit],
-      normal=self.normals(pts[hit]) if self.refl.can_use_normal else None,
-      latent=latent,
-      mask=hit,
+      x=pts[hit], view=r_d[hit], normal=n,
+      latent=latent, mask=hit,
     )
     if with_throughput and self.training:
       out = torch.cat([out, self.throughput(r_o, r_d)], dim=-1)
+    return out
+  def debug_normals(self, rays):
+    r_o, r_d = rays.split([3,3], dim=-1)
+    pts, hit, t = sphere_march(
+      self.underlying, r_o, r_d, near=self.near, far=self.far,
+      iters=128 if self.training else 192,
+    )
+    latent = None if self.underlying.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
+    out = torch.zeros_like(r_d)
+    out[hit] = self.normals(pts[hit])
     return out
   def throughput(self, r_o, r_d):
     tput, _best_pos = throughput(self.underlying, r_o, r_d, self.near, self.far)

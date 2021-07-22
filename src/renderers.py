@@ -76,20 +76,19 @@ class AllLearnedOcc(nn.Module):
     latent_size:int=0,
   ):
     super().__init__()
+    in_size=6
     self.attenuation = SkipConnMLP(
-      in_size=6, out=1, latent_size=latent_size,
-      num_layers=5, hidden_size=256,
-      xavier_init=True,
+      in_size=in_size, out=1, latent_size=latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=256, xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
     visible = isect_fn(pts, -dir, near=0.1, far=20).unsqueeze(-1)
-    att = self.attenuation(
-      torch.cat([pts, dir_to_elev_azim(dir), visible], dim=-1),
-      latent
-    )
-    att = (att.sin()+1)/2
+    elaz = dir_to_elev_azim(dir)
+    # try squaring to encode the symmetry on both sides of asin
+    att = self.attenuation(torch.cat([pts, elaz, visible], dim=-1), latent).sigmoid()
     spectrum = spectrum * att
     return dir, spectrum
 

@@ -215,7 +215,7 @@ class CommonNeRF(nn.Module):
 
   # produces a segmentation mask of sorts, using the alpha for occupancy.
   def acc(self): return self.alpha.max(dim=0)[0]
-  def acc_smooth(self): return torch.sum(self.weights,dim=0).unsqueeze(-1)
+  def acc_smooth(self): return self.weights.sum(dim=0).unsqueeze(-1)
   def set_refl(self, refl):
     if hasattr(self, "refl"): self.refl = refl
 
@@ -477,13 +477,13 @@ class VolSDF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     sdf_vals, latent = self.sdf.from_pts(pts)
-
-    density = 1/self.scale * self.laplace_cdf(-sdf_vals)
+    scale = self.scale if self.training else 1e-2
+    density = 1/scale * self.laplace_cdf(-sdf_vals, scale)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
     n = None
     if self.sdf.refl.can_use_normal or self.secondary is not None:
-      n = self.sdf.normals(pts)
+      self.n = n = F.normalize(self.sdf.normals(pts), dim=-1)
 
     view = r_d.unsqueeze(0).expand_as(pts)
     if self.secondary is None: rgb = self.sdf.refl(x=pts, view=view, normal=n, latent=latent)
@@ -491,8 +491,8 @@ class VolSDF(CommonNeRF):
 
     return volumetric_integrate(self.weights, rgb)
 
-  def laplace_cdf(self, sdf_vals):
-    scaled = sdf_vals/self.scale
+  def laplace_cdf(self, sdf_vals, scale):
+    scaled = sdf_vals/scale
     return torch.where(
       scaled <= 0,
       # clamps are necessary to prevent NaNs, even though the values should get filtered out

@@ -125,7 +125,7 @@ class ConicGaussian(nn.Module):
 
 def save_image(name, img): plt.imsave(name, img.detach().cpu().clamp(0,1).numpy())
 def save_plot(name, expected, *got):
-  fig = plt.figure()
+  fig = plt.figure(figsize=((len(got)+2)*4,16))
   fig.add_subplot(1, 1+len(got), 1)
   plt.imshow(expected.detach().squeeze().cpu().numpy())
   plt.grid("off");
@@ -191,7 +191,7 @@ lim = 1 - 1e-6
 #@torch.jit.script
 def dir_to_elev_azim(direc):
   x, y, z = F.normalize(direc, dim=-1).clamp(min=-lim, max=lim).split([1,1,1], dim=-1)
-  elev = z.asin()
+  elev = y.asin()
   azim = torch.atan2(x, (1 - x.square() - z.square()).clamp(min=1e-6).sqrt())
   return torch.cat([elev, azim], dim=-1)
 

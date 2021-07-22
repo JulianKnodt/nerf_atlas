@@ -372,6 +372,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       exp = labels[i,...,:3]
       got = torch.zeros_like(exp)
       acc = torch.zeros_like(got)
+      normals = torch.zeros_like(got)
       if args.backing_sdf: got_sdf = torch.zeros_like(got)
       if light is not None: model.refl.light = light[i:i+1]
 
@@ -386,7 +387,15 @@ def test(model, cam, labels, args, training: bool = True, light=None):
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
           if hasattr(model, "nerf"):
-            acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = model.nerf.acc()[..., None]
+            acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+              model.nerf.acc_smooth()[0,...].clamp(min=0,max=1)
+          if hasattr(model, "n"):
+            normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+              nerf.volumetric_integrate(model.weights, model.n.abs())[0,...].clamp(min=0,max=1)
+          elif hasattr(model, "sdf"):
+            ...
+            #normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+            #  model.sdf.debug_normals(
 
       loss = F.mse_loss(got, exp)
       psnr = utils.mse2psnr(loss).item()
@@ -394,7 +403,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
       name = f"outputs/train_{i:03}.png" if training else f"outputs/test_{i:03}.png"
       items = [exp, got.clamp(min=0, max=1)]
-      if hasattr(model, "nerf"): items.append(acc)
+      #if hasattr(model, "nerf"): items.append(acc)
+      if hasattr(model, "n"): items.append(normals)
       save_plot(name, *items)
       ls.append(psnr)
 
