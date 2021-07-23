@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 import math
 
-from .neural_blocks import ( SkipConnMLP, FourierEncoder )
+from .neural_blocks import ( SkipConnMLP, NNEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim )
 from .refl import ( LightAndRefl )
 
@@ -79,19 +79,21 @@ class AllLearnedOcc(nn.Module):
     latent_size:int=0,
   ):
     super().__init__()
-    in_size=6
+    in_size=5
+    # TODO does this need to be a SIREN for high enough frequency?
     self.attenuation = SkipConnMLP(
-      in_size=in_size, out=1, latent_size=latent_size,
-      enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=256, xavier_init=True,
+      in_size=in_size, out=1, latent_size=latent_size+1,
+      enc=NNEncoder(input_dims=in_size, out=64),
+      num_layers=6, hidden_size=256, xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
     visible = isect_fn(pts, -dir, near=0.1, far=20).unsqueeze(-1)
     elaz = dir_to_elev_azim(dir)
+    latent = visible if latent is None else torch.cat([latent, visible], dim=-1)
     # try squaring to encode the symmetry on both sides of asin
-    att = self.attenuation(torch.cat([pts, elaz, visible], dim=-1), latent).sigmoid()
+    att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
     spectrum = spectrum * att
     return dir, spectrum
 

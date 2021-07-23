@@ -141,6 +141,9 @@ def arguments():
     "--sdf-eikonal", help="Weight of SDF eikonal loss", type=float, default=0,
   )
   sdfa.add_argument(
+    "--smooth-normals", help="Amount to attempt to smooth normals", type=float, default=0,
+  )
+  sdfa.add_argument(
     "--sdf-kind", help="Which SDF model to use", type=str,
     choices=["spheres", "siren", "local", "mlp"], default="siren",
   )
@@ -325,9 +328,17 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if args.sparsify_alpha > 0: loss = loss + args.sparsify_alpha * (model.nerf.alpha).square().mean()
     if args.dnerf_tf_smooth_weight > 0:
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
-    if args.sdf_eikonal > 0:
-      loss = loss + args.sdf_eikonal * \
-        utils.eikonal_loss(model.sdf.normals(16*(torch.rand(1<<13, 3, device=device)-0.5)))
+
+    if args.sdf_eikonal > 0 or args.smooth_normals > 0:
+      pts = 16*(torch.rand(1<<12, 3, device=device, requires_grad=True)-0.5)
+      n = model.sdf.normals(pts)
+    if args.sdf_eikonal > 0: loss = loss + args.sdf_eikonal * utils.eikonal_loss(n)
+    if args.smooth_normals > 0:
+      delta_n = torch.autograd.grad(
+        inputs=pts, outputs=n, retain_graph=True, create_graph=True,
+        grad_outputs=torch.ones_like(n),
+      )[0]
+      loss = loss + args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
 
     update(display)
     losses.append(l2_loss)
