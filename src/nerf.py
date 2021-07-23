@@ -113,7 +113,6 @@ class CommonNeRF(nn.Module):
     instance_latent_size: int = 0,
     per_pixel_latent_size: int = 0,
     per_point_latent_size: int = 0,
-    unisurf_loss: bool = False,
 
     sigmoid_kind: str = "thin",
     bg: str = "black",
@@ -142,9 +141,6 @@ class CommonNeRF(nn.Module):
     self.alpha = None
     self.noise_std = 0.2
     # TODO add activation for using sigmoid or fat sigmoid
-
-    self.rec_unisurf_loss = unisurf_loss
-    self.unisurf_loss = 0
 
     self.set_bg(bg)
     self.set_sigmoid(sigmoid_kind)
@@ -178,19 +174,6 @@ class CommonNeRF(nn.Module):
     else: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
   def sky_from_mlp(self, elaz_r_d, weights):
     return (1-weights.sum(dim=0)).unsqueeze(-1) * fat_sigmoid(self.sky_mlp(elaz_r_d))
-  def record_unisurf_loss(self, pts, alpha):
-    if not self.rec_unisurf_loss or not self.training: return
-    alpha = alpha.unsqueeze(-1)
-    normals, = torch.autograd.grad(
-      inputs=pts, outputs=alpha, grad_outputs=torch.ones_like(alpha), create_graph=True
-    )
-    self.unisurf_loss, = torch.autograd.grad(
-      inputs=normals, outputs=alpha, grad_outputs=torch.ones_like(alpha),
-      only_inputs=True, allow_unused=True,
-    )
-    self.unisurf_loss = self.unisurf_loss or 0
-    return self.unisurf_loss
-
   def total_latent_size(self) -> int:
     return self.mip_size() + \
       self.per_pixel_latent_size + \
@@ -424,7 +407,6 @@ class NeRFAE(CommonNeRF):
     )
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
-    self.record_unisurf_loss(pts, self.alpha)
 
     color = volumetric_integrate(self.weights, rgb)
     sky = self.sky_color(None, self.weights)
@@ -583,7 +565,6 @@ class DynamicNeRFAE(nn.Module):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
     )
-    if self.canon.rec_unisurf_loss: pts.requires_grad_()
     # small deviation for regularization
     if self.training and self.time_noise_std > 0: t = t + self.time_noise_std * torch.randn_like(t)
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
@@ -596,51 +577,6 @@ class DynamicNeRFAE(nn.Module):
 
     # TODO is this best as a sum, or is some other kind of tform better?
     return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
-
-
-# unisurf, currently doesn't really work because no secant search
-class Unisurf(CommonNeRF):
-  def __init__(
-    self,
-    intermediate_size: int = 32, out_features: int = 3,
-    device: torch.device = "cuda",
-    **kwargs,
-  ):
-    super().__init__(**kwargs, device=device)
-    self.latent_size = self.total_latent_size()
-
-    self.alpha_pred = SkipConnMLP(
-      in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
-      enc=NNEncoder(input_dims=3, device=device),
-      num_layers = 6, hidden_size = 128, xavier_init=True,
-    )
-
-    self.refl = refl.View(
-      out_features=out_features, act=self.feat_act,
-      latent_size=self.latent_size+intermediate_size,
-    )
-
-  def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
-    )
-    return self.from_pts(pts, ts, r_o, r_d)
-  def from_pts(self, pts, ts, r_o, r_d):
-    latent = self.curr_latent(pts.shape)
-    mip_enc = self.mip_encoding(r_o, r_d, ts)
-    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
-
-    first_out = self.alpha_pred(pts, latent if latent.shape[-1] != 0 else None)
-
-    self.alpha = fat_sigmoid(first_out[..., 0])
-    intermediate = first_out[..., 1:]
-
-    rgb = self.refl(
-      x=pts, view=r_d.squeeze(0).expand_as(pts),
-      latent=torch.cat([intermediate, latent], dim=-1),
-    )
-    self.weights = self.alpha * cumuprod_exclusive(1.0 - self.alpha + 1e-10)
-    return volumetric_integrate(self.weights, rgb)
 
 class SinglePixelNeRF(nn.Module):
   def __init__(

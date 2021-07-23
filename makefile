@@ -89,9 +89,9 @@ nerv_point: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 15_000 --loss-window 750 \
+	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 750 \
 	--near 2 --far 6 --batch-size 4 -lr 2e-4 --refl-kind rusin --tone-map \
-	--sdf-eikonal 0.1 --light-kind dataset --omit-bg --seed -1 --notraintest \
+	--sdf-eikonal 0.1 --light-kind dataset --omit-bg --seed -1 \
 	--loss-fns rmse --valid-freq 499 --occ-kind all-learned --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
@@ -109,12 +109,6 @@ original: clean
 	--size 64 --crop --epochs 80_000 --save models/lego.pt \
 	--near 2 --far 6 --batch-size 4 --crop-size 26 --model plain -lr 1e-3 \
 	--loss-fns l2 --valid-freq 499 --nosave #--load models/lego.pt #--omit-bg
-
-unisurf: clean
-	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 64 --crop --epochs 80_000 --save models/lego_us.pt \
-	--near 2 --far 6 --batch-size 5 --crop-size 26 --model unisurf -lr 5e-4 \
-	--loss-fns l1 --valid-freq 499 --no-sched --load models/lego_us.pt #--omit-bg
 
 test_original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \

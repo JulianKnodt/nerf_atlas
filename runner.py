@@ -53,7 +53,6 @@ def arguments():
   a.add_argument(
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
-  a.add_argument("--unisurf-loss", help="Add unisurf loss", action="store_true")
   a.add_argument(
     "--sigmoid-kind", help="What sigmoid to use, curr keeps old", default="thin",
     choices=["normal", "fat", "thin", "cyclic", "softmax", "curr"],
@@ -69,7 +68,7 @@ def arguments():
   )
   a.add_argument(
     "--model", help="which model do we want to use", type=str,
-    choices=["tiny", "plain", "ae", "unisurf", "volsdf", "sdf"], default="plain",
+    choices=["tiny", "plain", "ae", "volsdf", "sdf"], default="plain",
   )
   a.add_argument(
     "--bg", help="What kind of background to use for NeRF", type=str,
@@ -326,8 +325,6 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if args.sparsify_alpha > 0: loss = loss + args.sparsify_alpha * (model.nerf.alpha).square().mean()
     if args.dnerf_tf_smooth_weight > 0:
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
-    if hasattr(model, "nerf") and model.nerf.unisurf_loss > 0:
-      loss = loss + model.nerf.unisurf_loss
     if args.sdf_eikonal > 0:
       loss = loss + args.sdf_eikonal * \
         utils.eikonal_loss(model.sdf.normals(16*(torch.rand(1<<13, 3, device=device)-0.5)))
@@ -454,7 +451,6 @@ def load_model(args):
     "per_point_latent_size": per_pt_latent_size,
     "instance_latent_size": instance_latent_size,
     "sigmoid_kind": args.sigmoid_kind,
-    "unisurf_loss": args.unisurf_loss,
     "sigmoid_kind": args.sigmoid_kind if args.sigmoid_kind != "curr" else "thin",
     "bg": args.bg,
   }
@@ -468,7 +464,6 @@ def load_model(args):
     constructor = nerf.VolSDF
     kwargs["sdf"] = sdf.load(args)
     kwargs["occ_kind"] = args.occ_kind
-  elif args.model == "unisurf": constructor = nerf.Unisurf
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
 

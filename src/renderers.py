@@ -15,7 +15,10 @@ def load(args, shape, light_and_refl: LightAndRefl):
   elif args.integrator_kind == "direct": cons = Direct
   elif args.integrator_kind == "path": cons = Path
   else: raise NotImplementedError(f"load integrator: {args.integrator_kind}")
-  occ = load_occlusion_kind(args.occ_kind, shape.total_latent_size())
+  ls = 0
+  if hasattr(shape, "latent_size"): ls = shape.latent_size
+  elif hasattr(shape, "total_latent_size"): ls = shape.total_latent_size()
+  occ = load_occlusion_kind(args.occ_kind, ls)
 
   integ = cons(shape=shape, refl=light_and_refl.refl, occlusion=occ)
 
