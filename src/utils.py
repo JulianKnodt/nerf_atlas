@@ -148,6 +148,7 @@ def rotate_vector(v, axis, c, s):
 
 def mse2psnr(x): return -10 * torch.log10(x)
 
+# tone mapping is used in NeRV before the loss function. It will accentuate smaller loss items.
 def tone_map(loss_fn):
   def tone_mapped_loss(got, ref): return loss_fn(got/(1+got), ref/(1+ref))
   return tone_mapped_loss

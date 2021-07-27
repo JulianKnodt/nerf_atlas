@@ -25,24 +25,25 @@ def load(args, training=True, device="cuda"):
     if args.data.endswith(".mp4"): kind = "single_video"
     elif args.data.endswith(".jpg"): kind = "pixel-single"
 
+  with_mask = (args.model == "sdf" or args.volsdf_alternate) and training
   size = args.size
   if kind == "original":
     return original(
       args.data, training=training, normalize=False, size=size,
       white_bg=args.bg=="white",
-      with_mask = (args.model == "sdf") and training,
+      with_mask = with_mask,
       device=device,
     )
   elif kind == "nerv_point":
     return nerv_point(
       args.data, training=training, size=size,
-      with_mask = (args.model == "sdf") and training,
+      with_mask = with_mask,
       device=device,
     )
   elif kind == "dtu":
     return dtu(
       args.data, training=training, size=size,
-      with_mask = (args.model == "sdf") and training,
+      with_mask = with_mask,
       device=device,
     )
   elif kind == "dnerf":

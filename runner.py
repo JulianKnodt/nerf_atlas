@@ -103,6 +103,11 @@ def arguments():
     help="Modules to replace on this run, if any",
   )
 
+  a.add_argument(
+    "--volsdf-alternate", help="Use alternating volume rendering/SDF training volsdf",
+    action="store_true",
+  )
+
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
     "--refl-kind",
@@ -241,7 +246,7 @@ def save_losses(losses, window=250):
   plt.savefig("outputs/training_loss.png", bbox_inches='tight')
   plt.close()
 
-def load_loss_fn(args):
+def load_loss_fn(args, model):
   if args.style_img != None:
     return StyleTransfer(load_image(args.style_img, resize=(args.size, args.size)))
 
@@ -254,6 +259,8 @@ def load_loss_fn(args):
       for fn in loss_fns: loss = loss + fn(x, ref)
       return loss
   if args.tone_map: loss_fn = utils.tone_map(loss_fn)
+  if args.volsdf_alternate:
+    return nerf.alternating_volsdf(model, loss_fn, sdf.masked_loss(loss_fn))
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
   return loss_fn
 
@@ -262,7 +269,7 @@ def load_loss_fn(args):
 def train(model, cam, labels, opt, args, light=None, sched=None):
   if args.epochs == 0: return
 
-  loss_fn = load_loss_fn(args)
+  loss_fn = load_loss_fn(args, model)
 
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
   update = lambda kwargs: iters.set_postfix(**kwargs)
@@ -529,6 +536,7 @@ def load_model(args):
     setattr(model, "nerf", og_model)
 
   if args.torchjit: model = torch.jit.script(model)
+  if args.volsdf_alternate: model = nerf.AlternatingVolSDF(model)
   return model
 
 def save(model, args):

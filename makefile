@@ -92,16 +92,16 @@ nerv_point: clean
 	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 2e-4 --refl-kind rusin --tone-map \
 	--sdf-eikonal 0.1 --light-kind dataset --omit-bg --seed -1 \
-	--smooth-normals 1e-6 \
-	--loss-fns rmse --valid-freq 499 --occ-kind all-learned --load models/nerv_${nerv_dataset}.pt
+	--smooth-normals 2e-6 --notraintest \
+	--loss-fns l2 --valid-freq 499 --occ-kind all-learned --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model sdf --sdf-kind mlp \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 64 --epochs 0 --loss-window 250 \
-	--near 2 --far 6 --batch-size 6 -lr 3e-4 --refl-kind rusin \
-	--sdf-eikonal 0.1 --light-kind dataset \
+	--size 200 --crop --crop-size 32 --epochs 7500 --loss-window 250 \
+	--near 2 --far 6 --batch-size 3 -lr 3e-4 --refl-kind rusin \
+	--sdf-eikonal 0.1 --light-kind dataset --smooth-normals 1e-6 \
 	--loss-fns l2 --valid-freq 100 --save-freq 2500 \
 	--integrator-kind direct --load models/nerv_sdf_${nerv_dataset}.pt
 

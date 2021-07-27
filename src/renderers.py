@@ -118,21 +118,26 @@ class Direct(Renderer):
   @property
   def sdf(self): return self.shape
   def forward(self, rays):
-    r_o, r_d = rays.split([3, 3], dim=-1)
+    return direct(self.shape, self.refl, self.occ, rays, self.training)
 
-    pts, hits, _t, n = self.shape.intersect_w_n(r_o, r_d)
-    _, latent = self.shape.from_pts(pts[hits])
+# Functional version of integration
+def direct(shape, refl, occ, rays, training=True):
+  r_o, r_d = rays.split([3, 3], dim=-1)
 
-    light_dir, light_val = self.occ(
-      pts + n*1e-3, self.refl.light, self.shape.intersect_mask, mask=hits,
-      latent=latent,
-    )
-    bsdf_val = self.refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
-    out = torch.zeros_like(r_d)
-    out[hits] = bsdf_val * light_val
-    if self.training:
-      out = torch.cat([out, self.shape.throughput(r_o, r_d)], dim=-1)
-    return out
+  pts, hits, _t, n = shape.intersect_w_n(r_o, r_d)
+  _, latent = shape.from_pts(pts[hits])
+
+  light_dir, light_val = occ(
+    pts + n*1e-3, refl.light, shape.intersect_mask, mask=hits,
+    latent=latent,
+  )
+  bsdf_val = refl(
+    x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent
+  )
+  out = torch.zeros_like(r_d)
+  out[hits] = bsdf_val * light_val
+  if training: out = torch.cat([out, shape.throughput(r_o, r_d)], dim=-1)
+  return out
 
 class Path(Renderer):
   def __init__(

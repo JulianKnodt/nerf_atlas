@@ -8,7 +8,7 @@ from .neural_blocks import (
 )
 from .utils import ( dir_to_elev_azim, autograd )
 import src.refl as refl
-from .renderers import ( load_occlusion_kind )
+from .renderers import ( load_occlusion_kind, direct )
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -483,7 +483,40 @@ class VolSDF(CommonNeRF):
       1 - scaled.clamp(min=0).neg().exp()/2
     )
 
+def alternating_volsdf_loss(alt_volsdf, nerf_loss, sdf_loss):
+  def aux(ref, img):
+    if (i % 2 == 0 or self.force_volume) and not self.force_sdf:
+      return nerf_loss(ref[..., :3], img)
+    else:
+      return sdf_loss(ref, img)
+  return aux
+# An odd module which alternates between volume rendering and SDF rendering
+class AlternatingVolSDF(nn.Module):
+  def __init__(
+    self,
+    volsdf: VolSDF,
+  ):
+    super().__init__()
+    assert(isinstance(volsdf, VolSDF))
+    self.volsdf = volsdf
+    self.i = 0
+    self.force_volume = False
+    self.force_sdf = False
 
+  # forward a few properties to sdf
+  @property
+  def sdf(self): return self.volsdf.sdf
+  @property
+  def n(self): return self.volsdf.n
+
+  def forward(self, rays):
+    self.i = (self.i + 1) % 2
+    if (i % 2 == 0 or self.force_volume) and not self.force_sdf:
+      return self.volsdf(rays)
+    else:
+      return renderers.direct(
+        self.volsdf, self.volsdf.refl, self.volsdf.occ, rays, self.training
+      )
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
