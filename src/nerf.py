@@ -483,12 +483,12 @@ class VolSDF(CommonNeRF):
       1 - scaled.clamp(min=0).neg().exp()/2
     )
 
-def alternating_volsdf_loss(alt_volsdf, nerf_loss, sdf_loss):
-  def aux(ref, img):
-    if (i % 2 == 0 or self.force_volume) and not self.force_sdf:
-      return nerf_loss(ref[..., :3], img)
+def alternating_volsdf_loss(model, nerf_loss, sdf_loss):
+  def aux(x, ref):
+    if (model.i % 2 == 0 or model.force_volume) and not model.force_sdf:
+      return nerf_loss(x, ref[..., :3])
     else:
-      return sdf_loss(ref, img)
+      return sdf_loss(x, ref)
   return aux
 # An odd module which alternates between volume rendering and SDF rendering
 class AlternatingVolSDF(nn.Module):
@@ -508,14 +508,16 @@ class AlternatingVolSDF(nn.Module):
   def sdf(self): return self.volsdf.sdf
   @property
   def n(self): return self.volsdf.n
+  @property
+  def refl(self): return self.volsdf.refl
 
   def forward(self, rays):
     self.i = (self.i + 1) % 2
-    if (i % 2 == 0 or self.force_volume) and not self.force_sdf:
+    if (self.i % 2 == 0 or self.force_volume) and not self.force_sdf:
       return self.volsdf(rays)
     else:
-      return renderers.direct(
-        self.volsdf, self.volsdf.refl, self.volsdf.occ, rays, self.training
+      return direct(
+        self.volsdf.sdf, self.volsdf.refl, self.volsdf.occ, rays, self.training
       )
 
 # Dynamic NeRF for multiple frams

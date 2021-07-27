@@ -65,7 +65,8 @@ class LearnedLighting(nn.Module):
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, -dir, near=0.1, far=20)
+    # have an extra large eps to account for incorrect shapes.
+    visible = isect_fn(pts, -dir, near=1e-1, far=20, eps=5e-3)
     att = self.attenuation(
       torch.cat([pts, dir_to_elev_azim(dir)], dim=-1),
       latent
@@ -117,6 +118,7 @@ class Direct(Renderer):
     super().__init__(**kwargs)
   @property
   def sdf(self): return self.shape
+  def total_latent_size(self): return self.shape.latent_size
   def forward(self, rays):
     return direct(self.shape, self.refl, self.occ, rays, self.training)
 
@@ -128,7 +130,7 @@ def direct(shape, refl, occ, rays, training=True):
   _, latent = shape.from_pts(pts[hits])
 
   light_dir, light_val = occ(
-    pts + n*1e-3, refl.light, shape.intersect_mask, mask=hits,
+    pts, refl.light, shape.intersect_mask, mask=hits,
     latent=latent,
   )
   bsdf_val = refl(

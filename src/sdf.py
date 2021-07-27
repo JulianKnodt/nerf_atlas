@@ -94,10 +94,10 @@ class SDF(nn.Module):
       iters=128 if self.training else 256,
     )
     return pts, hit, t, self.normals(pts)
-  def intersect_mask(self, r_o, r_d, near=None, far=None):
+  def intersect_mask(self, r_o, r_d, near=None, far=None, eps=1e-3):
     with torch.no_grad():
       return ~sphere_march(
-        self.underlying, r_o, r_d,
+        self.underlying, r_o, r_d, eps=eps,
         near=self.near if near is None else near,
         far=self.far if far is None else far,
         # since this is just for intersection, alright to use fewer steps
@@ -109,7 +109,7 @@ class SDF(nn.Module):
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       iters=128 if self.training else 192,
     )
-    latent = None if self.underlying.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
+    latent = None if self.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
     out = torch.zeros_like(r_d)
     n = None
     if self.refl.can_use_normal:
@@ -324,6 +324,6 @@ def masked_loss(img_loss=F.mse_loss):
     if misses.any():
       loss_fn = F.binary_cross_entropy_with_logits
       mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
-    return mask_weight * mask_loss + 10*color_loss
+    return mask_weight * mask_loss + color_loss
 
   return aux

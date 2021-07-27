@@ -59,8 +59,6 @@ def arguments():
   )
   a.add_argument("--sparsify-alpha", help="Weight for sparsifying alpha",type=float,default=0)
   a.add_argument("--backing-sdf", help="Use a backing SDF", action="store_true")
-  a.add_argument("--blur", help="Blur before loss comparison", action="store_true")
-  a.add_argument("--sharpen", help="Sharpen before loss comparison", action="store_true")
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -259,8 +257,7 @@ def load_loss_fn(args, model):
       for fn in loss_fns: loss = loss + fn(x, ref)
       return loss
   if args.tone_map: loss_fn = utils.tone_map(loss_fn)
-  if args.volsdf_alternate:
-    return nerf.alternating_volsdf(model, loss_fn, sdf.masked_loss(loss_fn))
+  if args.volsdf_alternate: return nerf.alternating_volsdf_loss(model, loss_fn, sdf.masked_loss(loss_fn))
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
   return loss_fn
 
@@ -303,18 +300,12 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
 
     if light is not None: model.refl.light = light[idxs]
 
-    # omit items which are all darker with some likelihood.
+    # omit items which are all darker with some likelihood. This is mainly used when
+    # attempting to focus on learning the refl and not the shape.
     if args.omit_bg and (i % args.save_freq) != 0 and (i % args.valid_freq) != 0 and \
       ref.mean() + 0.3 < sqr(random.random()): continue
 
     out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
-    if args.blur:
-      r = 1 + 2 * random.randint(0,2)
-      out = TVF.gaussian_blur(out.permute(0,3,1,2), r).permute(0,2,3,1)
-      ref = TVF.gaussian_blur(ref.permute(0,3,1,2), r).permute(0,2,3,1) # TODO cache ref blur?
-    if args.sharpen:
-      out = TVF.adjust_sharpness(out.permute(0,3,1,2),1.5).permute(0,2,3,1)
-      ref = TVF.adjust_sharpness(ref.permute(0,3,1,2),1.5).permute(0,2,3,1) # TODO cache sharpen?
     loss = loss_fn(out, ref)
     assert(loss.isfinite()), f"Got {loss.item()} loss"
     l2_loss = loss.item()
@@ -323,23 +314,30 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       "refresh": False,
     }
     if sched is not None: display["lr"] = f"{sched.get_last_lr()[0]:.1e}"
+
     if args.backing_sdf:
       eik = sdf.eikonal_loss(model.sdf.normals)
       s = sdf.sigmoid_loss(model.min_along_rays, model.nerf.acc())
       loss = loss + eik + s
-      #display["eik"] = f"{eik:.02f}"
-      #display["s"] = f"{s:.02f}"
+
     if args.latent_l2_weight > 0:
       loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
+
     # experiment with emptying the model at the beginning
     if args.sparsify_alpha > 0: loss = loss + args.sparsify_alpha * (model.nerf.alpha).square().mean()
     if args.dnerf_tf_smooth_weight > 0:
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
 
+    # prepare one set of points for either smoothing normals or eikonal.
     if args.sdf_eikonal > 0 or args.smooth_normals > 0:
-      pts = 16*(torch.rand(1<<12, 3, device=device, requires_grad=True)-0.5)
+      pts = 8*(torch.rand(1<<13, 3, device=device, requires_grad=True)-0.5)
       n = model.sdf.normals(pts)
+
+    # E[d sdf(x)/dx] = 1, enforces that the SDF is valid.
     if args.sdf_eikonal > 0: loss = loss + args.sdf_eikonal * utils.eikonal_loss(n)
+
+    # dn/dx -> 0, hopefully smoothes out the local normals of the surface.
+    # TODO does it matter to normalize the normal or not?
     if args.smooth_normals > 0:
       delta_n = torch.autograd.grad(
         inputs=pts, outputs=n, retain_graph=True, create_graph=True,
@@ -354,6 +352,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     loss.backward()
     opt.step()
     if sched is not None: sched.step()
+
     if i % args.valid_freq == 0:
       with torch.no_grad():
         ref0 = ref[0,...,:3]
@@ -364,7 +363,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         if hasattr(model, "nerf") and args.model != "volsdf":
           items.append(model.nerf.acc()[0,...,None].expand_as(ref0).clamp(min=0, max=1))
           items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0).clamp(min=0, max=1))
-        elif args.model == "sdf":
+        elif ref.shape[-1] == 4:
           items.append(ref[0,...,-1,None].expand_as(ref0))
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
         save_plot(f"outputs/valid_{i:05}.png", *items)
