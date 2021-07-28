@@ -12,11 +12,13 @@ import src.renderers as renderers
 from tqdm import trange
 
 def load(args):
-  if args.sdf_kind == "spheres": model = SmoothedSpheres()
-  elif args.sdf_kind == "siren": model = SIREN()
-  elif args.sdf_kind == "local": model = Local()
-  elif args.sdf_kind == "mlp": model = MLP()
+  if args.sdf_kind == "spheres": cons = SmoothedSpheres
+  elif args.sdf_kind == "siren": cons = SIREN
+  elif args.sdf_kind == "local": cons = Local
+  elif args.sdf_kind == "mlp": cons = MLP
   else: raise NotImplementedError()
+
+  model = cons(latent_size=args.latent_size)
 
   if args.sphere_init: model.set_to_sphere()
   # refl inst may also have a nested light
@@ -33,8 +35,12 @@ def load(args):
   return sdf
 
 class SDFModel(nn.Module):
-  def __init__(self):
+  def __init__(
+    self,
+    latent_size: int = 32,
+  ):
     super().__init__()
+    self.latent_size = latent_size
   def forward(self, _pts): raise NotImplementedError()
 
   def normals(self, pts, values = None):
@@ -146,8 +152,12 @@ class SmoothedSpheres(SDFModel):
   def __init__(
     self,
     n:int=32,
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
+    # has no latent size
+    self.latent_size = 0
+
     self.centers = nn.Parameter(0.3 * torch.rand(n,3, requires_grad=True) - 0.15)
     self.radii = nn.Parameter(0.2 * torch.rand(n, requires_grad=True) - 0.1)
 
@@ -158,9 +168,6 @@ class SmoothedSpheres(SDFModel):
     tfs = self.tfs + torch.eye(3, device=p.device).unsqueeze(0)
     return torch.einsum("ijk,ibk->ibj", tfs, p.expand(tfs.shape[0], -1, -1))
 
-  @property
-  def latent_size(self): return 0
-
   def forward(self, p):
     q = self.transform(p.reshape(-1, 3).unsqueeze(0)) - self.centers.unsqueeze(1)
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
@@ -170,25 +177,24 @@ class SmoothedSpheres(SDFModel):
 class MLP(SDFModel):
   def __init__(
     self,
-    latent_size:int=32,
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
-      in_size=3, out=1+latent_size,
+      in_size=3, out=1+self.latent_size,
       enc=FourierEncoder(input_dims=3),
       num_layers=6, hidden_size=256,
       xavier_init=True,
     )
-    self.latent_size = latent_size
   def forward(self, x): return self.mlp(x)
 
 #def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):
   def __init__(
     self,
-    latent_size:int=32,
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**kwargs)
     self.siren = SkipConnMLP(
       in_size=3, out=1+latent_size, enc=None,
       num_layers=6, hidden_size=256,
@@ -206,17 +212,16 @@ class Local(SDFModel):
   def __init__(
     self,
     partition_sz: int = 0.5,
-    latent_sz:int = 32,
+    **kwargs,
   ):
-    super().__init__()
+    super().__init__(**Kwargs)
     self.part_sz = partition_sz
-    self.latent = SkipConnMLP(in_size=3,out=latent_sz,skip=4)
-    self.tform = SkipConnMLP(in_size=3, out=1, latent_size=latent_sz)
+    self.latent = SkipConnMLP(in_size=3,out=self.latent_size,skip=4)
+    self.tform = SkipConnMLP(in_size=3, out=1+self.latent_size, latent_size=self.latent_size)
   def forward(self, x):
     local = x % self.part_sz
     latent = self.latent(x//self.part_sz)
-    out = self.tform(local, latent)
-    return out
+    return self.tform(local, latent)
 
 class SDFNeRF(nn.Module):
   def __init__(

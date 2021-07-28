@@ -1,16 +1,17 @@
 # Global runner for all NeRF methods.
 # For convenience, we want all methods using NeRF to use this one file.
+import argparse
+import random
+import json
+import math
+import time
 
 import numpy as np
-import argparse
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.transforms.functional as TVF
 import torch.nn as nn
-import random
-import json
-import math
 import matplotlib.pyplot as plt
 
 from datetime import datetime
@@ -98,12 +99,16 @@ def arguments():
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
   a.add_argument(
     "--replace", nargs="*", choices=["refl", "occ", "bg"], default=[], type=str,
-    help="Modules to replace on this run, if any",
+    help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
   )
 
   a.add_argument(
     "--volsdf-alternate", help="Use alternating volume rendering/SDF training volsdf",
     action="store_true",
+  )
+  a.add_argument(
+    "--latent-size",type=int, default=32,
+    help="Latent-size to use in shape models. If not supported by the shape model, it will be ignored.",
   )
 
   refla = a.add_argument_group("reflectance")
@@ -179,6 +184,10 @@ def arguments():
   rprt.add_argument("--load", help="model to load from", type=str)
   rprt.add_argument("--loss-window", help="# epochs to smooth loss over", type=int, default=250)
   rprt.add_argument("--notraintest", help="Do not test on training set", action="store_true")
+  rprt.add_argument(
+    "--duration-sec", help="Max number of seconds to run this for, s <= 0 implies None",
+    type=float, default=0,
+  )
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -289,7 +298,15 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
   #next_idxs = lambda i: [i%10] * batch_size # DEBUG
 
   losses = []
+  start = time.time()
+  should_end = lambda: False
+  if args.duration_sec > 0: should_end = lambda: time.time() - start > args.duration_sec
+
   for i in iters:
+    if should_end():
+      print("Training timed out")
+      break
+
     opt.zero_grad()
 
     idxs = next_idxs(i)
@@ -339,8 +356,9 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     # dn/dx -> 0, hopefully smoothes out the local normals of the surface.
     # TODO does it matter to normalize the normal or not?
     if args.smooth_normals > 0:
+      # TODO maybe lower dimensionality of n?
       delta_n = torch.autograd.grad(
-        inputs=pts, outputs=n, retain_graph=True, create_graph=True,
+        inputs=pts, outputs=F.normalize(n,dim=-1), retain_graph=True, create_graph=True,
         grad_outputs=torch.ones_like(n),
       )[0]
       loss = loss + args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
@@ -363,7 +381,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         if hasattr(model, "nerf") and args.model != "volsdf":
           items.append(model.nerf.acc()[0,...,None].expand_as(ref0).clamp(min=0, max=1))
           items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0).clamp(min=0, max=1))
-        elif ref.shape[-1] == 4:
+        elif out.shape[-1] == 4:
           items.append(ref[0,...,-1,None].expand_as(ref0))
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
         save_plot(f"outputs/valid_{i:05}.png", *items)
@@ -405,7 +423,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
               model.nerf.acc_smooth()[0,...].clamp(min=0,max=1)
           if hasattr(model, "n"):
             normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              nerf.volumetric_integrate(model.weights, model.n.abs())[0,...].clamp(min=0,max=1)
+              nerf.volumetric_integrate(
+                model.nerf.weights, model.n.abs()
+              )[0,...].clamp(min=0,max=1)
           elif hasattr(model, "sdf"):
             ...
             #normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \

@@ -484,17 +484,15 @@ class VolSDF(CommonNeRF):
     )
 
 def alternating_volsdf_loss(model, nerf_loss, sdf_loss):
-  def aux(x, ref):
-    if (model.i % 2 == 0 or model.force_volume) and not model.force_sdf:
-      return nerf_loss(x, ref[..., :3])
-    else:
-      return sdf_loss(x, ref)
+  def aux(x, ref): return nerf_loss(x, ref[..., :3]) if model.vol_render else sdf_loss(x, ref)
   return aux
+
 # An odd module which alternates between volume rendering and SDF rendering
 class AlternatingVolSDF(nn.Module):
   def __init__(
     self,
     volsdf: VolSDF,
+    run_len:int = 32,
   ):
     super().__init__()
     assert(isinstance(volsdf, VolSDF))
@@ -502,23 +500,29 @@ class AlternatingVolSDF(nn.Module):
     self.i = 0
     self.force_volume = False
     self.force_sdf = False
+    self.run_len = run_len
+    # TODO add some count for doing only sdfs first?
 
   # forward a few properties to sdf
   @property
   def sdf(self): return self.volsdf.sdf
+  @property
+  def nerf(self): return self.volsdf
   @property
   def n(self): return self.volsdf.n
   @property
   def refl(self): return self.volsdf.refl
 
   def forward(self, rays):
-    self.i = (self.i + 1) % 2
-    if (self.i % 2 == 0 or self.force_volume) and not self.force_sdf:
+    if not self.training: return self.volsdf(rays)
+    setattr(self, "run_len", 32)
+
+    self.i = (self.i + 1) % self.run_len
+    self.vol_render = (self.i < self.run_len/2 or self.force_volume) and not self.force_sdf
+    if self.vol_render:
       return self.volsdf(rays)
     else:
-      return direct(
-        self.volsdf.sdf, self.volsdf.refl, self.volsdf.occ, rays, self.training
-      )
+      return direct(self.volsdf.sdf, self.volsdf.refl, self.volsdf.occ, rays, self.training)
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
