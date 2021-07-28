@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from pytorch_msssim import ( ssim, ms_ssim )
 import matplotlib.pyplot as plt
 
 def create_fourier_basis(batch_size, features=3, freq=40, device="cuda"):

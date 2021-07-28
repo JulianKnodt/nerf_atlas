@@ -112,11 +112,11 @@ nerv_point_alternating: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_alt_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 20_000 --loss-window 250 \
-	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin \
-	--sdf-eikonal 0.1 --light-kind dataset --smooth-normals 1e-6 \
+	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 500 \
+	--near 2 --far 6 --batch-size 4 -lr 1e-4 --refl-kind rusin \
+	--sdf-eikonal 0.1 --light-kind dataset --smooth-normals 1e-4 \
 	--loss-fns l2 --valid-freq 251 --save-freq 2500 --seed -1 \
-	--occ-kind learned --volsdf-alternate \
+	--occ-kind learned --volsdf-alternate --notraintest \
 	--load models/nerv_alt_${nerv_dataset}.pt
 
 # -- End NeRV tests
