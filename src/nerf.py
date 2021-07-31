@@ -492,7 +492,9 @@ class AlternatingVolSDF(nn.Module):
   def __init__(
     self,
     volsdf: VolSDF,
-    run_len:int = 32,
+    # run_len is how many iterations of volume/SDF rendering it will perform.
+    # it performs run_len/2 volume, and run_len/2 SDF
+    run_len:int = 1024,
   ):
     super().__init__()
     assert(isinstance(volsdf, VolSDF))
@@ -515,10 +517,8 @@ class AlternatingVolSDF(nn.Module):
 
   def forward(self, rays):
     if not self.training: return self.volsdf(rays)
-    setattr(self, "run_len", 32)
-
     self.i = (self.i + 1) % self.run_len
-    self.vol_render = (self.i < self.run_len/2 or self.force_volume) and not self.force_sdf
+    self.vol_render = (self.i < self.run_len//2 or self.force_volume) and not self.force_sdf
     if self.vol_render:
       return self.volsdf(rays)
     else:

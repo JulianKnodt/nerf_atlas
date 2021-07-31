@@ -53,9 +53,15 @@ One note for usage:
 
 ## Dependencies
 
-PyTorch, NumPy, tqdm, matplotlib.
+PyTorch, NumPy, tqdm, matplotlib, imageio.
 
 Install them how you want.
+
+Notes on dependency versions:
+
+This library makes use of `tensordot(..., dims=0)`, which is [broken in PyTorch
+1.9](https://github.com/pytorch/pytorch/issues/61096). If you find this while using the library,
+please downgrade to 1.8
 
 ---
 
