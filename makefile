@@ -100,6 +100,7 @@ nerv_dataset := hotdogs
 nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
+	--outdir /tigress/FHEIDE/neural_rendering/out/ \
 	--save models/nerv_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 4.5e-4 --refl-kind multi_rusin \
@@ -112,6 +113,7 @@ nerv_point: clean
 nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model sdf --sdf-kind mlp \
+	--outdir /tigress/FHEIDE/neural_rendering/out/ \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 32 --epochs 20_000 --loss-window 500 \
 	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind multi_rusin \
@@ -124,6 +126,7 @@ nerv_point_sdf: clean
 nerv_point_alternating: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
+	--outdir /tigress/FHEIDE/neural_rendering/out/ \
 	--save models/nerv_alt_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 12 --epochs 50_000 --loss-window 500 \
 	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind rusin \
