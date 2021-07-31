@@ -517,7 +517,6 @@ class AlternatingVolSDF(nn.Module):
 
   def forward(self, rays):
     if not self.training: return self.volsdf(rays)
-
     self.i = (self.i + 1) % self.run_len
     self.vol_render = (self.i < self.run_len//2 or self.force_volume) and not self.force_sdf
     if self.vol_render:

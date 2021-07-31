@@ -27,6 +27,8 @@ import src.renderers as renderers
 from src.utils import ( save_image, save_plot, load_image )
 from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer )
 
+import os
+
 def arguments():
   a = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   a.add_argument("-d", "--data", help="path to data", required=True)
@@ -41,6 +43,12 @@ def arguments():
     "--derive-kind", help="Attempt to derive the kind if a single file is given",
     action="store_false",
   )
+
+  a.add_argument("--outdir", help="path to output directory", type=str, default="outputs/")
+  a.add_argument(
+    "--timed-outdir", help="Create new output directory with date and time of run", action="store_true"
+  )
+
   # various size arguments
   a.add_argument("--size", help="post-upsampling size", type=int, default=32)
   a.add_argument("--render-size", help="pre-upsampling size", type=int, default=16)
@@ -200,6 +208,11 @@ def arguments():
 
 
   args = a.parse_args()
+
+  if args.timed_outdir:
+    args.outdir = os.path.join(args.outdir, datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
+  if not os.path.exists(args.outdir): os.mkdir(args.outdir)
+
   # runtime checks
   if not args.neural_upsample:
     args.render_size = args.size
@@ -246,11 +259,11 @@ def render(
 
 def sqr(x): return x * x
 
-def save_losses(losses, window=250):
+def save_losses(losses, outdir, window=250):
   window = min(window, len(losses))
   losses = np.convolve(losses, np.ones(window)/window, mode='valid')
   plt.plot(range(len(losses)), losses)
-  plt.savefig("outputs/training_loss.png", bbox_inches='tight')
+  plt.savefig(os.path.join(outdir, "training_loss.png"), bbox_inches='tight')
   plt.close()
 
 def load_loss_fn(args, model):
@@ -384,11 +397,11 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         elif out.shape[-1] == 4:
           items.append(ref[0,...,-1,None].expand_as(ref0))
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
-        save_plot(f"outputs/valid_{i:05}.png", *items)
+        save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
-      save_losses(losses, args.loss_window)
-  save_losses(losses, args.loss_window)
+      save_losses(losses, args.outdir, args.loss_window)
+  save_losses(losses, args.outdir, args.loss_window)
 
 def test(model, cam, labels, args, training: bool = True, light=None):
   times = None
@@ -435,7 +448,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       psnr = utils.mse2psnr(loss).item()
       ts = "" if ts is None else f",t={ts.item():.02f}"
       print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
-      name = f"outputs/train_{i:03}.png" if training else f"outputs/test_{i:03}.png"
+      name = f"train_{i:03}.png" if training else f"test_{i:03}.png"
+      name = os.path.join(args.outdir, name)
       items = [exp, got.clamp(min=0, max=1)]
       #if hasattr(model, "nerf"): items.append(acc)
       if hasattr(model, "n"): items.append(normals)
