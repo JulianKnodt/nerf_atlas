@@ -676,9 +676,6 @@ def seed(s):
 def main():
   args = arguments()
   seed(args.seed)
-  outdir = os.path.join(args.outdir, datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
-  os.mkdir(outdir)
-  args.outdir = outdir
 
   labels, cam, light = loaders.load(args, training=True, device=device)
   if args.train_imgs > 0:
