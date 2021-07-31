@@ -116,7 +116,7 @@ nerv_point_alternating: clean
 	--near 2 --far 6 --batch-size 4 -lr 1e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --smooth-normals 1e-4 \
 	--loss-fns l2 --valid-freq 251 --save-freq 2500 --seed -1 \
-	--occ-kind learned --volsdf-alternate \
+	--occ-kind learned --volsdf-alternate --notraintest \
 	--load models/nerv_alt_${nerv_dataset}.pt
 
 # -- End NeRV tests
