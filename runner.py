@@ -448,7 +448,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       psnr = utils.mse2psnr(loss).item()
       ts = "" if ts is None else f",t={ts.item():.02f}"
       print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
-      name = f"outputs/train_{i:03}.png" if training else f"outputs/test_{i:03}.png"
+      name = f"train_{i:03}.png" if training else f"test_{i:03}.png"
       name = os.path.join(args.outdir, name)
       items = [exp, got.clamp(min=0, max=1)]
       #if hasattr(model, "nerf"): items.append(acc)
