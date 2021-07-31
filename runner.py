@@ -45,6 +45,9 @@ def arguments():
   )
 
   a.add_argument("--outdir", help="path to output directory", type=str, default="outputs/")
+  a.add_argument(
+    "--timed-outdir", help="Create new output directory with date and time of run", action="store_true"
+  )
 
   # various size arguments
   a.add_argument("--size", help="post-upsampling size", type=int, default=32)
@@ -205,6 +208,11 @@ def arguments():
 
 
   args = a.parse_args()
+
+  if args.timed_outdir:
+    args.outdir = os.path.join(args.outdir, datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
+  if not os.path.exists(args.outdir): os.mkdir(args.outdir)
+
   # runtime checks
   if not args.neural_upsample:
     args.render_size = args.size
@@ -584,9 +592,6 @@ def seed(s):
 def main():
   args = arguments()
   seed(args.seed)
-  outdir = os.path.join(args.outdir, datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
-  os.mkdir(outdir)
-  args.outdir = outdir
 
   labels, cam, light = loaders.load(args, training=True, device=device)
   if args.train_imgs > 0:
