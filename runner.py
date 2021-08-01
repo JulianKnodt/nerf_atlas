@@ -24,6 +24,7 @@ import src.utils as utils
 import src.sdf as sdf
 import src.refl as refl
 import src.cameras as cameras
+import src.hyper_config as hyper_config
 import src.renderers as renderers
 from src.utils import ( save_image, save_plot, load_image )
 from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer )
@@ -198,6 +199,9 @@ def arguments():
     "--duration-sec", help="Max number of seconds to run this for, s <= 0 implies None",
     type=float, default=0,
   )
+  rprt.add_argument(
+    "--param-file", type=str, default=None, help="Path to JSON file to use for hyper-parameters",
+  )
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -211,14 +215,16 @@ def arguments():
 
   args = a.parse_args()
 
+  # runtime checks
+  hyper_config.load(args)
   if args.timed_outdir:
     args.outdir = os.path.join(args.outdir, datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
   if not os.path.exists(args.outdir): os.mkdir(args.outdir)
 
-  # runtime checks
   if not args.neural_upsample:
     args.render_size = args.size
     args.feature_space = 3
+
   return args
 
 loss_map = {
@@ -373,7 +379,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if args.smooth_normals > 0:
       # TODO maybe lower dimensionality of n?
       delta_n = torch.autograd.grad(
-        inputs=pts, outputs=F.normalize(n,dim=-1), retain_graph=True, create_graph=True,
+        inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
         grad_outputs=torch.ones_like(n),
       )[0]
       loss = loss + args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
@@ -389,10 +395,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if i % args.valid_freq == 0:
       with torch.no_grad():
         ref0 = ref[0,...,:3]
-        items = [
-          ref0,
-          out[0,...,:3].clamp(min=0, max=1),
-        ]
+        items = [ref0, out[0,...,:3].clamp(min=0, max=1)]
         if hasattr(model, "nerf") and args.model != "volsdf":
           items.append(model.nerf.acc()[0,...,None].expand_as(ref0).clamp(min=0, max=1))
           items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0).clamp(min=0, max=1))
