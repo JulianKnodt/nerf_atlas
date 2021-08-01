@@ -513,7 +513,10 @@ class AlternatingVolSDF(nn.Module):
   @property
   def n(self): return self.volsdf.n
   @property
+  def total_latent_size(self): return self.volsdf.total_latent_size
+  @property
   def refl(self): return self.volsdf.refl
+  def set_refl(self, refl): return self.volsdf.set_refl(refl)
 
   def forward(self, rays):
     if not self.training: return self.volsdf(rays)
