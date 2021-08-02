@@ -10,7 +10,7 @@ import random
 # General Camera interface
 @dataclass
 class Camera(nn.Module):
-  # samples from positions in [0,1] screen space to global
+  # samples from positions in [0,size] screen space to global
   def sample_positions(self, positions): raise NotImplementedError()
 
 # A camera made specifically for generating rays from NeRF models
@@ -77,6 +77,40 @@ def exp(r):
     ((1 - norm_r.cos())/norm_r.square()) * (skew_r @ skew_r)
   return R
 
+class OrthogonalCamera(Camera):
+  def __init__(
+    self,
+    pos: torch.tensor,
+    at: torch.tensor,
+    up: torch.tensor,
+    view_width:float=10.,
+    view_height:float=None,
+  ):
+    super().__init__()
+    if view_height is None: view_width = view_height
+    self.pos = pos
+    self.dir = F.normalize(at - pos, dim=-1)
+    self.right = view_width * F.normalize(torch.cross(dir, up), dim=-1)
+    self.up = view_height * F.normalize(torch.cross(right, dir), dim=-1)
+  def __len__(self): return self.pos.shape[0]
+  def __getitem__(self, v):
+    # FIXME anyway to make this not use an odd part of the language?
+    cam = OrthogonalCamera.__new__()
+    cam.pos = self.pos[v]
+    cam.dir = self.dir[v]
+    cam.right = self.up[v]
+    cam.up = self.up[v]
+    return cam
+  def sample_positions(self, position_samples, size:int, with_noise=False):
+    u, v = position_samples.split([1,1], dim=-1)
+    u = 2 * ((u.squeeze(-1)/size) - 0.5)
+    v = 2 * ((v.squeeze(-1)/size) - 0.5)
+    r_o = self.pos + u * self.right + v * self.up
+    r_d = self.dir.expand_as(r_o)
+    return torch.cat([r_o, r_d], dim=-1)
+
+
+
 # The camera described in the NeRF-- paper
 @dataclass
 class NeRFMMCamera(Camera):
@@ -113,9 +147,7 @@ class NeRFMMCamera(Camera):
 
     d = torch.stack(
       [
-        # W
         (u - size * 0.5) / self.focals[..., 0],
-        # H
         -(v - size * 0.5) / self.focals[..., 1],
         -torch.ones_like(u),
       ],
