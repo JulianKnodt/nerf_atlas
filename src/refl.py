@@ -198,7 +198,7 @@ class Rusin(Reflectance):
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
-      enc=NNEncoder(input_dims=in_size),
+      enc=NNEncoder(input_dims=in_size, out=64),
       xavier_init=True,
 
       num_layers=6, hidden_size=512,
@@ -218,7 +218,7 @@ class Rusin(Reflectance):
     rusin = rusin_params(wo, wi)
     x = self.space(x)
     raw = self.mlp(torch.cat([x, rusin], dim=-1), latent)
-    return F.softplus(raw)
+    return raw.sigmoid()
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
