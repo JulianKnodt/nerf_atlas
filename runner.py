@@ -296,6 +296,7 @@ def sqr(x): return x * x
 def save_losses(args, losses):
   outdir = args.outdir
   window = args.loss_window
+
   window = min(window, len(losses))
   losses = np.convolve(losses, np.ones(window)/window, mode='valid')
   losses = losses[args.skip_loss:]
