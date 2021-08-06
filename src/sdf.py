@@ -208,6 +208,7 @@ class SIREN(SDFModel):
     assert(out.isfinite().all())
     return out
 
+# TODO better verify this works? Haven't tried it out a ton on a lot of methods
 class Local(SDFModel):
   def __init__(
     self,

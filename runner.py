@@ -202,6 +202,9 @@ def arguments():
   rprt.add_argument(
     "--param-file", type=str, default=None, help="Path to JSON file to use for hyper-parameters",
   )
+  rprt.add_argument(
+    "--skip-loss", type=int, default=0, help="Number of epochs to skip loss for",
+  )
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -267,9 +270,13 @@ def render(
 
 def sqr(x): return x * x
 
-def save_losses(losses, outdir, window=250):
+def save_losses(args, losses):
+  outdir = args.outdir
+  window = args.loss_window
+
   window = min(window, len(losses))
   losses = np.convolve(losses, np.ones(window)/window, mode='valid')
+  losses = losses[args.skip_loss:]
   plt.plot(range(len(losses)), losses)
   plt.savefig(os.path.join(outdir, "training_loss.png"), bbox_inches='tight')
   plt.close()
@@ -405,8 +412,8 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
-      save_losses(losses, args.outdir, args.loss_window)
-  save_losses(losses, args.outdir, args.loss_window)
+      save_losses(args, losses)
+  save_losses(args, losses)
 
 def test(model, cam, labels, args, training: bool = True, light=None):
   times = None

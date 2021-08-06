@@ -136,7 +136,9 @@ def direct(shape, refl, occ, rays, training=True):
     x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent
   )
   out = torch.zeros_like(r_d)
-  out[hits] = bsdf_val * light_val
+  # last term is foreshortening term, the angle between incident light and the normal.
+  out[hits] = bsdf_val * light_val * \
+    (light_dir * n).sum(dim=-1, keepdim=True).abs()
   if training: out = torch.cat([out, shape.throughput(r_o, r_d)], dim=-1)
   return out
 
