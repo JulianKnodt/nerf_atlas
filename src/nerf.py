@@ -441,7 +441,7 @@ class VolSDF(CommonNeRF):
     bsdf_val = self.sdf.refl(
       x=pts, view=view, normal=n, light=light_dir, latent=latent,
     )
-    return bsdf_val * light_val
+    return bsdf_val * light_val * (n * light_dir).sum(dim=-1,keepdim=True).abs()
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
@@ -459,7 +459,7 @@ class VolSDF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     sdf_vals, latent = self.sdf.from_pts(pts)
-    scale = self.scale if self.training else 1e-2
+    scale = self.scale #if self.training else 1e-2
     density = 1/scale * self.laplace_cdf(-sdf_vals, scale)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
