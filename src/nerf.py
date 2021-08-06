@@ -494,7 +494,7 @@ class AlternatingVolSDF(nn.Module):
     volsdf: VolSDF,
     # run_len is how many iterations of volume/SDF rendering it will perform.
     # it performs run_len/2 volume, and run_len/2 SDF
-    run_len:int = 1024,
+    run_len:int = 4096,
   ):
     super().__init__()
     assert(isinstance(volsdf, VolSDF))

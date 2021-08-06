@@ -66,7 +66,7 @@ class LearnedLighting(nn.Module):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
     # have an extra large eps to account for incorrect shapes.
-    visible = isect_fn(pts, -dir, near=1e-1, far=20, eps=5e-3)
+    visible = isect_fn(pts, -dir, near=1e-1, far=20)
     att = self.attenuation(
       torch.cat([pts, dir_to_elev_azim(dir)], dim=-1),
       latent
@@ -93,7 +93,6 @@ class AllLearnedOcc(nn.Module):
     visible = isect_fn(pts, -dir, near=0.1, far=20).unsqueeze(-1)
     elaz = dir_to_elev_azim(dir)
     latent = visible if latent is None else torch.cat([latent, visible], dim=-1)
-    # try squaring to encode the symmetry on both sides of asin
     att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
     spectrum = spectrum * att
     return dir, spectrum

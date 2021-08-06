@@ -441,9 +441,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
               model.nerf.acc_smooth()[0,...].clamp(min=0,max=1)
           if hasattr(model, "n"):
             normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              nerf.volumetric_integrate(
-                model.nerf.weights, model.n.abs()
-              )[0,...].clamp(min=0,max=1)
+              (nerf.volumetric_integrate(model.nerf.weights, F.normalize(model.n, dim=-1))[0,...]+1)/2
           elif hasattr(model, "sdf"):
             ...
             #normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
@@ -457,7 +455,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       name = os.path.join(args.outdir, name)
       items = [exp, got.clamp(min=0, max=1)]
       #if hasattr(model, "nerf"): items.append(acc)
-      if hasattr(model, "n"): items.append(normals)
+      if hasattr(model, "n"): items.append(normals.clamp(min=0,max=1))
       save_plot(name, *items)
       ls.append(psnr)
 
