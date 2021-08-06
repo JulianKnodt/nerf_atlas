@@ -218,7 +218,7 @@ class Rusin(Reflectance):
     rusin = rusin_params(wo, wi)
     x = self.space(x)
     raw = self.mlp(torch.cat([x, rusin], dim=-1), latent)
-    return raw.sigmoid()
+    return raw.sigmoid() + 1e-3
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
