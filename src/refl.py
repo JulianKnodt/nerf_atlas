@@ -48,6 +48,9 @@ class LightAndRefl(nn.Module):
 
   @property
   def can_use_normal(self): return self.refl.can_use_normal
+  @property
+  def latent_size(self): return self.refl.latent_size
+
   def forward(self, x, view=None, normal=None, light=None, latent=None, mask=None):
     if light is None: light, _spectrum = self.light(x, mask)
     return self.refl(x, view, normal, light, latent)

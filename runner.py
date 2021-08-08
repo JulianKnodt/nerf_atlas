@@ -531,7 +531,7 @@ def load_model(args):
 
   # set reflectance kind for new models (but volsdf handles it differently)
   if args.refl_kind != "curr":
-    ls = model.total_latent_size()
+    ls = model.refl.latent_size
     refl_inst = refl.load(args, ls).to(device)
     model.set_refl(refl_inst)
 

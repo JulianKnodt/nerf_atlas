@@ -51,6 +51,7 @@ C4 = [
   0.6258357354491761,
 ]
 
+# evaluates spherical harmonics up to a given degree for the coeffs sh, with given viewing dirs.
 def eval_sh(deg: int, sh, dirs):
   """
   Evaluate spherical harmonics at unit directions

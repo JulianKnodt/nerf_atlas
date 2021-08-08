@@ -27,13 +27,15 @@ rusin: clean
 	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
 	--nosave --light-kind field --refl-kind rusin
 
+nerfactor_ds := pinecone
 nerf-sh: clean
-	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 64 --crop --epochs 50_000 --crop-size 25 \
-	--near 2 --far 6 --batch-size 3 --model volsdf --sdf-kind mlp \
+	python3 runner.py -d data/nerfactor/${nerfactor_ds}/ \
+	--data-kind original --size 128 --crop --epochs 0 --crop-size 25 \
+	--near 2 --far 6 --batch-size 5 --model plain \
 	-lr 1e-3 --loss-window 750 --valid-freq 250 \
-	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
-  --refl sph-har --nosave
+	--loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
+	--refl sph-har --save models/${nerfactor_ds}-sh.pt \
+  --load models/${nerfactor_ds}-sh.pt
 
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean

@@ -108,10 +108,11 @@ training it takes about a day, and my GPU is much smaller than any used in the p
 
 **Datasets Supported**:
 
-- NeRF Synthetic
-- Dynamic NeRF
-- NeRV
-- DTU Scans
+- NeRF Synthetic (`--data-kind original`)
+- Dynamic NeRF (`--data-kind dnerf`)
+- NeRV (`--data-kind nerv_point`)
+- DTU Scans (`--data-kind dtu`)
+- NeRFActor (same as NeRF synthetic)
 
 ---
 
