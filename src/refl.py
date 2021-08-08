@@ -6,6 +6,7 @@ import random
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector )
 import src.lights as lights
+from .spherical_harmonics import eval_sh
 
 def load(args, latent_size):
   if args.space_kind == "identity": space = IdentitySpace
@@ -24,6 +25,9 @@ def load(args, latent_size):
   elif args.refl_kind == "rusin": cons = Rusin
   elif args.refl_kind == "view_dir" or args.refl_kind == "curr": cons = View
   elif args.refl_kind == "diffuse": cons = Diffuse
+  elif args.refl_kind == "sph-har":
+    cons = SphericalHarmonic
+    kwargs["order"] = args.spherical_harmonic_order
   else: raise NotImplementedError(f"refl kind: {args.refl_kind}")
   # TODO assign view, normal, lighting here?
   refl = cons(**kwargs)
@@ -162,6 +166,7 @@ class Diffuse(Reflectance):
   def __init__(
     self,
     space=None,
+
     **kwargs,
   ):
     super().__init__(**kwargs)
@@ -285,3 +290,32 @@ def to_local(frame, wo):
   out = F.normalize((frame * wo).sum(dim=-2), eps=1e-7, dim=-1)
   return out
 
+# Spherical Harmonics computes reflectance of a given viewing direction using the spherical
+# harmonic basis.
+class SphericalHarmonic(Reflectance):
+  def __init__(
+    self,
+    space=None,
+    order:int=2,
+    view="elaz",
+
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    assert(order >= 0 and order <= 4)
+    in_size, self.view_enc = enc_norm_dir(view)
+    self.order = order
+    self.mlp = SkipConnMLP(
+      in_size=in_size, out=self.out_features*((order+1)*(order+1)), latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
+    )
+  def forward(self, x, view, normal=None, light=None, latent=None):
+    v = self.view_enc(view)
+    sh_coeffs = self.act(self.mlp(v, latent))
+    rgb = eval_sh(
+      self.order,
+      sh_coeffs.reshape(sh_coeffs.shape[:-1] + (self.out_features, -1)),
+      F.normalize(view, dim=-1),
+    )
+    return rgb.sigmoid()

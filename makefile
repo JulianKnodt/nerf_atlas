@@ -27,6 +27,14 @@ rusin: clean
 	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
 	--nosave --light-kind field --refl-kind rusin
 
+nerf-sh: clean
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 64 --crop --epochs 50_000 --crop-size 25 \
+	--near 2 --far 6 --batch-size 3 --model volsdf --sdf-kind mlp \
+	-lr 1e-3 --loss-window 750 --valid-freq 250 \
+	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
+  --refl sph-har --nosave
+
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean
 	python3 runner.py -d data/food/ --data-kind shiny --size 64 \
@@ -91,9 +99,9 @@ nerv_point: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 20_000 --loss-window 1500 \
+	--size 200 --crop --crop-size 12 --epochs 10_000 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 2e-4 --refl-kind rusin \
-	--sdf-eikonal 0.1 --light-kind dataset --omit-bg --seed -1 \
+	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
 	--notraintest \
 	--loss-fns l2 --valid-freq 499 --occ-kind learned \
   --load models/nerv_${nerv_dataset}.pt

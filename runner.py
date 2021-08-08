@@ -120,16 +120,18 @@ def arguments():
     "--latent-size",type=int, default=32,
     help="Latent-size to use in shape models. If not supported by the shape model, it will be ignored.",
   )
+  a.add_argument(
+    "--spherical-harmonic-order", default=2, type=int,
+    help="Learn spherical harmonic coefficients up to given order. Used w/ --refl-kind=sph-har",
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
-    "--refl-kind",
-    choices=["curr", "view_only", "basic", "diffuse", "rusin"], default="curr",
-    help="What kind of reflectance model to use",
+    "--refl-kind", help="What kind of reflectance model to use",
+    choices=["curr", "view_only", "basic", "diffuse", "rusin", "sph-har"], default="curr",
   )
   refla.add_argument(
-    "--normal-kind",
-    choices=[None, "elaz", "raw"], default=None,
+    "--normal-kind", choices=[None, "elaz", "raw"], default=None,
     help="How to include normals in reflectance model. Not all surface models support normals",
   )
   refla.add_argument(
@@ -214,7 +216,6 @@ def arguments():
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
   ae.add_argument("--normalize-latent", help="L2 normalize latent space", action="store_true")
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
-
 
   args = a.parse_args()
 
