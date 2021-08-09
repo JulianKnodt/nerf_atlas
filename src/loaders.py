@@ -75,8 +75,12 @@ def original(
   exp_imgs = []
   cam_to_worlds = []
   focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
-  for frame in tfs["frames"]:
-    img = load_image(os.path.join(dir, frame['file_path'] + '.png'), resize=(size, size))
+  for i, frame in enumerate(tfs["frames"]):
+    fp = frame['file_path']
+    if fp == "":
+      # have to special case empty since nerfactor didn't fill in their blanks
+      fp = f"test_{i:03}/nn"
+    img = load_image(os.path.join(dir, fp + '.png'), resize=(size, size))
     if white_bg: img = img[..., :3]*img[..., -1:] + (1-img[..., -1:])
     exp_imgs.append(img[..., :channels])
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]

@@ -152,6 +152,8 @@ class SmoothedSpheres(SDFModel):
   def __init__(
     self,
     n:int=32,
+
+    with_mlp=True,
     **kwargs,
   ):
     super().__init__(**kwargs)
@@ -162,6 +164,13 @@ class SmoothedSpheres(SDFModel):
     self.radii = nn.Parameter(0.2 * torch.rand(n, requires_grad=True) - 0.1)
 
     self.tfs = nn.Parameter(torch.zeros(n, 3, 3, requires_grad=True))
+    if with_mlp:
+      self.mlp = SkipConnMLP(
+        in_size=3, out=1,
+        num_layers=5, hidden_size=128,
+        enc=FourierEncoder(input_dims=3),
+        xavier_init=True,
+      )
 
   @torch.jit.export
   def transform(self, p):
@@ -172,6 +181,7 @@ class SmoothedSpheres(SDFModel):
     q = self.transform(p.reshape(-1, 3).unsqueeze(0)) - self.centers.unsqueeze(1)
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
     out = smooth_min(sd, k=32.).reshape(p.shape[:-1] + (1,))
+    if hasattr(self, "mlp"): out = out + self.mlp(p).cos()
     return out
 
 class MLP(SDFModel):
