@@ -30,7 +30,7 @@ rusin: clean
 nerfactor_ds := pinecone
 nerf-sh: clean
 	python3 runner.py -d data/nerfactor/${nerfactor_ds}/ \
-	--data-kind original --size 128 --crop --epochs 0 --crop-size 25 \
+	--data-kind original --size 128 --crop --epochs 25_000 --crop-size 25 \
 	--near 2 --far 6 --batch-size 5 --model plain \
 	-lr 1e-3 --loss-window 750 --valid-freq 250 \
 	--loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
@@ -110,13 +110,13 @@ nerv_point: clean
 
 nerv_point_sdf: clean
 	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
-	--data-kind nerv_point --model sdf --sdf-kind mlp \
+	--data-kind nerv_point --model sdf --sdf-kind spheres \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 32 --epochs 25_000 --loss-window 250 \
-	--near 2 --far 6 --batch-size 3 -lr 1e-4 --refl-kind rusin \
+	--size 200 --crop --crop-size 48 --epochs 15_000 --loss-window 250 \
+	--near 2 --far 6 --batch-size 3 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l2 --valid-freq 100 --save-freq 2500 --omit-bg --seed -1 \
-	--replace occ --occ-kind learned \
+	--loss-fns l2 --valid-freq 250 --save-freq 1000 --omit-bg --seed -1 \
+	--occ-kind learned \
 	--integrator-kind direct --load models/nerv_sdf_${nerv_dataset}.pt
 
 nerv_point_alternating: clean
