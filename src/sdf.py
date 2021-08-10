@@ -5,7 +5,7 @@ import torch.optim as optim
 import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
-from .neural_blocks import ( SkipConnMLP, FourierEncoder )
+from .neural_blocks import ( SkipConnMLP, FourierEncoder, NNEncoder )
 from .utils import ( autograd, eikonal_loss )
 import src.refl as refl
 import src.renderers as renderers
@@ -16,7 +16,8 @@ def load(args):
   elif args.sdf_kind == "siren": cons = SIREN
   elif args.sdf_kind == "local": cons = Local
   elif args.sdf_kind == "mlp": cons = MLP
-  else: raise NotImplementedError()
+  elif args.sdf_kind == "triangles": cons = Triangles
+  else: raise NotImplementedError(f"Unknown SDF kind: {args.sdf_kind}")
 
   model = cons(latent_size=args.latent_size)
 
@@ -72,7 +73,7 @@ class SDF(nn.Module):
     reflectance: refl.Reflectance,
     t_near: float,
     t_far: float,
-    alpha:int = 500,
+    alpha:int = 1000,
   ):
     super().__init__()
     assert(isinstance(underlying, SDFModel))
@@ -151,7 +152,7 @@ def smooth_min(v, k:float=32, dim:int=0):
 class SmoothedSpheres(SDFModel):
   def __init__(
     self,
-    n:int=32,
+    n:int=128,
 
     with_mlp=True,
     **kwargs,
@@ -181,7 +182,54 @@ class SmoothedSpheres(SDFModel):
     q = self.transform(p.reshape(-1, 3).unsqueeze(0)) - self.centers.unsqueeze(1)
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
     out = smooth_min(sd, k=32.).reshape(p.shape[:-1] + (1,))
-    if hasattr(self, "mlp"): out = out + self.mlp(p).cos()
+    if hasattr(self, "mlp"): out = out + self.mlp(p).tanh() * (1-out.sigmoid())
+    return out
+
+
+def dot(a,b, dim:int=-1, keepdim:bool=False): return (a * b).sum(dim=dim,keepdim=keepdim)
+# dot2(a) = dot(a,a)
+def dot2(a, dim:int=-1, keepdim:bool=False): return dot(a,a,dim=dim,keepdim=keepdim)
+
+# triangle is similar to spheres but contains triangles instead
+class Triangles(SDFModel):
+  def __init__(
+    self,
+    n:int=32,
+
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    # has no latent size
+    self.latent_size = 0
+
+    # each triangle requires 3 points
+    self.points = nn.Parameter(0.3 * torch.rand(n,3,3, requires_grad=True) - 0.15)
+    #self.thickness = nn.Parameter(0.3 * torch.rand(n, requires_grad=True) - 0.15)
+
+  def forward(self, p):
+    pa,pb,pc = (p.reshape(-1, 1, 1, 3) - self.points).split([1,1,1],dim=-2)
+    ac,ba,cb = (self.points - self.points.roll(1, dims=-2)).split([1,1,1], dim=-2)
+    nor = torch.cross(ba, ac, dim=-1)
+
+    sidedness = \
+      dot(torch.cross(ba, nor), pa, dim=-1).sign() + \
+      dot(torch.cross(cb, nor), pb, dim=-1).sign() + \
+      dot(torch.cross(ac, nor), pc, dim=-1).sign()
+
+
+    same_sided = dot2(ba*(dot(ba, pa,keepdim=True)/dot2(ba,keepdim=True)).clamp(min=0,max=1)-pa)\
+        .minimum(dot2(cb*(dot(cb, pb,keepdim=True)/dot2(cb,keepdim=True)).clamp(min=0,max=1)-pb))\
+        .minimum(dot2(ac*(dot(ac, pc,keepdim=True)/dot2(ac,keepdim=True)).clamp(min=0,max=1)-pc))
+
+    opp_sided = dot(nor, pa,dim=-1).square()/dot(nor,nor, dim=-1)
+    out = torch.where(sidedness < 2, same_sided, opp_sided).clamp(min=1e-8).sqrt()
+    # need to add a smooth min across all the triangles as well as an extrusion
+    # apply thickness to each triangle to allow certain ones to take up more space.
+    out = out.squeeze(-1) - 4e-2
+    # smooth min or just normal union?
+    out = smooth_min(out,dim=-1).reshape(p.shape[:-1] + (1,))
+    #if out.numel() == 0: return out.reshape(p.shape[:-1] + (1,))
+    #out = out.min(dim=-1)[0].reshape(p.shape[:-1] + (1,))
     return out
 
 class MLP(SDFModel):
@@ -206,13 +254,12 @@ class SIREN(SDFModel):
   ):
     super().__init__(**kwargs)
     self.siren = SkipConnMLP(
-      in_size=3, out=1+latent_size, enc=None,
-      num_layers=6, hidden_size=256,
+      in_size=3, out=1+self.latent_size, enc=None,
+      num_layers=8, hidden_size=256,
       activation=torch.sin,
       # Do not have skip conns
       skip=1000,
     )
-    self.latent_size = latent_size
   def forward(self, x):
     out = self.siren((30*x).sin())
     assert(out.isfinite().all())
@@ -225,13 +272,16 @@ class Local(SDFModel):
     partition_sz: int = 0.5,
     **kwargs,
   ):
-    super().__init__(**Kwargs)
+    super().__init__(**kwargs)
     self.part_sz = partition_sz
     self.latent = SkipConnMLP(in_size=3,out=self.latent_size,skip=4)
-    self.tform = SkipConnMLP(in_size=3, out=1+self.latent_size, latent_size=self.latent_size)
+    self.tform = SkipConnMLP(
+      in_size=3, out=1+self.latent_size, latent_size=self.latent_size,
+      enc=NNEncoder(input_dims=3),
+    )
   def forward(self, x):
     local = x % self.part_sz
-    latent = self.latent(x//self.part_sz)
+    latent = self.latent(x/self.part_sz)
     return self.tform(local, latent)
 
 class SDFNeRF(nn.Module):

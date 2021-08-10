@@ -165,7 +165,7 @@ def arguments():
   )
   sdfa.add_argument(
     "--sdf-kind", help="Which SDF model to use", type=str,
-    choices=["spheres", "siren", "local", "mlp"], default="siren",
+    choices=["spheres", "siren", "local", "mlp", "triangles"], default="mlp",
   )
   sdfa.add_argument("--sphere-init", help="Initialize SDF to a sphere", action="store_true")
 
