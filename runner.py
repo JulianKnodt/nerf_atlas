@@ -168,6 +168,10 @@ def arguments():
     choices=["spheres", "siren", "local", "mlp", "triangles"], default="mlp",
   )
   sdfa.add_argument("--sphere-init", help="Initialize SDF to a sphere", action="store_true")
+  sdfa.add_argument(
+    "--bound-sphere-rad", type=float, default=-1,
+    help="Intersect the learned SDF with a bounding sphere at the origin, < 0 is no sphere",
+  )
 
   dnerfa = a.add_argument_group("dnerf")
   dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")

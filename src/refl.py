@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, fat_sigmoid )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, thin_sigmoid )
 import src.lights as lights
 from .spherical_harmonics import eval_sh
 
@@ -226,7 +226,7 @@ class Rusin(Reflectance):
     rusin = rusin_params(wo, wi)
     x = self.space(x)
     raw = self.mlp(torch.cat([x, rusin], dim=-1), latent)
-    return fat_sigmoid(raw, eps=1e-2)
+    return raw.square()/10
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter

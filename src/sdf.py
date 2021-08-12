@@ -22,6 +22,8 @@ def load(args):
   model = cons(latent_size=args.latent_size)
 
   if args.sphere_init: model.set_to_sphere()
+
+  if args.bound_sphere_rad > 0: model = UnitSphere(inner=model,rad=args.bound_sphere_rad)
   # refl inst may also have a nested light
   refl_inst = refl.load(args, model.latent_size)
 
@@ -65,6 +67,25 @@ class SDFModel(nn.Module):
       t.set_postfix(l=loss.item())
       loss.backward()
       opt.step()
+
+# Wraps another SDF as the intersection of a sphere centered at the origin.
+class UnitSphere(SDFModel):
+  def __init__(
+    self,
+    inner: SDFModel,
+    rad:float=3,
+  ):
+    super().__init__(latent_size=inner.latent_size)
+    self.inner = inner
+    self.rad = rad
+
+  def forward(self, pts):
+    sph = torch.linalg.norm(pts, dim=-1, ord=2) - self.rad
+    inner = self.inner(pts)
+    return torch.cat([
+      torch.maximum(inner[..., 0], sph).unsqueeze(-1),
+      inner[..., 1:],
+    ], dim=-1)
 
 class SDF(nn.Module):
   def __init__(
