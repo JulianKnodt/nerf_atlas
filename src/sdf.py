@@ -8,6 +8,7 @@ from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder, NNEncoder )
 from .utils import ( autograd, eikonal_loss )
 import src.refl as refl
+import src.march as march
 import src.renderers as renderers
 from tqdm import trange
 
@@ -26,9 +27,12 @@ def load(args):
   if args.bound_sphere_rad > 0: model = UnitSphere(inner=model,rad=args.bound_sphere_rad)
   # refl inst may also have a nested light
   refl_inst = refl.load(args, model.latent_size)
+  isect = march.load_intersection_kind(args.sdf_isect_kind)
 
   sdf = SDF(
-    model, refl_inst,
+    model,
+    refl_inst,
+    isect=isect,
     t_near=args.near,
     t_far=args.far,
   )
@@ -92,9 +96,10 @@ class SDF(nn.Module):
     self,
     underlying: SDFModel,
     reflectance: refl.Reflectance,
+    isect,
     t_near: float,
     t_far: float,
-    alpha:int = 1000,
+    alpha:int = 1500,
   ):
     super().__init__()
     assert(isinstance(underlying, SDFModel))
@@ -103,6 +108,7 @@ class SDF(nn.Module):
     self.far = t_far
     self.near = t_near
     self.alpha = alpha
+    self.isect=isect
 
   @property
   def sdf(self): return self
@@ -117,14 +123,17 @@ class SDF(nn.Module):
     return raw[..., 0], latent if latent.shape[-1] != 0 else None
 
   def intersect_w_n(self, r_o, r_d):
-    pts, hit, t = sphere_march(
+    pts, hit, t, tput = self.isect(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      iters=128 if self.training else 256,
+      eps=5e-5, iters=128 if self.training else 256,
     )
-    return pts, hit, t, self.normals(pts)
+    if self.training:
+      if tput is None: tput = self.throughput(r_o, r_d)
+      else: tput = -self.alpha * tput
+    return pts, hit, tput, self.normals(pts)
   def intersect_mask(self, r_o, r_d, near=None, far=None, eps=1e-3):
     with torch.no_grad():
-      return ~sphere_march(
+      return ~self.isect(
         self.underlying, r_o, r_d, eps=eps,
         near=self.near if near is None else near,
         far=self.far if far is None else far,
@@ -133,7 +142,7 @@ class SDF(nn.Module):
       )[1]
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hit, t = sphere_march(
+    pts, hit, t, tput = self.isect(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       iters=128 if self.training else 192,
     )
@@ -150,11 +159,13 @@ class SDF(nn.Module):
       latent=latent, mask=hit,
     )
     if with_throughput and self.training:
-      out = torch.cat([out, self.throughput(r_o, r_d)], dim=-1)
+      if tput is None: tput = self.throughput(r_o, r_d)
+      else: tput = -self.alpha * tput
+      out = torch.cat([out, tput], dim=-1)
     return out
   def debug_normals(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hit, t = sphere_march(
+    pts, hit, t = self.isect(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       iters=128 if self.training else 192,
     )
@@ -163,7 +174,7 @@ class SDF(nn.Module):
     out[hit] = self.normals(pts[hit])
     return out
   def throughput(self, r_o, r_d):
-    tput, _best_pos = throughput(self.underlying, r_o, r_d, self.near, self.far)
+    tput, _best_pos = march.throughput(self.underlying, r_o, r_d, self.near, self.far)
     return -self.alpha*tput.unsqueeze(-1)
 
 #@torch.jit.script
@@ -328,63 +339,11 @@ class SDFNeRF(nn.Module):
   def density(self): return self.nerf.density
   def render(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hits, ts = self.sdf.sphere_march(r_o, r_d, near=self.nerf.t_near, far=self.nerf.t_far)
+    pts, hits, ts = self.sdf.isect(r_o, r_d, near=self.nerf.t_near, far=self.nerf.t_far)
     # TODO convert vals to some RGB value
     vals = torch.ones_like(pts)
     raise NotImplementedError()
     return torch.where(hits, vals, torch.zeros_like(vals))
-
-# sphere_march is a traditional sphere marching algorithm on the SDF.
-# It returns the (pts: R^3s, mask: bools, t: step along rays)
-#
-# note that this implementation is efficient in that it only will compute distance
-# for pts that are still candidates.
-def sphere_march(
-  self,
-  r_o, r_d,
-  iters: int = 32,
-  eps: float = 1e-3,
-  near: float = 0, far: float = 1,
-):
-  device = r_o.device
-  with torch.no_grad():
-    hits = torch.zeros(r_o.shape[:-1] + (1,), dtype=torch.bool, device=device)
-    rem = torch.ones_like(hits).squeeze(-1)
-    curr_dist = torch.full_like(hits, near, dtype=torch.float)
-    for i in range(iters):
-      curr = r_o[rem] + r_d[rem] * curr_dist[rem]
-      dist = self(curr)[...,0].reshape_as(curr_dist[rem])
-      hits[rem] |= ((dist < eps) & (curr_dist[rem] <= far))
-      # anything that was hit or is past range no longer need to compute
-      curr_dist[rem] += dist
-      rem[hits.squeeze(-1) | (curr_dist > far).squeeze(-1)] = False
-    curr = r_o + r_d * curr_dist
-  ...
-  return curr, hits.squeeze(-1), curr_dist
-
-def throughput(
-  self,
-  r_o, r_d,
-  near: float, far: float,
-  batch_size:int = 128,
-):
-  assert(far > near)
-  # some random jitter I guess?
-  max_t = far-near+random.random()*(2/batch_size)
-  step = max_t/batch_size
-  with torch.no_grad():
-    sd = self(r_o + near * r_d)[...,0]
-    curr_min = sd
-    idxs = torch.zeros_like(sd, dtype=torch.long, device=r_d.device)
-    for i in range(batch_size):
-      t = near + step * (i+1)
-      sd = self(r_o + t * r_d)[..., 0]
-      idxs = torch.where(sd < curr_min, i+1, idxs)
-      curr_min = torch.minimum(curr_min, sd)
-    idxs = idxs.unsqueeze(-1)
-    best_pos = r_o  + (near + idxs * step) * r_d
-  return self(best_pos)[...,0], best_pos
-
 
 #@torch.jit.script
 def masked_loss(img_loss=F.mse_loss):

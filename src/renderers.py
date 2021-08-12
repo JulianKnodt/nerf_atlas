@@ -5,7 +5,7 @@ import random
 import math
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, fat_sigmoid )
 from .refl import ( LightAndRefl )
 
 def load(args, shape, light_and_refl: LightAndRefl):
@@ -58,19 +58,17 @@ class LearnedLighting(nn.Module):
   ):
     super().__init__()
     self.attenuation = SkipConnMLP(
-      in_size=5, out=1, latent_size=latent_size,
-      num_layers=5, hidden_size=256,
-      xavier_init=True,
+      in_size=5, out=1, latent_size=latent_size, num_layers=5, hidden_size=256,
+      enc=NNEncoder(input_dims=5), xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
     # have an extra large eps to account for incorrect shapes.
-    visible = isect_fn(pts, -dir, near=1e-1, far=20)
-    att = self.attenuation(
-      torch.cat([pts, dir_to_elev_azim(dir)], dim=-1),
-      latent
-    ).sigmoid()
+    visible = isect_fn(pts, -dir, near=1e-1, far=10)
+    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1), latent)
+    # TODO what should the activation here be? fat sigmoid (need to cap max to 1), sin or normal sigmoid?
+    att = att.sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
 
@@ -118,14 +116,13 @@ class Direct(Renderer):
   @property
   def sdf(self): return self.shape
   def total_latent_size(self): return self.shape.latent_size
-  def forward(self, rays):
-    return direct(self.shape, self.refl, self.occ, rays, self.training)
+  def forward(self, rays): return direct(self.shape, self.refl, self.occ, rays, self.training)
 
 # Functional version of integration
 def direct(shape, refl, occ, rays, training=True):
   r_o, r_d = rays.split([3, 3], dim=-1)
 
-  pts, hits, _t, n = shape.intersect_w_n(r_o, r_d)
+  pts, hits, tput, n = shape.intersect_w_n(r_o, r_d)
   _, latent = shape.from_pts(pts[hits])
 
   light_dir, light_val = occ(
@@ -137,9 +134,8 @@ def direct(shape, refl, occ, rays, training=True):
   )
   out = torch.zeros_like(r_d)
   # last term is foreshortening term, the angle between incident light and the normal.
-  out[hits] = bsdf_val * light_val * \
-    (light_dir * n[hits]).sum(dim=-1, keepdim=True).abs()
-  if training: out = torch.cat([out, shape.throughput(r_o, r_d)], dim=-1)
+  out[hits] = bsdf_val * light_val * (light_dir * n[hits]).sum(dim=-1, keepdim=True).abs()
+  if training: out = torch.cat([out, tput], dim=-1)
   return out
 
 class Path(Renderer):

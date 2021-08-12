@@ -172,6 +172,10 @@ def arguments():
     "--bound-sphere-rad", type=float, default=-1,
     help="Intersect the learned SDF with a bounding sphere at the origin, < 0 is no sphere",
   )
+  sdfa.add_argument(
+    "--sdf-isect-kind", choices=["sphere", "secant", "bisect"], default="sphere",
+    help="Marching kind to use when computing SDF intersection.",
+  )
 
   dnerfa = a.add_argument_group("dnerf")
   dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
@@ -248,7 +252,7 @@ if torch.cuda.is_available():
   torch.cuda.set_device(device)
 
 # DEBUG
-#torch.autograd.set_detect_anomaly(True)
+#torch.autograd.set_detect_anomaly(True); print("HAS DEBUG")
 
 def render(
   model, cam, crop,
@@ -394,6 +398,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
         grad_outputs=torch.ones_like(n),
       )[0]
+      # TODO maybe convert this to abs? seems to work for nerfactor, altho unisurf uses square?
       loss = loss + args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
 
     update(display)
@@ -451,7 +456,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
           if hasattr(model, "nerf"):
             acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
               model.nerf.acc_smooth()[0,...].clamp(min=0,max=1)
-          if hasattr(model, "n"):
+          if hasattr(model, "n") and hasattr(model, "nerf"):
             normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
               (nerf.volumetric_integrate(model.nerf.weights, F.normalize(model.n, dim=-1))[0,...]+1)/2
           elif hasattr(model, "sdf"):
@@ -467,7 +472,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       name = os.path.join(args.outdir, name)
       items = [exp, got.clamp(min=0, max=1)]
       #if hasattr(model, "nerf"): items.append(acc)
-      if hasattr(model, "n"): items.append(normals.clamp(min=0,max=1))
+      if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0,max=1))
       save_plot(name, *items)
       ls.append(psnr)
 
