@@ -344,24 +344,24 @@ def sphere_march(
 def throughput(
   self,
   r_o, r_d,
-  near: float,
-  far: float,
+  near: float, far: float,
   batch_size:int = 128,
 ):
+  assert(far > near)
   # some random jitter I guess?
-  max_t = far+random.random()*(2/batch_size)
+  max_t = far-near+random.random()*(2/batch_size)
   step = max_t/batch_size
   with torch.no_grad():
-    sd = self(r_o)[...,0]
+    sd = self(r_o + near * r_d)[...,0]
     curr_min = sd
     idxs = torch.zeros_like(sd, dtype=torch.long, device=r_d.device)
     for i in range(batch_size):
-      t = step * (i+1)
+      t = near + step * (i+1)
       sd = self(r_o + t * r_d)[..., 0]
       idxs = torch.where(sd < curr_min, i+1, idxs)
       curr_min = torch.minimum(curr_min, sd)
     idxs = idxs.unsqueeze(-1)
-    best_pos = r_o  + idxs * step * r_d
+    best_pos = r_o  + (near + idxs * step) * r_d
   return self(best_pos)[...,0], best_pos
 
 
