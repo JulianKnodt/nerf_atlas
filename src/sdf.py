@@ -99,7 +99,7 @@ class SDF(nn.Module):
     isect,
     t_near: float,
     t_far: float,
-    alpha:int = 1500,
+    alpha:int = 1000,
   ):
     super().__init__()
     assert(isinstance(underlying, SDFModel))
@@ -369,7 +369,10 @@ def masked_loss(img_loss=F.mse_loss):
     mask_loss = 0
     if misses.any():
       loss_fn = F.binary_cross_entropy_with_logits
-      mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
+      mask_loss = loss_fn(
+        got_mask[misses].reshape(-1, 1),
+        exp_mask[misses].reshape(-1, 1),
+      )
     return mask_weight * mask_loss + color_loss
 
   return aux

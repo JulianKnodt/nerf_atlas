@@ -59,7 +59,7 @@ class LearnedLighting(nn.Module):
     super().__init__()
     self.attenuation = SkipConnMLP(
       in_size=5, out=1, latent_size=latent_size, num_layers=5, hidden_size=256,
-      enc=NNEncoder(input_dims=5), xavier_init=True,
+      enc=FourierEncoder(input_dims=5), xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
@@ -116,6 +116,7 @@ class Direct(Renderer):
   @property
   def sdf(self): return self.shape
   def total_latent_size(self): return self.shape.latent_size
+  def set_refl(self, refl): self.refl = refl
   def forward(self, rays): return direct(self.shape, self.refl, self.occ, rays, self.training)
 
 # Functional version of integration
@@ -133,8 +134,7 @@ def direct(shape, refl, occ, rays, training=True):
     x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent
   )
   out = torch.zeros_like(r_d)
-  # last term is foreshortening term, the angle between incident light and the normal.
-  out[hits] = bsdf_val * light_val * (light_dir * n[hits]).sum(dim=-1, keepdim=True).abs()
+  out[hits] = bsdf_val * light_val
   if training: out = torch.cat([out, tput], dim=-1)
   return out
 
