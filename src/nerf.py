@@ -435,13 +435,13 @@ class VolSDF(CommonNeRF):
       self.secondary = self.direct
   def direct(self, weights, pts, view, n, latent):
     light_dir, light_val = self.occ(
-      pts + 5e-3*F.normalize(n, dim=-1), self.sdf.refl.light, self.sdf.intersect_mask,
+      pts, self.sdf.refl.light, self.sdf.intersect_mask,
       latent=latent,
     )
     bsdf_val = self.sdf.refl(
       x=pts, view=view, normal=n, light=light_dir, latent=latent,
     )
-    return bsdf_val * light_val * (n * light_dir).sum(dim=-1,keepdim=True).abs()
+    return bsdf_val * light_val
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,

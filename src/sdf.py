@@ -5,9 +5,10 @@ import torch.optim as optim
 import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
-from .neural_blocks import ( SkipConnMLP, FourierEncoder )
+from .neural_blocks import ( SkipConnMLP, FourierEncoder, NNEncoder )
 from .utils import ( autograd, eikonal_loss )
 import src.refl as refl
+import src.march as march
 import src.renderers as renderers
 from tqdm import trange
 
@@ -16,16 +17,22 @@ def load(args):
   elif args.sdf_kind == "siren": cons = SIREN
   elif args.sdf_kind == "local": cons = Local
   elif args.sdf_kind == "mlp": cons = MLP
-  else: raise NotImplementedError()
+  elif args.sdf_kind == "triangles": cons = Triangles
+  else: raise NotImplementedError(f"Unknown SDF kind: {args.sdf_kind}")
 
   model = cons(latent_size=args.latent_size)
 
   if args.sphere_init: model.set_to_sphere()
+
+  if args.bound_sphere_rad > 0: model = UnitSphere(inner=model,rad=args.bound_sphere_rad)
   # refl inst may also have a nested light
   refl_inst = refl.load(args, model.latent_size)
+  isect = march.load_intersection_kind(args.sdf_isect_kind)
 
   sdf = SDF(
-    model, refl_inst,
+    model,
+    refl_inst,
+    isect=isect,
     t_near=args.near,
     t_far=args.far,
   )
@@ -65,14 +72,34 @@ class SDFModel(nn.Module):
       loss.backward()
       opt.step()
 
+# Wraps another SDF as the intersection of a sphere centered at the origin.
+class UnitSphere(SDFModel):
+  def __init__(
+    self,
+    inner: SDFModel,
+    rad:float=3,
+  ):
+    super().__init__(latent_size=inner.latent_size)
+    self.inner = inner
+    self.rad = rad
+
+  def forward(self, pts):
+    sph = torch.linalg.norm(pts, dim=-1, ord=2) - self.rad
+    inner = self.inner(pts)
+    return torch.cat([
+      torch.maximum(inner[..., 0], sph).unsqueeze(-1),
+      inner[..., 1:],
+    ], dim=-1)
+
 class SDF(nn.Module):
   def __init__(
     self,
     underlying: SDFModel,
     reflectance: refl.Reflectance,
+    isect,
     t_near: float,
     t_far: float,
-    alpha:int = 500,
+    alpha:int = 1000,
   ):
     super().__init__()
     assert(isinstance(underlying, SDFModel))
@@ -81,6 +108,7 @@ class SDF(nn.Module):
     self.far = t_far
     self.near = t_near
     self.alpha = alpha
+    self.isect=isect
 
   @property
   def sdf(self): return self
@@ -95,14 +123,17 @@ class SDF(nn.Module):
     return raw[..., 0], latent if latent.shape[-1] != 0 else None
 
   def intersect_w_n(self, r_o, r_d):
-    pts, hit, t = sphere_march(
+    pts, hit, t, tput = self.isect(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
-      iters=128 if self.training else 256,
+      eps=5e-5, iters=128 if self.training else 256,
     )
-    return pts, hit, t, self.normals(pts)
+    if self.training:
+      if tput is None: tput = self.throughput(r_o, r_d)
+      else: tput = -self.alpha * tput
+    return pts, hit, tput, self.normals(pts)
   def intersect_mask(self, r_o, r_d, near=None, far=None, eps=1e-3):
     with torch.no_grad():
-      return ~sphere_march(
+      return ~self.isect(
         self.underlying, r_o, r_d, eps=eps,
         near=self.near if near is None else near,
         far=self.far if far is None else far,
@@ -111,7 +142,7 @@ class SDF(nn.Module):
       )[1]
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hit, t = sphere_march(
+    pts, hit, t, tput = self.isect(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       iters=128 if self.training else 192,
     )
@@ -128,11 +159,13 @@ class SDF(nn.Module):
       latent=latent, mask=hit,
     )
     if with_throughput and self.training:
-      out = torch.cat([out, self.throughput(r_o, r_d)], dim=-1)
+      if tput is None: tput = self.throughput(r_o, r_d)
+      else: tput = -self.alpha * tput
+      out = torch.cat([out, tput], dim=-1)
     return out
   def debug_normals(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hit, t = sphere_march(
+    pts, hit, t = self.isect(
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       iters=128 if self.training else 192,
     )
@@ -141,7 +174,7 @@ class SDF(nn.Module):
     out[hit] = self.normals(pts[hit])
     return out
   def throughput(self, r_o, r_d):
-    tput, _best_pos = throughput(self.underlying, r_o, r_d, self.near, self.far)
+    tput, _best_pos = march.throughput(self.underlying, r_o, r_d, self.near, self.far)
     return -self.alpha*tput.unsqueeze(-1)
 
 #@torch.jit.script
@@ -151,7 +184,7 @@ def smooth_min(v, k:float=32, dim:int=0):
 class SmoothedSpheres(SDFModel):
   def __init__(
     self,
-    n:int=32,
+    n:int=128,
 
     with_mlp=True,
     **kwargs,
@@ -181,7 +214,54 @@ class SmoothedSpheres(SDFModel):
     q = self.transform(p.reshape(-1, 3).unsqueeze(0)) - self.centers.unsqueeze(1)
     sd = q.norm(p=2, dim=-1) - self.radii.unsqueeze(-1)
     out = smooth_min(sd, k=32.).reshape(p.shape[:-1] + (1,))
-    if hasattr(self, "mlp"): out = out + self.mlp(p).cos()
+    if hasattr(self, "mlp"): out = out + self.mlp(p).tanh() * (1-out.sigmoid())
+    return out
+
+
+def dot(a,b, dim:int=-1, keepdim:bool=False): return (a * b).sum(dim=dim,keepdim=keepdim)
+# dot2(a) = dot(a,a)
+def dot2(a, dim:int=-1, keepdim:bool=False): return dot(a,a,dim=dim,keepdim=keepdim)
+
+# triangle is similar to spheres but contains triangles instead
+class Triangles(SDFModel):
+  def __init__(
+    self,
+    n:int=32,
+
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    # has no latent size
+    self.latent_size = 0
+
+    # each triangle requires 3 points
+    self.points = nn.Parameter(0.3 * torch.rand(n,3,3, requires_grad=True) - 0.15)
+    #self.thickness = nn.Parameter(0.3 * torch.rand(n, requires_grad=True) - 0.15)
+
+  def forward(self, p):
+    pa,pb,pc = (p.reshape(-1, 1, 1, 3) - self.points).split([1,1,1],dim=-2)
+    ac,ba,cb = (self.points - self.points.roll(1, dims=-2)).split([1,1,1], dim=-2)
+    nor = torch.cross(ba, ac, dim=-1)
+
+    sidedness = \
+      dot(torch.cross(ba, nor), pa, dim=-1).sign() + \
+      dot(torch.cross(cb, nor), pb, dim=-1).sign() + \
+      dot(torch.cross(ac, nor), pc, dim=-1).sign()
+
+
+    same_sided = dot2(ba*(dot(ba, pa,keepdim=True)/dot2(ba,keepdim=True)).clamp(min=0,max=1)-pa)\
+        .minimum(dot2(cb*(dot(cb, pb,keepdim=True)/dot2(cb,keepdim=True)).clamp(min=0,max=1)-pb))\
+        .minimum(dot2(ac*(dot(ac, pc,keepdim=True)/dot2(ac,keepdim=True)).clamp(min=0,max=1)-pc))
+
+    opp_sided = dot(nor, pa,dim=-1).square()/dot(nor,nor, dim=-1)
+    out = torch.where(sidedness < 2, same_sided, opp_sided).clamp(min=1e-8).sqrt()
+    # need to add a smooth min across all the triangles as well as an extrusion
+    # apply thickness to each triangle to allow certain ones to take up more space.
+    out = out.squeeze(-1) - 4e-2
+    # smooth min or just normal union?
+    out = smooth_min(out,dim=-1).reshape(p.shape[:-1] + (1,))
+    #if out.numel() == 0: return out.reshape(p.shape[:-1] + (1,))
+    #out = out.min(dim=-1)[0].reshape(p.shape[:-1] + (1,))
     return out
 
 class MLP(SDFModel):
@@ -206,13 +286,12 @@ class SIREN(SDFModel):
   ):
     super().__init__(**kwargs)
     self.siren = SkipConnMLP(
-      in_size=3, out=1+latent_size, enc=None,
-      num_layers=6, hidden_size=256,
+      in_size=3, out=1+self.latent_size, enc=None,
+      num_layers=8, hidden_size=256,
       activation=torch.sin,
       # Do not have skip conns
       skip=1000,
     )
-    self.latent_size = latent_size
   def forward(self, x):
     out = self.siren((30*x).sin())
     assert(out.isfinite().all())
@@ -225,13 +304,16 @@ class Local(SDFModel):
     partition_sz: int = 0.5,
     **kwargs,
   ):
-    super().__init__(**Kwargs)
+    super().__init__(**kwargs)
     self.part_sz = partition_sz
     self.latent = SkipConnMLP(in_size=3,out=self.latent_size,skip=4)
-    self.tform = SkipConnMLP(in_size=3, out=1+self.latent_size, latent_size=self.latent_size)
+    self.tform = SkipConnMLP(
+      in_size=3, out=1+self.latent_size, latent_size=self.latent_size,
+      enc=NNEncoder(input_dims=3),
+    )
   def forward(self, x):
     local = x % self.part_sz
-    latent = self.latent(x//self.part_sz)
+    latent = self.latent(x/self.part_sz)
     return self.tform(local, latent)
 
 class SDFNeRF(nn.Module):
@@ -257,63 +339,11 @@ class SDFNeRF(nn.Module):
   def density(self): return self.nerf.density
   def render(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
-    pts, hits, ts = self.sdf.sphere_march(r_o, r_d, near=self.nerf.t_near, far=self.nerf.t_far)
+    pts, hits, ts = self.sdf.isect(r_o, r_d, near=self.nerf.t_near, far=self.nerf.t_far)
     # TODO convert vals to some RGB value
     vals = torch.ones_like(pts)
     raise NotImplementedError()
     return torch.where(hits, vals, torch.zeros_like(vals))
-
-# sphere_march is a traditional sphere marching algorithm on the SDF.
-# It returns the (pts: R^3s, mask: bools, t: step along rays)
-#
-# note that this implementation is efficient in that it only will compute distance
-# for pts that are still candidates.
-def sphere_march(
-  self,
-  r_o, r_d,
-  iters: int = 32,
-  eps: float = 1e-3,
-  near: float = 0, far: float = 1,
-):
-  device = r_o.device
-  with torch.no_grad():
-    hits = torch.zeros(r_o.shape[:-1] + (1,), dtype=torch.bool, device=device)
-    rem = torch.ones_like(hits).squeeze(-1)
-    curr_dist = torch.full_like(hits, near, dtype=torch.float)
-    for i in range(iters):
-      curr = r_o[rem] + r_d[rem] * curr_dist[rem]
-      dist = self(curr)[...,0].reshape_as(curr_dist[rem])
-      hits[rem] |= ((dist < eps) & (curr_dist[rem] <= far))
-      # anything that was hit or is past range no longer need to compute
-      curr_dist[rem] += dist
-      rem[hits.squeeze(-1) | (curr_dist > far).squeeze(-1)] = False
-    curr = r_o + r_d * curr_dist
-  ...
-  return curr, hits.squeeze(-1), curr_dist
-
-def throughput(
-  self,
-  r_o, r_d,
-  near: float,
-  far: float,
-  batch_size:int = 128,
-):
-  # some random jitter I guess?
-  max_t = far+random.random()*(2/batch_size)
-  step = max_t/batch_size
-  with torch.no_grad():
-    sd = self(r_o)[...,0]
-    curr_min = sd
-    idxs = torch.zeros_like(sd, dtype=torch.long, device=r_d.device)
-    for i in range(batch_size):
-      t = step * (i+1)
-      sd = self(r_o + t * r_d)[..., 0]
-      idxs = torch.where(sd < curr_min, i+1, idxs)
-      curr_min = torch.minimum(curr_min, sd)
-    idxs = idxs.unsqueeze(-1)
-    best_pos = r_o  + idxs * step * r_d
-  return self(best_pos)[...,0], best_pos
-
 
 #@torch.jit.script
 def masked_loss(img_loss=F.mse_loss):
@@ -331,15 +361,18 @@ def masked_loss(img_loss=F.mse_loss):
 
     color_loss = 0
     if active.any():
-      got_active = got * active[..., None]
-      exp_active = exp * active[..., None]
+      got_active = got[active]
+      exp_active = exp[active]
       color_loss = img_loss(got_active, exp_active)
 
     # this case is hit if the mask intersects nothing
     mask_loss = 0
     if misses.any():
       loss_fn = F.binary_cross_entropy_with_logits
-      mask_loss = loss_fn(got_mask[misses].reshape(-1, 1), exp_mask[misses].reshape(-1, 1))
+      mask_loss = loss_fn(
+        got_mask[misses].reshape(-1, 1),
+        exp_mask[misses].reshape(-1, 1),
+      )
     return mask_weight * mask_loss + color_loss
 
   return aux

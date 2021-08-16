@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, fat_sigmoid )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, thin_sigmoid )
 import src.lights as lights
 from .spherical_harmonics import eval_sh
 
@@ -203,13 +203,58 @@ class Rusin(Reflectance):
   ):
     super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
+    pos_size = space.dims
+    self.pos = SkipConnMLP(
+      in_size=pos_size, out=3+32, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=pos_size),
+      xavier_init=True,
+
+      num_layers=5, hidden_size=256,
+    )
+    rusin_size = 3
+    self.rusin = SkipConnMLP(
+      in_size=rusin_size, out=self.out_features, latent_size=self.latent_size+32,
+      enc=FourierEncoder(input_dims=rusin_size),
+      xavier_init=True,
+
+      num_layers=5, hidden_size=256,
+    )
+    self.space = space
+
+  @property
+  def can_use_normal(self): return True
+  @property
+  def can_use_light(self): return True
+
+  def forward(self, x, view, normal, light, latent=None):
+    raw_pos = self.pos(self.space(x), latent)
+    color, pos_latent = raw_pos[..., :3], raw_pos[..., 3:]
+    return color.sigmoid()
+    frame = coordinate_system(normal)
+    wo = to_local(frame, view)
+    wi = to_local(frame, light)
+    # have to move view and light into basis of normal
+    rusin = rusin_params(wo, wi)
+    # view dependent effects
+    raw = self.rusin(rusin, torch.cat([latent, pos_latent], dim=-1))
+    return (color+raw).sigmoid()
+
+class MultiRusin(Reflectance):
+  def __init__(
+    self,
+    space=None,
+    n:int=6,
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    if space is None: space = IdentitySpace()
     in_size = 3 + space.dims
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
-      enc=NNEncoder(input_dims=in_size, out=64),
+      enc=FourierEncoder(input_dims=in_size),
       xavier_init=True,
 
-      num_layers=6, hidden_size=512,
+      num_layers=6, hidden_size=256,
     )
     self.space = space
 
@@ -226,7 +271,7 @@ class Rusin(Reflectance):
     rusin = rusin_params(wo, wi)
     x = self.space(x)
     raw = self.mlp(torch.cat([x, rusin], dim=-1), latent)
-    return fat_sigmoid(raw, eps=1e-2)
+    return raw.sigmoid()
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
@@ -256,9 +301,7 @@ def rusin_params(wo, wi):
   diff = F.normalize(rotate_vector(tmp, e_1, c, s), eps=1e-6, dim=-1)
   cos_theta_d = diff[..., 2]
 
-  # rather than do `% pi/2`, take `cos` since both are cyclic but cos has better
-  # properties.
-  cos_phi_d = torch.atan2(nonzero_eps(diff[..., 1]), nonzero_eps(diff[..., 0])).cos()
+  cos_phi_d = torch.atan2(nonzero_eps(diff[..., 1]), nonzero_eps(diff[..., 0]))
 
   return torch.stack([cos_phi_d, cos_theta_h, cos_theta_d], dim=-1)
 
