@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 import math
 
-from .neural_blocks import ( SkipConnMLP, NNEncoder )
+from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, fat_sigmoid )
 from .refl import ( LightAndRefl )
 
@@ -58,7 +58,7 @@ class LearnedLighting(nn.Module):
   ):
     super().__init__()
     self.attenuation = SkipConnMLP(
-      in_size=5, out=1, latent_size=latent_size, num_layers=5, hidden_size=256,
+      in_size=5, out=1, latent_size=latent_size, num_layers=5, hidden_size=128,
       enc=FourierEncoder(input_dims=5), xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):

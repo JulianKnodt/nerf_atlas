@@ -361,8 +361,8 @@ def masked_loss(img_loss=F.mse_loss):
 
     color_loss = 0
     if active.any():
-      got_active = got * active[..., None]
-      exp_active = exp * active[..., None]
+      got_active = got[active]
+      exp_active = exp[active]
       color_loss = img_loss(got_active, exp_active)
 
     # this case is hit if the mask intersects nothing

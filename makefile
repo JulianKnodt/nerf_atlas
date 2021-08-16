@@ -112,23 +112,24 @@ nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model sdf --sdf-kind mlp \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 32 --epochs 50_000 --loss-window 1000 \
-	--near 2 --far 6 --batch-size 3 -lr 3e-4 --refl-kind rusin \
+	--size 200 --crop --crop-size 16 --epochs 50_000 --loss-window 500 \
+	--near 2 --far 6 --batch-size 24 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l2 --valid-freq 250 --save-freq 1000 --seed -1 \
+	--loss-fns l1 l2 --valid-freq 250 --save-freq 1000 --seed -1 \
 	--occ-kind learned --sdf-isect-kind bisect \
   --integrator-kind direct --omit-bg \
 	--load models/nerv_sdf_${nerv_dataset}.pt
 
 nerv_point_alternating: clean
-	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
+	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_alt_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 15_000 --loss-window 500 \
+	--size 200 --crop --crop-size 12 --epochs 50_000 --loss-window 500 \
 	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l2 --valid-freq 251 --save-freq 2500 --seed -1 \
+	--loss-fns l1 l2 --valid-freq 251 --save-freq 2500 --seed -1 \
 	--occ-kind learned --volsdf-alternate --notraintest \
+	--sdf-isect-kind bisect \
 	#--load models/nerv_alt_${nerv_dataset}.pt
 
 # -- End NeRV tests

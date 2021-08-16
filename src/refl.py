@@ -209,7 +209,7 @@ class Rusin(Reflectance):
       enc=FourierEncoder(input_dims=pos_size),
       xavier_init=True,
 
-      num_layers=5, hidden_size=128,
+      num_layers=5, hidden_size=256,
     )
     rusin_size = 3
     self.rusin = SkipConnMLP(
@@ -229,12 +229,12 @@ class Rusin(Reflectance):
   def forward(self, x, view, normal, light, latent=None):
     raw_pos = self.pos(self.space(x), latent)
     color, pos_latent = raw_pos[..., :3], raw_pos[..., 3:]
+    return color.sigmoid()
     frame = coordinate_system(normal)
     wo = to_local(frame, view)
     wi = to_local(frame, light)
     # have to move view and light into basis of normal
     rusin = rusin_params(wo, wi)
-    x = self.space(x)
     # view dependent effects
     raw = self.rusin(rusin, torch.cat([latent, pos_latent], dim=-1))
     return (color+raw).sigmoid()
@@ -301,9 +301,7 @@ def rusin_params(wo, wi):
   diff = F.normalize(rotate_vector(tmp, e_1, c, s), eps=1e-6, dim=-1)
   cos_theta_d = diff[..., 2]
 
-  # rather than do `% pi/2`, take `cos` since both are cyclic but cos has better
-  # properties.
-  cos_phi_d = torch.atan2(nonzero_eps(diff[..., 1]), nonzero_eps(diff[..., 0])).cos()
+  cos_phi_d = torch.atan2(nonzero_eps(diff[..., 1]), nonzero_eps(diff[..., 0]))
 
   return torch.stack([cos_phi_d, cos_theta_h, cos_theta_d], dim=-1)
 
