@@ -112,10 +112,10 @@ nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model sdf --sdf-kind mlp \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 16 --epochs 50_000 --loss-window 500 \
-	--near 2 --far 6 --batch-size 24 -lr 3e-4 --refl-kind rusin \
+	--size 200 --crop --crop-size 32 --epochs 20_000 --loss-window 500 \
+	--near 2 --far 6 --batch-size 3 -lr 3e-4 --refl-kind multi_rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l1 l2 --valid-freq 250 --save-freq 1000 --seed -1 \
+	--loss-fns l2 l1 --valid-freq 250 --save-freq 1000 --seed -1 \
 	--occ-kind learned --sdf-isect-kind bisect \
   --integrator-kind direct --omit-bg \
 	--load models/nerv_sdf_${nerv_dataset}.pt

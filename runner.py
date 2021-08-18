@@ -128,7 +128,7 @@ def arguments():
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
     "--refl-kind", help="What kind of reflectance model to use",
-    choices=["curr", "view_only", "basic", "diffuse", "rusin", "sph-har"], default="curr",
+    choices=["curr", "view_only", "basic", "diffuse", "rusin", "multi_rusin", "sph-har"], default="curr",
   )
   refla.add_argument(
     "--normal-kind", choices=[None, "elaz", "raw"], default=None,

@@ -43,7 +43,7 @@ class LightingWIsect(nn.Module):
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, -dir, near=0.1, far=20)
+    visible = isect_fn(pts, dir, near=0.1, far=20)
     spectrum = torch.where(
       visible[...,None],
       spectrum,
@@ -65,7 +65,7 @@ class LearnedLighting(nn.Module):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
     # have an extra large eps to account for incorrect shapes.
-    visible = isect_fn(pts, -dir, near=1e-1, far=10)
+    visible = isect_fn(pts, dir, near=1e-1, far=10)
     att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1), latent)
     # TODO what should the activation here be? fat sigmoid (need to cap max to 1), sin or normal sigmoid?
     att = att.sigmoid()
@@ -88,7 +88,7 @@ class AllLearnedOcc(nn.Module):
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, -dir, near=0.1, far=20).unsqueeze(-1)
+    visible = isect_fn(pts, dir, near=0.1, far=20).unsqueeze(-1)
     elaz = dir_to_elev_azim(dir)
     latent = visible if latent is None else torch.cat([latent, visible], dim=-1)
     att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
