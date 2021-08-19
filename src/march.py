@@ -62,7 +62,7 @@ def bisect(
   self,
   r_o, r_d,
   iters: int = 128,
-  eps: float = 1e-3,
+  eps: float = 0,
   near: float = 0, far: float = 1,
 ):
   tput, best_pos, last_pos, first_neg = throughput_with_sign_change(self, r_o, r_d, near, far, batch_size=iters)

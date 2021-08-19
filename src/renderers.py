@@ -35,15 +35,17 @@ def load_occlusion_kind(kind=None, latent_size:int=0):
 
 # no shadow
 def lighting_wo_isect(pts, lights, isect_fn, latent=None, mask=None):
-  return lights(pts if mask is None else pts[mask], mask=mask)
+  dir, _, spectrum = lights(pts if mask is None else pts[mask], mask=mask)
+  return dir, spectrum
 
 # hard shadow lighting
 class LightingWIsect(nn.Module):
   def __init__(self): super().__init__()
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
-    dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, dir, near=0.1, far=20)
+    dir, dist, spectrum = lights(pts, mask=mask)
+    far = dist.max().item() if mask.any() else 6
+    visible = isect_fn(pts, dir, near=0.1, far=far)
     spectrum = torch.where(
       visible[...,None],
       spectrum,
@@ -63,12 +65,11 @@ class LearnedLighting(nn.Module):
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
-    dir, spectrum = lights(pts, mask=mask)
-    # have an extra large eps to account for incorrect shapes.
-    visible = isect_fn(pts, dir, near=1e-1, far=10)
-    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1), latent)
-    # TODO what should the activation here be? fat sigmoid (need to cap max to 1), sin or normal sigmoid?
-    att = att.sigmoid()
+    dir, dist, spectrum = lights(pts, mask=mask)
+    far = dist.max().item() if mask.any() else 6
+    visible = isect_fn(pts, dir, near=1e-5, far=far)
+    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1), latent)\
+      .sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
 
@@ -79,21 +80,17 @@ class AllLearnedOcc(nn.Module):
   ):
     super().__init__()
     in_size=5
-    # TODO does this need to be a SIREN for high enough frequency?
     self.attenuation = SkipConnMLP(
-      in_size=in_size, out=1, latent_size=latent_size+1,
-      enc=NNEncoder(input_dims=in_size, out=64),
-      num_layers=6, hidden_size=256, xavier_init=True,
+      in_size=in_size, out=1, latent_size=latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
-    dir, spectrum = lights(pts, mask=mask)
-    visible = isect_fn(pts, dir, near=0.1, far=20).unsqueeze(-1)
+    dir, _, spectrum = lights(pts, mask=mask)
     elaz = dir_to_elev_azim(dir)
-    latent = visible if latent is None else torch.cat([latent, visible], dim=-1)
     att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
-    spectrum = spectrum * att
-    return dir, spectrum
+    return dir, spectrum * att
 
 class Renderer(nn.Module):
   def __init__(
@@ -126,13 +123,8 @@ def direct(shape, refl, occ, rays, training=True):
   pts, hits, tput, n = shape.intersect_w_n(r_o, r_d)
   _, latent = shape.from_pts(pts[hits])
 
-  light_dir, light_val = occ(
-    pts, refl.light, shape.intersect_mask, mask=hits,
-    latent=latent,
-  )
-  bsdf_val = refl(
-    x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent
-  )
+  light_dir, light_val = occ(pts, refl.light, shape.intersect_mask, mask=hits, latent=latent)
+  bsdf_val = refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
   out = torch.zeros_like(r_d)
   out[hits] = bsdf_val * light_val
   if training: out = torch.cat([out, tput], dim=-1)

@@ -85,20 +85,33 @@ class Reflectance(nn.Module):
     act=torch.sigmoid,
     latent_size:int = 0,
     out_features:int = 3,
+    spherical_harmonic_order:int = 0,
 
     # delete unused
     normal=None,
     light=None,
   ):
     super().__init__()
-    self.act = act
+    self.sho = sho = spherical_harmonic_order
     self.latent_size = latent_size
-    self.out_features = out_features
+    self.out_features = out_features * (sho + 1) * (sho + 1)
+
+    self.act = act
+
   def forward(self, x, view,normal=None,light=None,latent=None): raise NotImplementedError()
   @property
   def can_use_normal(self): return False
   @property
   def can_use_light(self): return False
+
+  def sph_ham(sh_coeffs, view):
+    # not spherical harmonic coefficients
+    if self.sho == 0: return sh_coeffs
+    return eval_sh(
+      self.sho,
+      sh_coeffs.reshape(sh_coeffs.shape[:-1] + (self.out_features, -1)),
+      F.normalize(view, dim=-1),
+    )
 
 def ident(x): return x
 def empty(_): return None
@@ -241,6 +254,7 @@ class Rusin(Reflectance):
     rusin = rusin_params(wo, wi)
     # view dependent effects
     raw = self.rusin(rusin, latent)
+    #v = self.sph_ham(raw, view)
     return F.leaky_relu(raw)
 
 class MultiRusin(Reflectance):
@@ -381,10 +395,10 @@ class SphericalHarmonic(Reflectance):
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
-    sh_coeffs = self.act(self.mlp(v, latent))
+    sh_coeffs = self.mlp(v, latent)
     rgb = eval_sh(
       self.order,
       sh_coeffs.reshape(sh_coeffs.shape[:-1] + (self.out_features, -1)),
       F.normalize(view, dim=-1),
     )
-    return rgb.sigmoid()
+    return self.act(rgb)

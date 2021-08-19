@@ -217,6 +217,42 @@ def autograd(x, y):
   )
   return grad
 
+@torch.jit.script
+def rgb2hsv(v):
+  r,g,b = v.split([1,1,1], dim=-1)
+  r = r.squeeze(-1)
+  g = g.squeeze(-1)
+  b = b.squeeze(-1)
+  max_val, max_ind = v.max(dim=-1)
+  min_val, min_ind = v.max(dim=-1)
+  C = max_val - min_val
+  eps = 1e-8
+  Cc = C.clamp(min=eps) # necessary to prevent NaN prop in where
+  H = torch.where(C.abs() < eps, torch.zeros_like(C),
+    torch.where(
+      max_ind == 0, (g-b)/Cc, torch.where(max_ind == 1, 2+(b-r)/Cc, 4+(r-g)/Cc),
+    ),
+  )
+
+  S = torch.where(max_val.abs() < eps, torch.zeros_like(C), C/max_val.clamp(min=eps))
+  V = (max_val + min_val)/2
+  return torch.stack([H, S, V], dim=-1)
+
+@torch.jit.script
+def rgb2luminance(v):
+  r,g,b = v.split([1,1,1], dim=-1)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+@torch.jit.script
+def rgb2xyz(v):
+  v = v.reshape(-1, 3)
+  tf_mat = torch.tensor([
+    [0.49, 0.31, 0.2],
+    [0.17697, 0.8124, 0.01063],
+    [0., 0.01, 0.99],
+  ], device=v.device).unsqueeze(0).expand((v.shape[0],3,3))
+  xyz = torch.bmm(tf_mat, v.unsqueeze(-1)).squeeze(-1)/0.17697
+  return xyz
 
 #https://github.com/albertpumarola/D-NeRF/blob/main/load_blender.py#L62
 def spherical_pose(elev, azim, rad):

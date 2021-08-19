@@ -100,6 +100,10 @@ def arguments():
     choices=["l1", "l2", "rmse"], default=["l2"],
   )
   a.add_argument(
+    "--color-spaces", help="Color spaces to compare on", nargs="+", type=str,
+    choices=["rgb", "hsv", "luminance", "xyz"], default=["rgb"],
+  )
+  a.add_argument(
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action="store_true",
   )
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
@@ -245,6 +249,12 @@ loss_map = {
   "rmse": lambda x, ref: F.mse_loss(x, ref).clamp(min=1e-10).sqrt(),
 }
 
+color_fns = {
+  "hsv": utils.rgb2hsv,
+  "luminance": utils.rgb2luminance,
+  "xyz": utils.rgb2xyz,
+}
+
 # TODO better automatic device discovery here
 device = "cpu"
 if torch.cuda.is_available():
@@ -294,6 +304,7 @@ def load_loss_fn(args, model):
   if args.style_img != None:
     return StyleTransfer(load_image(args.style_img, resize=(args.size, args.size)))
 
+  # different losses like l1 or l2
   loss_fns = [loss_map[lfn] for lfn in args.loss_fns]
   assert(len(loss_fns) > 0), "must provide at least 1 loss function"
   if len(loss_fns) == 1: loss_fn = loss_fns[0]
@@ -302,8 +313,35 @@ def load_loss_fn(args, model):
       loss = 0
       for fn in loss_fns: loss = loss + fn(x, ref)
       return loss
+
+  assert(len(args.color_spaces) > 0), "must provide at least 1 color space"
+  # different colors like rgb, hsv
+  if len(args.color_spaces) == 1 and args.color_spaces[0] == "rgb":
+    # do nothing since this is the default return value
+    ...
+  elif len(args.color_spaces) == 1:
+    cfn = color_fns[args.color_spaces[0]]
+    prev_loss_fn = loss_fn
+    loss_fn = lambda x, ref: prev_loss_fn(cfn(x), cfn(ref))
+  elif "rgb" in args.color_spaces:
+    prev_loss_fn = loss_fn
+    cfns = [color_fns[cs] for cs in args.color_spaces if cs != "rgb"]
+    def loss_fn(x, ref):
+      loss = prev_loss_fn(x, ref)
+      for cfn in cfns: loss = loss + prev_loss_fn(cfn(x), cfn(ref))
+      return loss
+  else:
+    prev_loss_fn = loss_fn
+    cfns = [color_fns[cs] for cs in args.color_spaces]
+    def loss_fn(x, ref):
+      loss = 0
+      for cfn in cfns: loss = loss + prev_loss_fn(cfn(x), cfn(ref))
+      return loss
+
+
   if args.tone_map: loss_fn = utils.tone_map(loss_fn)
-  if args.volsdf_alternate: return nerf.alternating_volsdf_loss(model, loss_fn, sdf.masked_loss(loss_fn))
+  if args.volsdf_alternate:
+    return nerf.alternating_volsdf_loss(model, loss_fn, sdf.masked_loss(loss_fn))
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
   return loss_fn
 
