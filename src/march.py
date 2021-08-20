@@ -65,7 +65,9 @@ def bisect(
   eps: float = 0,
   near: float = 0, far: float = 1,
 ):
-  tput, best_pos, last_pos, first_neg = throughput_with_sign_change(self, r_o, r_d, near, far, batch_size=iters)
+  tput, best_pos, last_pos, first_neg = throughput_with_sign_change(
+    self, r_o, r_d, near=near, far=far, batch_size=iters,
+  )
   pts = bisection(self, r_o, r_d, near=last_pos, far = first_neg, iters=min(32, iters))
   hits = tput < 0
   return pts, hits, best_pos, tput.unsqueeze(-1)
@@ -97,8 +99,8 @@ def throughput_with_sign_change(
       last_pos = torch.where(mask, i, last_pos)
       first_neg = torch.where(mask, i + 1, first_neg)
     idxs = idxs.unsqueeze(-1)
-    best_pos = r_o  + (near + idxs * step) * r_d
     # convert from indeces to t
+    best_pos = r_o  + (near + idxs * step) * r_d
     first_neg = first_neg.unsqueeze(-1) * step
     last_pos = last_pos.unsqueeze(-1) * step
   val = self(best_pos)

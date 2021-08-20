@@ -83,7 +83,7 @@ class Point(Light):
     # direction from pts to the light
     d = loc - x
     dist = torch.linalg.norm(d, dim=-1)
-    dir = F.normalize(d, eps=1e-6, dim=-1)
+    d = F.normalize(d, eps=1e-6, dim=-1)
     #decay = self.const.clamp(min=1e-6) + \
     #  self.linear.clamp(min=1e-6) * dist + \
     #  self.square.clamp(min=1e-6) * dist.square()
@@ -92,4 +92,4 @@ class Point(Light):
     if mask is not None: intn = intn.expand(mask.shape + (3,))[mask]
     spectrum = intn/decay.clamp(min=1e-6).unsqueeze(-1)
 
-    return dir, dist, spectrum
+    return d, dist, spectrum

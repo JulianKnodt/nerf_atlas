@@ -59,17 +59,18 @@ class LearnedLighting(nn.Module):
     latent_size:int=0,
   ):
     super().__init__()
+    in_size=6
     self.attenuation = SkipConnMLP(
-      in_size=5, out=1, latent_size=latent_size, num_layers=5, hidden_size=128,
-      enc=FourierEncoder(input_dims=5), xavier_init=True,
+      in_size=in_size, out=1, latent_size=latent_size, num_layers=5, hidden_size=128,
+      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, dist, spectrum = lights(pts, mask=mask)
     far = dist.max().item() if mask.any() else 6
-    visible = isect_fn(pts, dir, near=1e-5, far=far)
-    att = self.attenuation(torch.cat([pts, dir_to_elev_azim(dir)], dim=-1), latent)\
-      .sigmoid()
+    # TODO why doesn't this isect fn seem to work?
+    visible = isect_fn(r_o=pts, r_d=dir, near=2e-3, far=3, eps=1e-3)
+    att = self.attenuation(torch.cat([pts, dir], dim=-1), latent).sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
 
@@ -79,7 +80,7 @@ class AllLearnedOcc(nn.Module):
     latent_size:int=0,
   ):
     super().__init__()
-    in_size=5
+    in_size=6
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
       enc=FourierEncoder(input_dims=in_size),
@@ -88,8 +89,7 @@ class AllLearnedOcc(nn.Module):
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)
-    elaz = dir_to_elev_azim(dir)
-    att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
+    att = self.attenuation(torch.cat([pts, dir], dim=-1), latent).sigmoid()
     return dir, spectrum * att
 
 class Renderer(nn.Module):

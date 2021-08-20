@@ -187,9 +187,9 @@ def elev_azim_to_dir(elev_azim):
   return direction
 
 
-lim = 1 - 1e-6
-#@torch.jit.script
+@torch.jit.script
 def dir_to_elev_azim(direc):
+  lim = 1 - 1e-6
   x, y, z = F.normalize(direc, dim=-1).clamp(min=-lim, max=lim).split([1,1,1], dim=-1)
   elev = z.acos()
   azim = torch.atan2(y,x)

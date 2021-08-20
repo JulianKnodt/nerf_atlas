@@ -232,7 +232,7 @@ class Rusin(Reflectance):
       enc=FourierEncoder(input_dims=rusin_size),
       xavier_init=True,
 
-      num_layers=5, hidden_size=256,
+      num_layers=3, hidden_size=256,
     )
     self.space = space
 
@@ -247,7 +247,7 @@ class Rusin(Reflectance):
 
     # TODO would it be good to detach the normal? is it trying to fix the surface
     # to make it look better?
-    frame = coordinate_system(normal.detach())
+    frame = coordinate_system(normal)
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     # have to move view and light into basis of normal
@@ -273,7 +273,7 @@ class MultiRusin(Reflectance):
       enc=FourierEncoder(input_dims=pos_size),
       xavier_init=True,
 
-      num_layers=5, hidden_size=128,
+      num_layers=3, hidden_size=128,
     )
     rusin_size = 3
     self.rusin = SkipConnMLP(
@@ -367,11 +367,9 @@ def coordinate_system(n):
   return torch.stack([s, t, n], dim=-1)
 
 # frame: [..., 3, 3], wo: [..., 3], return a vector of wo in the reference frame
-#@torch.jit.script
+@torch.jit.script
 def to_local(frame, wo):
-  wo = wo.unsqueeze(-1)#.expand_as(frame) # TODO see if commenting out this expand_as works
-  out = F.normalize((frame * wo).sum(dim=-2), eps=1e-7, dim=-1)
-  return out
+  return F.normalize((frame * wo.unsqueeze(-1)).sum(dim=-2), eps=1e-7, dim=-1)
 
 # Spherical Harmonics computes reflectance of a given viewing direction using the spherical
 # harmonic basis.
