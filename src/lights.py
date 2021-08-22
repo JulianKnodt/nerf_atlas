@@ -41,55 +41,51 @@ class Point(Light):
     train_center=False,
     intensity=[1],
     train_intensity=False,
-    const: float=1e-6,
-    linear:float=1e-6,
-    square:float=1,
-    train_decay=False,
   ):
     super().__init__()
     if type(center) == torch.Tensor: self.center = center
     else:
-      self.center = nn.Parameter(torch.tensor(
-        center, requires_grad=train_center, dtype=torch.float,
-      ))
+      center = torch.tensor(center, requires_grad=train_center, dtype=torch.float)
+      self.center = nn.Parameter(center)
     self.train_center = train_center
 
     if type(intensity) == torch.Tensor: self.intensity = intensity
     else:
       if len(intensity) == 1: intensity = intensity * 3
-      intensity = torch.tensor(
-        intensity, requires_grad=train_intensity, dtype=torch.float,
-      ).expand([self.center.shape[0], -1])
+      intensity = torch.tensor(intensity, requires_grad=train_intensity, dtype=torch.float)\
+        .expand_as(self.center)
       self.intensity = nn.Parameter(intensity)
     self.train_intensity = train_intensity
-    rg = self.train_decay = train_decay
-    self.const  = nn.Parameter(torch.tensor( const, dtype=torch.float, requires_grad=rg))
-    self.linear = nn.Parameter(torch.tensor(linear, dtype=torch.float, requires_grad=rg))
-    self.square = nn.Parameter(torch.tensor(square, dtype=torch.float, requires_grad=rg))
+
+  # returns some subset of the training batch
   def __getitem__(self, v):
     return Point(
-      center=self.center[v], train_center=self.train_center,
-      intensity=self.intensity[v], train_intensity=self.train_intensity,
-      const=self.const.item(),
-      linear=self.linear.item(),
-      square=self.square.item(),
-      train_decay=self.train_decay,
+      center=self.center[v],
+      train_center=self.train_center,
+      intensity=self.intensity[v],
+      train_intensity=self.train_intensity,
     )
   @property
   def can_sample(self): return True
+  # return a singular light from a batch, altho it may be more efficient to use batching
+  # this is conceptually nicer, and allows for previous code to work.
+  def iter(self):
+    for i in range(self.center.shape[1]):
+      yield Point(
+        center=self.center[:, i, :],
+        train_center=self.train_center,
+        intensity=self.intensity[:, i, :],
+        train_intensity=self.train_intensity,
+      )
   def forward(self, x, mask=None):
     loc = self.center[:, None, None, :]
-    if mask is not None: loc = loc.expand(mask.shape + (3,))[mask]
+    if mask is not None: loc = loc.expand((*mask.shape, 3))[mask]
     # direction from pts to the light
     d = loc - x
     dist = torch.linalg.norm(d, dim=-1)
     d = F.normalize(d, eps=1e-6, dim=-1)
-    #decay = self.const.clamp(min=1e-6) + \
-    #  self.linear.clamp(min=1e-6) * dist + \
-    #  self.square.clamp(min=1e-6) * dist.square()
     decay = dist.square()
     intn = self.intensity[:, None, None, :]
-    if mask is not None: intn = intn.expand(mask.shape + (3,))[mask]
-    spectrum = intn/decay.clamp(min=1e-6).unsqueeze(-1)
-
+    if mask is not None: intn = intn.expand((*mask.shape, 3,))[mask]
+    spectrum = intn/decay.clamp(min=1e-5).unsqueeze(-1)
     return d, dist, spectrum

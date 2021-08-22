@@ -1,7 +1,7 @@
 # A bunch of loaders for various NeRF datasets.
 # Each loader returns the dataset, as well a camera model which can be constructed
 # from the returned type
-# Loader(...) -> Labels, Camera
+# Loader(...) -> Labels, Camera, Optional<Lights>
 
 import json
 import os
@@ -84,8 +84,7 @@ def original(
     if white_bg: img = img[..., :3]*img[..., -1:] + (1-img[..., -1:])
     exp_imgs.append(img[..., :channels])
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
-    if normalize:
-      tf_mat[:3, 3] = F.normalize(tf_mat[:3, 3], dim=-1)
+    if normalize: tf_mat[:3, 3] = F.normalize(tf_mat[:3, 3], dim=-1)
     cam_to_worlds.append(tf_mat)
 
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
@@ -189,15 +188,17 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
   exp_imgs = []
   exp_masks = []
   light_locs = []
+  light_weights = []
   focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
   cam_to_worlds=[]
+
   frames = tfs["frames"]
-  # TODO the later frames have multiple lights, but I don't have a way to handle that currently.
   if not training: frames = frames[:100]
+  #if not training: frames = frames[100:]
   for frame in frames:
     img = load_exr(os.path.join(path, frame['file_path'] + '.exr')).permute(2,0,1)
     img = TVF.resize(img, size=(size, size))
-    img[:3,...] = TVF.adjust_gamma(img[:3,...], 1/(2.2*2.2))
+    img[:3,...] = TVF.adjust_gamma(img[:3,...].clamp(min=1e-10), 1/2.2)
     img = img.permute(1,2,0)
     exp_imgs.append(img[..., :3])
     exp_masks.append((img[..., 3] - 1e-5).ceil())
@@ -206,7 +207,13 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
     cam_to_worlds.append(tf_mat)
     # also have to update light positions since normalizing to unit sphere
     ll = torch.tensor(frame['light_loc'], dtype=torch.float, device=device)
+    if len(ll.shape) == 1: ll = ll[None, ...]
     light_locs.append(ll)
+    w = torch.tensor(frame.get('light_weights', [[1,1,1]]),dtype=torch.float,device=device)
+    w = w[..., :3]
+    # TODO figure out the weight of other lights
+    weights = 100 if w.shape[0] == 1 else 66
+    light_weights.append(w * weights)
 
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device).clamp(min=0, max=1)
   if with_mask:
@@ -216,7 +223,9 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
   light_locs = torch.stack(light_locs, dim=0).to(device)
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
 
-  light = lights.Point(center=light_locs, intensity=[100.])
+  light_weights = torch.stack(light_weights, dim=0)
+  light = lights.Point(center=light_locs, intensity=light_weights)
+  assert(exp_imgs.isfinite().all())
   return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal), light.to(device)
 
 

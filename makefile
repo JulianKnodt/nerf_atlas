@@ -98,15 +98,15 @@ dtu: clean
 # hotdogs | armadillo, fun datasets :)
 nerv_dataset := hotdogs
 nerv_point: clean
-	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
+	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind multi_rusin \
+	--near 2 --far 6 --batch-size 4 -lr 4.5e-4 --refl-kind multi_rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
-	--notraintest \
 	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz \
+  --notraintest \
   --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean

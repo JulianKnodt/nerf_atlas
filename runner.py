@@ -461,6 +461,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
       save_losses(args, losses)
+  save(model, args)
   save_losses(args, losses)
 
 def test(model, cam, labels, args, training: bool = True, light=None):
@@ -699,7 +700,6 @@ def main():
   if args.no_sched: sched = None
   train(model, cam, labels, opt, args, light=light, sched=sched)
 
-  if args.epochs != 0: save(model, args)
   if args.notest: return
 
   if not args.notraintest: test(model, cam, labels, args, training=True, light=light)

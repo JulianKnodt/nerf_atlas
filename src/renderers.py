@@ -123,10 +123,38 @@ def direct(shape, refl, occ, rays, training=True):
   pts, hits, tput, n = shape.intersect_w_n(r_o, r_d)
   _, latent = shape.from_pts(pts[hits])
 
-  light_dir, light_val = occ(pts, refl.light, shape.intersect_mask, mask=hits, latent=latent)
-  bsdf_val = refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
   out = torch.zeros_like(r_d)
-  out[hits] = bsdf_val * light_val
+  for light in refl.light.iter():
+    light_dir, light_val = occ(pts, light, shape.intersect_mask, mask=hits, latent=latent)
+    bsdf_val = refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
+    out[hits] = out[hits] + bsdf_val * light_val
+  if training: out = torch.cat([out, tput], dim=-1)
+  return out
+
+def path(shape, refl, occ, rays, training=True):
+  r_o, r_d = rays.split([3, 3], dim=-1)
+
+  pts, hits, tput, n = shape.intersect_w_n(r_o, r_d)
+  _, latent = shape.from_pts(pts[hits])
+
+  out = torch.zeros_like(r_d)
+  for light in refl.light.iter():
+    light_dir, light_val = occ(pts, light, shape.intersect_mask, mask=hits, latent=latent)
+    bsdf_val = refl(x=pts[hits], view=r_d[hits], normal=n[hits], light=light_dir, latent=latent)
+    out[hits] = out[hits] + bsdf_val * light_val
+
+  # TODO this should just be a random sample of pts in some range?
+  pts_2nd_ord = pts.reshape(-1, 3)
+  pts_2nd_ord = pts[torch.randint(high=pts_2nd_ord.shape[0], size=32, device=pts.device), :]
+  with torch.no_grad():
+    # compute light to set of points
+    light_dir, light_val = occ(pts_2nd_ord, shape.intersect_mask, latent=latent)
+    # compute dir from each of the 2nd order pts to the main points
+    dirs = pts_2nd_ord - pts
+    # TODO apply the learned occlusion here
+    att = occ.attenuation(torch.cat([pts_2nd_ord, dirs], dim=-1), latent=latent)
+    # TODO this should account for the BSDF when computing the reflected component
+    out[hits] = out[hits] + att * light_val
   if training: out = torch.cat([out, tput], dim=-1)
   return out
 
