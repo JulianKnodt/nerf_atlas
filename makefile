@@ -98,26 +98,27 @@ dtu: clean
 # hotdogs | armadillo, fun datasets :)
 nerv_dataset := hotdogs
 nerv_point: clean
-	python3 -O runner.py -d data/nerv_public_release/${nerv_dataset}/ \
+	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 10_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 2e-4 --refl-kind rusin \
+	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 4.5e-4 --refl-kind multi_rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
-	--notraintest \
-	--loss-fns l2 --valid-freq 499 --occ-kind learned \
+	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
+  --color-spaces rgb hsv xyz \
+  --notraintest \
   --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model sdf --sdf-kind mlp \
 	--save models/nerv_sdf_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 16 --epochs 50_000 --loss-window 500 \
-	--near 2 --far 6 --batch-size 24 -lr 3e-4 --refl-kind rusin \
+	--size 200 --crop --crop-size 32 --epochs 20_000 --loss-window 500 \
+	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind multi_rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l1 l2 --valid-freq 250 --save-freq 1000 --seed -1 \
-	--occ-kind learned --sdf-isect-kind bisect \
-  --integrator-kind direct --omit-bg \
+	--loss-fns l2 l1 --valid-freq 250 --save-freq 1000 --seed -1 \
+	--occ-kind learned --sdf-isect-kind bisect --replace occ \
+  --integrator-kind direct --color-spaces rgb hsv xyz \
 	--load models/nerv_sdf_${nerv_dataset}.pt
 
 nerv_point_alternating: clean
@@ -125,12 +126,12 @@ nerv_point_alternating: clean
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_alt_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 12 --epochs 50_000 --loss-window 500 \
-	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin \
+	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
-	--loss-fns l1 l2 --valid-freq 251 --save-freq 2500 --seed -1 \
-	--occ-kind learned --volsdf-alternate --notraintest \
-	--sdf-isect-kind bisect \
-	#--load models/nerv_alt_${nerv_dataset}.pt
+	--loss-fns l1 l2 --valid-freq 250 --save-freq 2500 --seed -1 \
+	--occ-kind all-learned --volsdf-alternate --notraintest \
+	--sdf-isect-kind bisect --color-spaces rgb hsv xyz \
+	--load models/nerv_alt_${nerv_dataset}.pt
 
 # -- End NeRV tests
 

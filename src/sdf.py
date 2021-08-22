@@ -133,7 +133,7 @@ class SDF(nn.Module):
     return pts, hit, tput, self.normals(pts)
   def intersect_mask(self, r_o, r_d, near=None, far=None, eps=1e-3):
     with torch.no_grad():
-      return ~self.isect(
+      return ~march.sphere_march(
         self.underlying, r_o, r_d, eps=eps,
         near=self.near if near is None else near,
         far=self.far if far is None else far,

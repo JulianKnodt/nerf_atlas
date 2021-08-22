@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
+import math
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, thin_sigmoid )
@@ -23,6 +24,7 @@ def load(args, latent_size):
     cons = Basic
     if args.light_kind is not None: kwargs["light"] = "elaz"
   elif args.refl_kind == "rusin": cons = Rusin
+  elif args.refl_kind == "multi_rusin": cons = MultiRusin
   elif args.refl_kind == "view_dir" or args.refl_kind == "curr": cons = View
   elif args.refl_kind == "diffuse": cons = Diffuse
   elif args.refl_kind == "sph-har":
@@ -83,20 +85,33 @@ class Reflectance(nn.Module):
     act=torch.sigmoid,
     latent_size:int = 0,
     out_features:int = 3,
+    spherical_harmonic_order:int = 0,
 
     # delete unused
     normal=None,
     light=None,
   ):
     super().__init__()
-    self.act = act
+    self.sho = sho = spherical_harmonic_order
     self.latent_size = latent_size
-    self.out_features = out_features
+    self.out_features = out_features * (sho + 1) * (sho + 1)
+
+    self.act = act
+
   def forward(self, x, view,normal=None,light=None,latent=None): raise NotImplementedError()
   @property
   def can_use_normal(self): return False
   @property
   def can_use_light(self): return False
+
+  def sph_ham(sh_coeffs, view):
+    # not spherical harmonic coefficients
+    if self.sho == 0: return sh_coeffs
+    return eval_sh(
+      self.sho,
+      sh_coeffs.reshape(sh_coeffs.shape[:-1] + (self.out_features, -1)),
+      F.normalize(view, dim=-1),
+    )
 
 def ident(x): return x
 def empty(_): return None
@@ -203,21 +218,21 @@ class Rusin(Reflectance):
   ):
     super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
-    pos_size = space.dims
-    self.pos = SkipConnMLP(
-      in_size=pos_size, out=3+32, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=pos_size),
-      xavier_init=True,
+    _pos_size = space.dims
+    #self.pos = SkipConnMLP(
+    #  in_size=pos_size, out=3+32, latent_size=self.latent_size,
+    #  enc=FourierEncoder(input_dims=pos_size),
+    #  xavier_init=True,
 
-      num_layers=5, hidden_size=256,
-    )
+    #  num_layers=5, hidden_size=256,
+    #)
     rusin_size = 3
     self.rusin = SkipConnMLP(
-      in_size=rusin_size, out=self.out_features, latent_size=self.latent_size+32,
+      in_size=rusin_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=rusin_size),
       xavier_init=True,
 
-      num_layers=5, hidden_size=256,
+      num_layers=3, hidden_size=256,
     )
     self.space = space
 
@@ -227,34 +242,46 @@ class Rusin(Reflectance):
   def can_use_light(self): return True
 
   def forward(self, x, view, normal, light, latent=None):
-    raw_pos = self.pos(self.space(x), latent)
-    color, pos_latent = raw_pos[..., :3], raw_pos[..., 3:]
-    return color.sigmoid()
+    #raw_pos = self.pos(self.space(x), latent)
+    #color, pos_latent = raw_pos[..., :3], raw_pos[..., 3:]
+
+    # TODO would it be good to detach the normal? is it trying to fix the surface
+    # to make it look better?
     frame = coordinate_system(normal)
-    wo = to_local(frame, view)
+    wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     # have to move view and light into basis of normal
     rusin = rusin_params(wo, wi)
     # view dependent effects
-    raw = self.rusin(rusin, torch.cat([latent, pos_latent], dim=-1))
-    return (color+raw).sigmoid()
+    raw = self.rusin(rusin, latent)
+    #v = self.sph_ham(raw, view)
+    return F.leaky_relu(raw)
 
 class MultiRusin(Reflectance):
   def __init__(
     self,
     space=None,
-    n:int=6,
+    n=5,
     **kwargs,
   ):
     super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
-    in_size = 3 + space.dims
-    self.mlp = SkipConnMLP(
-      in_size=in_size, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size),
+    self.n = n
+    pos_size = space.dims
+    self.pos = SkipConnMLP(
+      in_size=pos_size, out=n, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=pos_size),
       xavier_init=True,
 
-      num_layers=6, hidden_size=256,
+      num_layers=3, hidden_size=128,
+    )
+    rusin_size = 3
+    self.rusin = SkipConnMLP(
+      in_size=rusin_size, out=self.out_features * n, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=rusin_size, freqs=64),
+      xavier_init=True,
+
+      num_layers=5, hidden_size=256,
     )
     self.space = space
 
@@ -264,14 +291,22 @@ class MultiRusin(Reflectance):
   def can_use_light(self): return True
 
   def forward(self, x, view, normal, light, latent=None):
+    # in theory, it makes more sense to have this be a softmax,
+    # but in practice, having it be sigmoid works better for some reason.
+    selects = self.pos(self.space(x), latent).sigmoid()
+
+    # TODO would it be good to detach the normal? is it trying to fix the surface
+    # to make it look better?
     frame = coordinate_system(normal)
-    wo = to_local(frame, view)
+    wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     # have to move view and light into basis of normal
     rusin = rusin_params(wo, wi)
-    x = self.space(x)
-    raw = self.mlp(torch.cat([x, rusin], dim=-1), latent)
-    return raw.sigmoid()
+    # view dependent effects
+    raw = self.rusin(rusin, latent)\
+      .reshape(x.shape[:-1] + (self.n, self.out_features))\
+      .sigmoid()
+    return (raw * selects.unsqueeze(-1)).sum(dim=-2)
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
@@ -301,9 +336,11 @@ def rusin_params(wo, wi):
   diff = F.normalize(rotate_vector(tmp, e_1, c, s), eps=1e-6, dim=-1)
   cos_theta_d = diff[..., 2]
 
-  cos_phi_d = torch.atan2(nonzero_eps(diff[..., 1]), nonzero_eps(diff[..., 0]))
+  phi_d = torch.atan2(nonzero_eps(diff[..., 1]), nonzero_eps(diff[..., 0]))
+  phi_d = phi_d.cos()
+  #phi_d = torch.remainder(phi_d, math.pi)
 
-  return torch.stack([cos_phi_d, cos_theta_h, cos_theta_d], dim=-1)
+  return torch.stack([phi_d, cos_theta_h, cos_theta_d], dim=-1)
 
 # https://github.com/mitsuba-renderer/mitsuba2/blob/main/include/mitsuba/core/vector.h#L116
 # had to be significantly modified in order to add numerical stability while back-propagating.
@@ -316,7 +353,7 @@ def coordinate_system(n):
   s_z = sign + z
   a = -torch.where(
     s_z.abs() < 1e-6,
-    torch.tensor(1e-6, device=z.device),
+    torch.copysign(torch.tensor(1e-6, device=z.device), s_z),
     s_z,
   ).reciprocal()
   b = x * y * a
@@ -330,11 +367,9 @@ def coordinate_system(n):
   return torch.stack([s, t, n], dim=-1)
 
 # frame: [..., 3, 3], wo: [..., 3], return a vector of wo in the reference frame
-#@torch.jit.script
+@torch.jit.script
 def to_local(frame, wo):
-  wo = wo.unsqueeze(-1)#.expand_as(frame) # TODO see if commenting out this expand_as works
-  out = F.normalize((frame * wo).sum(dim=-2), eps=1e-7, dim=-1)
-  return out
+  return F.normalize((frame * wo.unsqueeze(-1)).sum(dim=-2), eps=1e-7, dim=-1)
 
 # Spherical Harmonics computes reflectance of a given viewing direction using the spherical
 # harmonic basis.
@@ -358,11 +393,11 @@ class SphericalHarmonic(Reflectance):
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
-    sh_coeffs = self.act(self.mlp(v, latent))
+    sh_coeffs = self.mlp(v, latent)
     rgb = eval_sh(
       self.order,
       sh_coeffs.reshape(sh_coeffs.shape[:-1] + (self.out_features, -1)),
       F.normalize(view, dim=-1),
     )
-    return rgb.sigmoid()
+    return self.act(rgb)
 

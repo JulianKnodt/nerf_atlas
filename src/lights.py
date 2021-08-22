@@ -45,35 +45,47 @@ class Point(Light):
     super().__init__()
     if type(center) == torch.Tensor: self.center = center
     else:
-      self.center = nn.Parameter(torch.tensor(
-        center, requires_grad=train_center, dtype=torch.float,
-      ))
+      center = torch.tensor(center, requires_grad=train_center, dtype=torch.float)
+      self.center = nn.Parameter(center)
     self.train_center = train_center
 
     if type(intensity) == torch.Tensor: self.intensity = intensity
     else:
       if len(intensity) == 1: intensity = intensity * 3
-      intensity = torch.tensor(
-        intensity, requires_grad=train_intensity, dtype=torch.float,
-      ).expand([self.center.shape[0], -1])
+      intensity = torch.tensor(intensity, requires_grad=train_intensity, dtype=torch.float)\
+        .expand_as(self.center)
       self.intensity = nn.Parameter(intensity)
     self.train_intensity = train_intensity
+
+  # returns some subset of the training batch
   def __getitem__(self, v):
     return Point(
-      center=self.center[v], train_center=self.train_center,
-      intensity=self.intensity[v], train_intensity=self.train_intensity,
+      center=self.center[v],
+      train_center=self.train_center,
+      intensity=self.intensity[v],
+      train_intensity=self.train_intensity,
     )
   @property
   def can_sample(self): return True
+  # return a singular light from a batch, altho it may be more efficient to use batching
+  # this is conceptually nicer, and allows for previous code to work.
+  def iter(self):
+    for i in range(self.center.shape[1]):
+      yield Point(
+        center=self.center[:, i, :],
+        train_center=self.train_center,
+        intensity=self.intensity[:, i, :],
+        train_intensity=self.train_intensity,
+      )
   def forward(self, x, mask=None):
     loc = self.center[:, None, None, :]
-    if mask is not None: loc = loc.expand(mask.shape + (3,))[mask]
-    d = x - loc
+    if mask is not None: loc = loc.expand((*mask.shape, 3))[mask]
+    # direction from pts to the light
+    d = loc - x
     dist = torch.linalg.norm(d, dim=-1)
-    dir = F.normalize(d, eps=1e-6, dim=-1)
+    d = F.normalize(d, eps=1e-6, dim=-1)
     decay = dist.square()
     intn = self.intensity[:, None, None, :]
-    if mask is not None: intn = intn.expand(mask.shape + (3,))[mask]
-    spectrum = intn/decay.clamp(min=1e-6).unsqueeze(-1)
-
-    return dir, spectrum
+    if mask is not None: intn = intn.expand((*mask.shape, 3,))[mask]
+    spectrum = intn/decay.clamp(min=1e-5).unsqueeze(-1)
+    return d, dist, spectrum
