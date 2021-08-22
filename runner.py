@@ -168,6 +168,10 @@ def arguments():
     "--smooth-normals", help="Amount to attempt to smooth normals", type=float, default=0,
   )
   sdfa.add_argument(
+    "--smooth-eps", help="size of random uniform perturbation for smooth normals regularization", 
+    type=float, default=0,
+  )
+  sdfa.add_argument(
     "--sdf-kind", help="Which SDF model to use", type=str,
     choices=["spheres", "siren", "local", "mlp", "triangles"], default="mlp",
   )
@@ -432,10 +436,14 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     # TODO does it matter to normalize the normal or not?
     if args.smooth_normals > 0:
       # TODO maybe lower dimensionality of n?
-      delta_n = torch.autograd.grad(
-        inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
-        grad_outputs=torch.ones_like(n),
-      )[0]
+      #delta_n = torch.autograd.grad(
+      #  inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
+      #  grad_outputs=torch.ones_like(n),
+      #)[0]
+      # epsilon implementation from unisurf
+      perturbation = F.normalize(torch.rand(3, device=device), dim=-1) * args.smooth_eps
+      perturbation = perturbation.expand(pts.size())
+      delta_n = n - model.sdf.normals(pts + perturbation)
       # TODO maybe convert this to abs? seems to work for nerfactor, altho unisurf uses square?
       loss = loss + args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
 
