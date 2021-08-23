@@ -433,7 +433,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if args.smooth_normals > 0:
       # TODO maybe lower dimensionality of n?
       delta_n = torch.autograd.grad(
-        inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
+        inputs=pts, outputs=F.normalize(n,dim=-1), retain_graph=True, create_graph=True,
         grad_outputs=torch.ones_like(n),
       )[0]
       # TODO maybe convert this to abs? seems to work for nerfactor, altho unisurf uses square?
