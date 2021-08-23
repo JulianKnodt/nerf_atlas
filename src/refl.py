@@ -400,3 +400,4 @@ class SphericalHarmonic(Reflectance):
       F.normalize(view, dim=-1),
     )
     return self.act(rgb)
+
