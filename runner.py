@@ -437,8 +437,8 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if args.smooth_normals > 0:
       if args.smooth_eps > 0:
         # epsilon-perturbation implementation from unisurf
-        perturbation = F.normalize(torch.rand(3, device=device), dim=-1) * args.smooth_eps
-        perturbation = perturbation.expand(pts.size())
+        perturbation = F.normalize(2*torch.rand(3, device=device)-1, dim=-1) * args.smooth_eps
+        perturbation = perturbation.expand(pts.shape)
         delta_n = n - model.sdf.normals(pts + perturbation)
       else:
         # TODO maybe lower dimensionality of n?
