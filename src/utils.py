@@ -147,6 +147,13 @@ def rotate_vector(v, axis, c, s):
 
 def mse2psnr(x): return -10 * torch.log10(x)
 
+def msssim_loss(xs, refs):
+  # only import here in case not installed.
+  from pytorch_msssim import ( ms_ssim )
+  xs = torch.stack(xs, dim=0).permute(0, 3, 1, 2)
+  refs = torch.stack(refs, dim=0).permute(0, 3, 1, 2)
+  return ms_ssim(xs, refs, data_range=1, size_average=True).item()
+
 # tone mapping is used in NeRV before the loss function. It will accentuate smaller loss items.
 def tone_map(loss_fn):
   def tone_mapped_loss(got, ref): return loss_fn(got/(1+got), ref/(1+ref))
@@ -253,6 +260,21 @@ def rgb2xyz(v):
   ], device=v.device).unsqueeze(0).expand((v.shape[0],3,3))
   xyz = torch.bmm(tf_mat, v.unsqueeze(-1)).squeeze(-1)/0.17697
   return xyz
+
+def sample_random_hemisphere(around, num_samples:int=32):
+  u,v = torch.rand(num_samples, 2, device=around.device).split([1,1], dim=-1)
+  sin_theta = (-u * (u-2)).clamp(min=1e-8).sqrt()
+  phi = 2 * math.pi * v
+
+  x = sin_theta * phi.cos()
+  y = sin_theta * phi.sin()
+
+  z = (1 - x.square() - y.square()).clamp(min=1e-8)
+  # TODO how to apply this to around? Convert normals into coordinate systems then convert
+  # direction from local coordinate system? is there a cheaper way?
+  dirs = torch.cat([x,y,z], dim=-1)
+  cs = coordinate_system(n)
+  return from_local(cs, dirs)
 
 #https://github.com/albertpumarola/D-NeRF/blob/main/load_blender.py#L62
 def spherical_pose(elev, azim, rad):

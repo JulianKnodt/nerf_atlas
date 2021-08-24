@@ -106,6 +106,10 @@ def arguments():
   a.add_argument(
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action="store_true",
   )
+  a.add_argument(
+    "--nerv-multi-point", help="Use NeRV multi point light dataset for testing",
+    action="store_true",
+  )
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
@@ -221,7 +225,10 @@ def arguments():
     "--param-file", type=str, default=None, help="Path to JSON file to use for hyper-parameters",
   )
   rprt.add_argument(
-    "--skip-loss", type=int, default=0, help="Number of epochs to skip loss for",
+    "--skip-loss", type=int, default=0, help="Number of epochs to skip reporting loss for",
+  )
+  rprt.add_argument(
+    "--msssim-loss", action="store_true", help="Report ms-ssim loss during testing",
   )
 
   meta = a.add_argument_group("meta runner parameters")
@@ -482,6 +489,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
     labels = labels[0]
 
   ls = []
+  gots = []
   with torch.no_grad():
     for i in range(labels.shape[0]):
       ts = None if times is None else times[i:i+1, ...]
@@ -513,6 +521,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
             #normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
             #  model.sdf.debug_normals(
 
+      gots.append(got)
       loss = F.mse_loss(got, exp)
       psnr = utils.mse2psnr(loss).item()
       ts = "" if ts is None else f",t={ts.item():.02f}"
@@ -530,6 +539,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
           min {min(ls):.03f}
           max {max(ls):.03f}
           var {np.var(ls):.03f}""")
+  if args.msssim_loss:
+    msssim = utils.msssim_loss(gots, refs)
+    print(f"\tms-ssim {mssim:.03f}")
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
@@ -584,6 +596,7 @@ def load_model(args):
     constructor = nerf.VolSDF
     kwargs["sdf"] = sdf.load(args)
     kwargs["occ_kind"] = args.occ_kind
+    kwargs["integrator_kind"] = args.integrator_kind or "direct"
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
 

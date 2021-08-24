@@ -422,6 +422,7 @@ class VolSDF(CommonNeRF):
     device: torch.device = "cuda",
 
     occ_kind=None,
+    integrator_kind="direct",
     **kwargs,
   ):
     super().__init__(**kwargs, device=device)
@@ -432,15 +433,43 @@ class VolSDF(CommonNeRF):
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), "Must have light w/ volsdf integration"
       self.occ = load_occlusion_kind(occ_kind, self.sdf.latent_size)
-      self.secondary = self.direct
-  def direct(self, weights, pts, view, n, latent):
+      if integrator_kind == "direct": self.secondary = self.direct
+      elif integrator_kind == "path": self.secondary = self.path
+      else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
+  def direct(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
     for light in self.sdf.refl.light.iter():
       light_dir, light_val = self.occ(pts, light, self.sdf.intersect_mask, latent=latent)
       bsdf_val = self.sdf.refl(x=pts, view=view, normal=n, light=light_dir, latent=latent)
       out = out + bsdf_val * light_val
-    assert(out.isfinite().all())
     return out
+  def path(self, r_o, weights, pts, view, n, latent):
+    out = torch.zeros_like(pts)
+
+    dirs = utils.sample_random_hemisphere(n, amt=32)
+    ext_pts, ext_hits, dists, _ = march.sphere_march(
+      self.sdf, pts[None,...].expand_as(dirs), dirs, iters=64, near=1e-3, far=10,
+    )
+    decays = 1/dists.square()
+    # TODO shape correctly
+    ext_view = F.normalize(r_o - ext_pts, dim=-1)
+    # TODO compute normal at ext_pts
+    ext_n = TODO
+    path_bsdf = self.sdf.refl(
+      x=ext_pts, view=ext_view, normal=ext_n, light=bounce_dirs, latent=latent,
+    )
+
+    for light in self.sdf.refl.light.iter():
+      # direct lighting at each point
+      light_dir, light_val = self.occ(pts, light, self.sdf.intersect_mask, latent=latent)
+      bsdf_val = self.sdf.refl(x=pts, view=view, normal=n, light=light_dir, latent=latent)
+      out = out + bsdf_val * light_val
+      # TODO compute light contribution and bsdf at external points, multiply by path_bsdf, and
+      # attenuation and add to out
+    return out
+    out = torch.zeros_like(pts)
+    for light in self.sdf.refl.light.iter():
+      raise NotImplementedError
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
@@ -468,7 +497,7 @@ class VolSDF(CommonNeRF):
 
     view = r_d.unsqueeze(0).expand_as(pts)
     if self.secondary is None: rgb = self.sdf.refl(x=pts, view=view, normal=n, latent=latent)
-    else: rgb = self.secondary(self.weights, pts, view, n, latent)
+    else: rgb = self.secondary(r_o, self.weights, pts, view, n, latent)
 
     return volumetric_integrate(self.weights, rgb)
 

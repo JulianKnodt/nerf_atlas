@@ -38,6 +38,7 @@ def load(args, training=True, device="cuda"):
     return nerv_point(
       args.data, training=training, size=size,
       with_mask = with_mask,
+      multi_point = args.nerv_multi_point,
       device=device,
     )
   elif kind == "dtu":
@@ -178,7 +179,7 @@ def dtu(path=".", training=True, size=256, with_mask=False, device="cuda"):
   return exp_imgs, cameras.DTUCamera(pose=poses, intrinsic=intrinsics), None
 
 # https://docs.google.com/document/d/1KI7YtWl3nAuS6xH2WFWug87o-1G6PP4GHrnNzZ0LeUk/edit
-def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"):
+def nerv_point(path=".", training=True, size=200, multi_point=False, with_mask=False, device="cuda"):
   import imageio
   def load_exr(path): return torch.from_numpy(imageio.imread(path))
 
@@ -193,8 +194,7 @@ def nerv_point(path=".", training=True, size=256, with_mask=False, device="cuda"
   cam_to_worlds=[]
 
   frames = tfs["frames"]
-  if not training: frames = frames[:100]
-  #if not training: frames = frames[100:]
+  frames = frames[:100] if multi_point else frames[100:]
   for frame in frames:
     img = load_exr(os.path.join(path, frame['file_path'] + '.exr')).permute(2,0,1)
     img = TVF.resize(img, size=(size, size))
