@@ -262,6 +262,7 @@ def rgb2xyz(v):
   return xyz
 
 def sample_random_hemisphere(around, num_samples:int=32):
+  n = num_samples
   u,v = torch.rand(num_samples, 2, device=around.device).split([1,1], dim=-1)
   sin_theta = (-u * (u-2)).clamp(min=1e-8).sqrt()
   phi = 2 * math.pi * v
@@ -269,12 +270,35 @@ def sample_random_hemisphere(around, num_samples:int=32):
   x = sin_theta * phi.cos()
   y = sin_theta * phi.sin()
 
-  z = (1 - x.square() - y.square()).clamp(min=1e-8)
+  z = (1 - x.square() - y.square()).clamp(min=1e-8).sqrt()
   # TODO how to apply this to around? Convert normals into coordinate systems then convert
   # direction from local coordinate system? is there a cheaper way?
   dirs = torch.cat([x,y,z], dim=-1)
-  cs = coordinate_system(n)
-  return from_local(cs, dirs)
+  basis = torch.tensor([0,0,1], dtype=torch.float, device=u.device)
+  ar_flat = around.reshape(-1, 3)
+  R = rot_from(ar_flat, basis.unsqueeze(0).expand_as(ar_flat), dim=-1)
+  R0 = R.shape[0]
+  R = R.repeat(num_samples,1,1)
+  dirs = dirs.repeat(R0, 1)
+  return torch.bmm(R, dirs.unsqueeze(-1))\
+    .reshape((n, *around.shape))
+
+def rot_from(a, b, dim=-1):
+  v = torch.cross(a,b, dim=dim)
+  c = (a * b).sum(dim=dim, keepdim=True).unsqueeze(-1)
+  ssm = skew_symmetric_matrix(v)
+  R = torch.eye(3, device=a.device).unsqueeze(0) + ssm + \
+    torch.bmm(ssm, ssm) * 1/(1+c).clamp(min=1e-8)
+  return R
+
+def skew_symmetric_matrix(v):
+  x,y,z = v.split([1,1,1], dim=-1)
+  O = torch.zeros_like(x)
+  return torch.stack([
+      O,-z, y,
+      z, O,-x,
+     -y, x, O
+   ], dim=-1).reshape((*v.shape[:-1],3,3))
 
 #https://github.com/albertpumarola/D-NeRF/blob/main/load_blender.py#L62
 def spherical_pose(elev, azim, rad):

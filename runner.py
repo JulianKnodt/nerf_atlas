@@ -565,7 +565,7 @@ def set_per_run(model, args):
 
 
 def load_model(args):
-  if args.model == "sdf": return sdf.load(args).to(device)
+  if args.model == "sdf": return sdf.load(args, with_integrator=True).to(device)
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   if args.model != "ae": args.latent_l2_weight = 0
   mip = utils.load_mip(args)
@@ -594,7 +594,7 @@ def load_model(args):
     kwargs["encoding_size"] = args.encoding_size
   elif args.model == "volsdf":
     constructor = nerf.VolSDF
-    kwargs["sdf"] = sdf.load(args)
+    kwargs["sdf"] = sdf.load(args, with_integrator=False)
     kwargs["occ_kind"] = args.occ_kind
     kwargs["integrator_kind"] = args.integrator_kind or "direct"
   else: raise NotImplementedError(args.model)

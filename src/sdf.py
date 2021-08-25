@@ -12,7 +12,7 @@ import src.march as march
 import src.renderers as renderers
 from tqdm import trange
 
-def load(args):
+def load(args, with_integrator:bool):
   if args.sdf_kind == "spheres": cons = SmoothedSpheres
   elif args.sdf_kind == "siren": cons = SIREN
   elif args.sdf_kind == "local": cons = Local
@@ -30,13 +30,9 @@ def load(args):
   isect = march.load_intersection_kind(args.sdf_isect_kind)
 
   sdf = SDF(
-    model,
-    refl_inst,
-    isect=isect,
-    t_near=args.near,
-    t_far=args.far,
+    model, refl_inst, isect=isect, t_near=args.near, t_far=args.far,
   )
-  if args.integrator_kind is not None:
+  if args.integrator_kind is not None and with_integrator:
     return renderers.load(args, sdf, refl_inst)
 
   return sdf
@@ -52,8 +48,7 @@ class SDFModel(nn.Module):
 
   def normals(self, pts, values = None):
     with torch.enable_grad():
-      if not pts.requires_grad: autograd_pts = pts.requires_grad_()
-      else: autograd_pts = pts
+      autograd_pts = pts if pts.requires_grad else pts.requires_grad_()
 
       if values is None: values = self(autograd_pts)
       normals = autograd(autograd_pts, values)

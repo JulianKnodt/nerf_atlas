@@ -6,9 +6,10 @@ import random
 from .neural_blocks import (
   SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder
 )
-from .utils import ( dir_to_elev_azim, autograd )
+from .utils import ( dir_to_elev_azim, autograd, sample_random_hemisphere )
 import src.refl as refl
 from .renderers import ( load_occlusion_kind, direct )
+import src.march as march
 
 @torch.jit.script
 def cumuprod_exclusive(t):
@@ -431,10 +432,19 @@ class VolSDF(CommonNeRF):
     self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
     self.secondary = None
     if occ_kind is not None:
-      assert(isinstance(self.sdf.refl, refl.LightAndRefl)), "Must have light w/ volsdf integration"
+      assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
+        f"Must have light w/ volsdf integration {type(self.sdf.refl)}"
       self.occ = load_occlusion_kind(occ_kind, self.sdf.latent_size)
       if integrator_kind == "direct": self.secondary = self.direct
-      elif integrator_kind == "path": self.secondary = self.path
+      elif integrator_kind == "path":
+        self.secondary = self.path
+        self.path_n = 4
+        seen = 3 * self.path_n
+
+        self.missing = SkipConnMLP(in_size=seen,out=3,enc=FourierEncoder(input_dims=seen))
+
+        self.transfer_fn = SkipConnMLP(in_size=6, out=1, enc=FourierEncoder(input_dims=6))
+
       else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
   def direct(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
@@ -446,30 +456,52 @@ class VolSDF(CommonNeRF):
   def path(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
 
-    dirs = utils.sample_random_hemisphere(n, amt=32)
-    ext_pts, ext_hits, dists, _ = march.sphere_march(
-      self.sdf, pts[None,...].expand_as(dirs), dirs, iters=64, near=1e-3, far=10,
+    N = self.path_n
+    # for each point sample some number of directions
+    dirs = sample_random_hemisphere(n, num_samples=N)
+    assert(dirs.isfinite().all())
+    # compute intersection of random directions (maybe find better method here?)
+    ext_pts, ext_hits, dists, _ = march.bisect(
+      self.sdf.underlying, pts[None,...].expand_as(dirs), dirs, iters=64, near=5e-3, far=10,
     )
-    decays = 1/dists.square()
-    # TODO shape correctly
-    ext_view = F.normalize(r_o - ext_pts, dim=-1)
-    # TODO compute normal at ext_pts
-    ext_n = TODO
-    path_bsdf = self.sdf.refl(
-      x=ext_pts, view=ext_view, normal=ext_n, light=bounce_dirs, latent=latent,
+    decays = 1/(1e-8 + dists.square().clamp(min=0))
+
+    ext_sdf_vals, ext_latent = self.sdf.from_pts(ext_pts)
+    density = 1/self.scale * self.laplace_cdf(-ext_sdf_vals, self.scale)
+
+    ext_view = F.normalize(ext_pts - r_o[None,None,...], eps=1e-6, dim=-1)
+    ext_n = F.normalize(self.sdf.normals(ext_pts), dim=-1)
+
+    fit = lambda x: x.unsqueeze(0).expand(N,-1,-1,-1,-1,-1)
+    first_step_bsdf = self.sdf.refl(
+      x=fit(pts), view=ext_view, normal=fit(n), light=-ext_view, latent=fit(latent),
     )
+    #first_step_bsdf[~ext_hits] = 0
+    tf = self.transfer_fn(torch.cat([pts.unsqueeze(0).expand_as(ext_pts), ext_pts],dim=-1))\
+      .sigmoid()
+    first_step_bsdf = first_step_bsdf * decays * density.unsqueeze(-1).detach() * tf
+    # TODO add a transfer function with sigmoid between points?
 
     for light in self.sdf.refl.light.iter():
       # direct lighting at each point
       light_dir, light_val = self.occ(pts, light, self.sdf.intersect_mask, latent=latent)
       bsdf_val = self.sdf.refl(x=pts, view=view, normal=n, light=light_dir, latent=latent)
       out = out + bsdf_val * light_val
-      # TODO compute light contribution and bsdf at external points, multiply by path_bsdf, and
-      # attenuation and add to out
+      # compute light contribution and bsdf at external points, multiply by path_bsdf
+      ext_light_dir, ext_light_val = \
+        self.occ(ext_pts, light, self.sdf.intersect_mask, latent=ext_latent)
+      path_bsdf = self.sdf.refl(
+        x=ext_pts, view=ext_view, normal=ext_n, light=ext_light_dir, latent=ext_latent,
+      )
+      second_step = ext_light_val * path_bsdf
+      secondary = (first_step_bsdf * second_step).sum(dim=0)
+      out = out + secondary
+    # because we are adding some sampling, add in a secondary component which accounts for
+    # unsampled values. This makes it possible to learn outside of the scope of what is
+    # possible, but should converge faster
+    missing = F.softplus(self.missing(ext_pts.reshape((*ext_pts.shape[1:-1], 3 * N))))
+    out = out + missing
     return out
-    out = torch.zeros_like(pts)
-    for light in self.sdf.refl.light.iter():
-      raise NotImplementedError
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
