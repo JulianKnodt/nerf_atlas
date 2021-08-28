@@ -9,9 +9,16 @@ from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, th
 import src.lights as lights
 from .spherical_harmonics import eval_sh
 
-def load(args, latent_size):
-  if args.space_kind == "identity": space = IdentitySpace
-  elif args.space_kind == "surface": space = SurfaceSpace
+refl_kinds = [
+  "curr", "view_only", "basic", "diffuse", "rusin", "multi_rusin", "sph-har",
+  # meta refl models
+  "weighted",
+]
+
+def load(args, refl_kind, space_kind, latent_size):
+  if space_kind == "identity": space = IdentitySpace
+  elif space_kind == "surface": space = SurfaceSpace
+  elif space_kind == "none": space = NoSpace
   else: raise NotImplementedError()
 
   kwargs = {
@@ -20,16 +27,22 @@ def load(args, latent_size):
     "normal": args.normal_kind,
     "space": space(),
   }
-  if args.refl_kind == "basic":
+  if refl_kind == "basic":
     cons = Basic
     if args.light_kind is not None: kwargs["light"] = "elaz"
-  elif args.refl_kind == "rusin": cons = Rusin
-  elif args.refl_kind == "multi_rusin": cons = MultiRusin
-  elif args.refl_kind == "view_dir" or args.refl_kind == "curr": cons = View
-  elif args.refl_kind == "diffuse": cons = Diffuse
-  elif args.refl_kind == "sph-har":
+  elif refl_kind == "rusin": cons = Rusin
+  elif refl_kind == "multi_rusin": cons = MultiRusin
+  elif refl_kind == "view_dir" or args.refl_kind == "curr": cons = View
+  elif refl_kind == "diffuse": cons = Diffuse
+  elif refl_kind == "sph-har":
     cons = SphericalHarmonic
     kwargs["order"] = args.spherical_harmonic_order
+  elif refl_kind == "weighted":
+    cons = WeightedChoice
+    subs = args.weighted_subrefl_kinds
+    # TODO should this warn if only one subrefl is used?
+    assert(len(subs) > 1), "Specifying one subrefl is pointless."
+    kwargs["choices"] = [load(args, c, "none", latent_size) for c in subs]
   else: raise NotImplementedError(f"refl kind: {args.refl_kind}")
   # TODO assign view, normal, lighting here?
   refl = cons(**kwargs)
@@ -78,6 +91,12 @@ class IdentitySpace(nn.Module):
   def forward(self, x): return x
   @property
   def dims(self): return 3
+
+class NoSpace(nn.Module):
+  def __init__(self): super().__init__()
+  def forward(self, x): torch.empty((*x.shape[:-1], 0), device=x.device, dtype=torch.float)
+  @property
+  def dims(self): return 0
 
 class Reflectance(nn.Module):
   def __init__(
@@ -204,11 +223,47 @@ class Diffuse(Reflectance):
   @property
   def can_use_light(self): return True
 
-  def forward(self, x, view, normal, light):
+  def forward(self, x, view, normal, light, latent=None):
     rgb = self.act(self.diffuse_color(self.space(x)))
     # TODO make this attentuation clamped to 0? Should be for realism.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
     return rgb * attenuation
+
+class WeightedChoice(Reflectance):
+  def __init__(
+    self,
+    choices:[Reflectance],
+    space=None,
+
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    if space is None: space = IdentitySpace()
+    self.space = space
+
+    for c in choices:
+      assert(issubclass(type(c), Reflectance) or isinstance(c, LightAndRefl)), \
+        f"Not refl: {type(c)}"
+
+    self.choices = nn.ModuleList(choices)
+    in_size = space.dims
+    self.selection = SkipConnMLP(
+      in_size=in_size, out=len(choices), latent_size=self.latent_size,
+      xavier_init=True, enc=FourierEncoder(input_dims=in_size),
+    )
+
+  @property
+  def can_use_normal(self): return True
+  @property
+  def can_use_light(self): return True
+
+  def forward(self, x, view, normal, light, latent=None):
+    weights = self.selection(self.space(x), latent)
+    weights = F.softmax(weights,dim=-1).unsqueeze(-2)
+    subs = torch.stack([
+      c(x, view, normal, light, latent) for c in self.choices
+    ], dim=-1)
+    return (weights * subs).sum(dim=-1)
 
 class Rusin(Reflectance):
   def __init__(

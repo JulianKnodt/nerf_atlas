@@ -439,7 +439,7 @@ class VolSDF(CommonNeRF):
       elif integrator_kind == "path":
         self.secondary = self.path
         self.path_n = 4
-        seen = 3 * self.path_n
+        seen = 3 * (self.path_n + 1)
 
         self.missing = SkipConnMLP(in_size=seen,out=3,enc=FourierEncoder(input_dims=seen))
 
@@ -470,7 +470,7 @@ class VolSDF(CommonNeRF):
     density = 1/self.scale * self.laplace_cdf(-ext_sdf_vals, self.scale)
 
     ext_view = F.normalize(ext_pts - r_o[None,None,...], eps=1e-6, dim=-1)
-    ext_n = F.normalize(self.sdf.normals(ext_pts), dim=-1)
+    ext_n = F.normalize(self.sdf.normals(ext_pts), dim=-1).detach()
 
     fit = lambda x: x.unsqueeze(0).expand(N,-1,-1,-1,-1,-1)
     first_step_bsdf = self.sdf.refl(
@@ -499,7 +499,11 @@ class VolSDF(CommonNeRF):
     # because we are adding some sampling, add in a secondary component which accounts for
     # unsampled values. This makes it possible to learn outside of the scope of what is
     # possible, but should converge faster
-    missing = F.softplus(self.missing(ext_pts.reshape((*ext_pts.shape[1:-1], 3 * N))))
+    missing = self.missing(torch.cat([
+      ext_pts.reshape((*ext_pts.shape[1:-1], 3 * N)),
+      pts,
+    ], dim=-1))
+    missing = F.softplus(missing)
     out = out + missing
     return out
   def forward(self, rays):

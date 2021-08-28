@@ -136,14 +136,20 @@ def arguments():
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
     "--refl-kind", help="What kind of reflectance model to use",
-    choices=["curr", "view_only", "basic", "diffuse", "rusin", "multi_rusin", "sph-har"], default="curr",
+    choices=refl.refl_kinds,
+  )
+  refla.add_argument(
+    "--weighted-subrefl-kinds",
+    help="What subreflectances should be used with --refl-kind weighted",
+    choices=[r for r in refl.refl_kinds if r != "weighted"],
+    nargs="+", default=["rusin", "rusin"],
   )
   refla.add_argument(
     "--normal-kind", choices=[None, "elaz", "raw"], default=None,
     help="How to include normals in reflectance model. Not all surface models support normals",
   )
   refla.add_argument(
-    "--space-kind", choices=["identity", "surface"], default="identity",
+    "--space-kind", choices=["identity", "surface", "none"], default="identity",
     help="Space to encode texture: surface builds a map from 3D (identity) to 2D",
   )
 
@@ -553,7 +559,7 @@ def set_per_run(model, args):
 
   if "refl" in args.replace:
     if args.refl_kind != "curr" and hasattr(model, "refl"):
-      refl_inst = refl.load(args, ls).to(device)
+      refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
       model.set_refl(refl_inst)
   if "bg" in args.replace:
     if isinstance(model, nerf.CommonNeRF): model.set_bg(args.bg)
@@ -603,7 +609,7 @@ def load_model(args):
   # set reflectance kind for new models (but volsdf handles it differently)
   if args.refl_kind != "curr":
     ls = model.refl.latent_size
-    refl_inst = refl.load(args, ls).to(device)
+    refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
     model.set_refl(refl_inst)
 
   if args.model == "ae" and args.latent_l2_weight > 0:

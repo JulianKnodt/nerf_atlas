@@ -26,12 +26,10 @@ def load(args, with_integrator:bool):
 
   if args.bound_sphere_rad > 0: model = UnitSphere(inner=model,rad=args.bound_sphere_rad)
   # refl inst may also have a nested light
-  refl_inst = refl.load(args, model.latent_size)
+  refl_inst = refl.load(args, args.refl_kind, args.space_kind, model.latent_size)
   isect = march.load_intersection_kind(args.sdf_isect_kind)
 
-  sdf = SDF(
-    model, refl_inst, isect=isect, t_near=args.near, t_far=args.far,
-  )
+  sdf = SDF(model, refl_inst, isect=isect, t_near=args.near, t_far=args.far)
   if args.integrator_kind is not None and with_integrator:
     return renderers.load(args, sdf, refl_inst)
 
