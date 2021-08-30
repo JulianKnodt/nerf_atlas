@@ -140,9 +140,11 @@ def arguments():
   )
   refla.add_argument(
     "--weighted-subrefl-kinds",
-    help="What subreflectances should be used with --refl-kind weighted",
+    help="What subreflectances should be used with --refl-kind weighted. \
+    They will not take a spacial component, and only rely on view direction, normal, \
+    and light direction.",
     choices=[r for r in refl.refl_kinds if r != "weighted"],
-    nargs="+", default=["rusin", "rusin"],
+    nargs="+", default=["rusin", "rusin", "rusin", "rusin"],
   )
   refla.add_argument(
     "--normal-kind", choices=[None, "elaz", "raw"], default=None,

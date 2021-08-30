@@ -31,7 +31,6 @@ def load(args, refl_kind, space_kind, latent_size):
     cons = Basic
     if args.light_kind is not None: kwargs["light"] = "elaz"
   elif refl_kind == "rusin": cons = Rusin
-  elif refl_kind == "multi_rusin": cons = MultiRusin
   elif refl_kind == "view_dir" or args.refl_kind == "curr": cons = View
   elif refl_kind == "diffuse": cons = Diffuse
   elif refl_kind == "sph-har":
@@ -311,57 +310,6 @@ class Rusin(Reflectance):
     raw = self.rusin(rusin, latent)
     #v = self.sph_ham(raw, view)
     return F.leaky_relu(raw)
-
-class MultiRusin(Reflectance):
-  def __init__(
-    self,
-    space=None,
-    n=5,
-    **kwargs,
-  ):
-    super().__init__(**kwargs)
-    if space is None: space = IdentitySpace()
-    self.n = n
-    pos_size = space.dims
-    self.pos = SkipConnMLP(
-      in_size=pos_size, out=n, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=pos_size),
-      xavier_init=True,
-
-      num_layers=3, hidden_size=128,
-    )
-    rusin_size = 3
-    self.rusin = SkipConnMLP(
-      in_size=rusin_size, out=self.out_features * n, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=rusin_size, freqs=64),
-      xavier_init=True,
-
-      num_layers=5, hidden_size=256,
-    )
-    self.space = space
-
-  @property
-  def can_use_normal(self): return True
-  @property
-  def can_use_light(self): return True
-
-  def forward(self, x, view, normal, light, latent=None):
-    # in theory, it makes more sense to have this be a softmax,
-    # but in practice, having it be sigmoid works better for some reason.
-    selects = self.pos(self.space(x), latent).sigmoid()
-
-    # TODO would it be good to detach the normal? is it trying to fix the surface
-    # to make it look better?
-    frame = coordinate_system(normal)
-    wo = to_local(frame, F.normalize(view, dim=-1))
-    wi = to_local(frame, light)
-    # have to move view and light into basis of normal
-    rusin = rusin_params(wo, wi)
-    # view dependent effects
-    raw = self.rusin(rusin, latent)\
-      .reshape(x.shape[:-1] + (self.n, self.out_features))\
-      .sigmoid()
-    return (raw * selects.unsqueeze(-1)).sum(dim=-2)
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
