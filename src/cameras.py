@@ -87,14 +87,14 @@ class OrthogonalCamera(Camera):
     view_height:float=None,
   ):
     super().__init__()
-    if view_height is None: view_width = view_height
+    if view_height is None: view_height = view_width
     self.pos = pos
-    self.dir = F.normalize(at - pos, dim=-1)
-    self.right = view_width * F.normalize(torch.cross(dir, up), dim=-1)
-    self.up = view_height * F.normalize(torch.cross(right, dir), dim=-1)
+    self.dir = dir = F.normalize(at - pos, dim=-1)
+    self.right = r = view_width * F.normalize(torch.cross(dir, up), dim=-1)
+    self.up = view_height * F.normalize(torch.cross(r, dir), dim=-1)
   def __len__(self): return self.pos.shape[0]
   def __getitem__(self, v):
-    # FIXME anyway to make this not use an odd part of the language?
+    # FIXME to make this not use an odd part of the language? it should be fine
     cam = OrthogonalCamera.__new__()
     cam.pos = self.pos[v]
     cam.dir = self.dir[v]
@@ -105,7 +105,9 @@ class OrthogonalCamera(Camera):
     u, v = position_samples.split([1,1], dim=-1)
     u = 2 * ((u.squeeze(-1)/size) - 0.5)
     v = 2 * ((v.squeeze(-1)/size) - 0.5)
-    r_o = self.pos + u * self.right + v * self.up
+    r_o = self.pos[:, None, None, :] + \
+      u[None, :, :, None] * self.right[:, None, None, :] +\
+      v[None, :, :, None] * self.up[:, None, None, :]
     r_d = self.dir.expand_as(r_o)
     return torch.cat([r_o, r_d], dim=-1)
 

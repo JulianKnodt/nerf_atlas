@@ -359,6 +359,36 @@ class Normalization(nn.Module):
         self.std = nn.Parameter(torch.tensor(norm_std).view(-1, 1, 1), requires_grad=False)
     def forward(self, img): return (img - self.mean) / self.std
 
+# performs N class classification of some set of points along with feature vectors.
+class PointNet(nn.Module):
+  def __init__(
+    self,
+    feature_size:int=7,
+    classes:int=2,
+    intermediate_size=512,
+  ):
+    super().__init__()
+    feats=feature_size
+    self.first = SkipConnMLP(
+      in_size=feats, out=intermediate_size,
+      enc=FourierEncoder(input_dims=feats),
+      xavier_init=True,
+      num_layers=3, skip=999
+    )
+    self.second = SkipConnMLP(
+      in_size=intermediate_size, out=classes,
+      xavier_init=True,
+      num_layers=3, skip=999
+    )
+  def forward(self, pos, feats):
+    # input has shape (batches, num_samples, C)
+    first = self.first(torch.cat([pos, feats], dim=-1))
+    # TODO this max pool will kill so many gradients
+    # maybe it makes sense to use something like averaging instead?
+    # TODO make this configurable with some parameter in the constructor
+    first_maxs = first.mean(dim=-2)[0]
+    return self.second(first_maxs)
+
 class StyleLoss(nn.Module):
   def __init__(self, feats):
     super().__init__()
