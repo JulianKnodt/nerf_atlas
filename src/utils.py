@@ -195,7 +195,7 @@ def elev_azim_to_dir(elev_azim):
   return direction
 
 
-@torch.jit.script
+#@torch.jit.script # FIXME cannot save this function
 def dir_to_elev_azim(direc):
   lim = 1 - 1e-6
   x, y, z = F.normalize(direc, dim=-1).clamp(min=-lim, max=lim).split([1,1,1], dim=-1)

@@ -10,7 +10,7 @@ import src.lights as lights
 from .spherical_harmonics import eval_sh
 
 refl_kinds = [
-  "curr", "view_only", "basic", "diffuse", "rusin", "multi_rusin", "sph-har",
+  "curr", "view", "basic", "diffuse", "rusin", "multi_rusin", "sph-har",
   # meta refl models
   "weighted",
 ]
@@ -31,7 +31,7 @@ def load(args, refl_kind, space_kind, latent_size):
     cons = Basic
     if args.light_kind is not None: kwargs["light"] = "elaz"
   elif refl_kind == "rusin": cons = Rusin
-  elif refl_kind == "view_dir" or args.refl_kind == "curr": cons = View
+  elif refl_kind == "view" or args.refl_kind == "curr": cons = View
   elif refl_kind == "diffuse": cons = Diffuse
   elif refl_kind == "sph-har":
     cons = SphericalHarmonic

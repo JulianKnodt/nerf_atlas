@@ -111,8 +111,6 @@ class OrthogonalCamera(Camera):
     r_d = self.dir.expand_as(r_o)
     return torch.cat([r_o, r_d], dim=-1)
 
-
-
 # The camera described in the NeRF-- paper
 @dataclass
 class NeRFMMCamera(Camera):

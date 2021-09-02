@@ -238,6 +238,12 @@ def arguments():
   rprt.add_argument(
     "--msssim-loss", action="store_true", help="Report ms-ssim loss during testing",
   )
+  rprt.add_argument(
+    "--depth-images", action="store_true", help="Whether to render depth images",
+  )
+  rprt.add_argument(
+    "--not-magma", action="store_true", help="Whether to use magma for depth maps",
+  )
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -259,6 +265,8 @@ def arguments():
   if not args.neural_upsample:
     args.render_size = args.size
     args.feature_space = 3
+
+  if not args.not_magma: plt.magma()
 
   return args
 
@@ -482,6 +490,13 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         elif out.shape[-1] == 4:
           items.append(ref[0,...,-1,None].expand_as(ref0))
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
+
+        if args.depth_images and hasattr(model, "nerf"):
+          depth = nerf.volumetric_integrate(
+            model.nerf.weights, model.nerf.ts[:, None, None, None, None]
+          )
+          depth = (depth[0,...]-args.near)/(args.far - args.near)
+          items.append(depth.clamp(min=0, max=1))
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
@@ -505,6 +520,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       got = torch.zeros_like(exp)
       acc = torch.zeros_like(got)
       normals = torch.zeros_like(got)
+      depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
       if args.backing_sdf: got_sdf = torch.zeros_like(got)
       if light is not None: model.refl.light = light[i:i+1]
 
@@ -521,6 +537,11 @@ def test(model, cam, labels, args, training: bool = True, light=None):
           if hasattr(model, "nerf"):
             acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
               model.nerf.acc_smooth()[0,...].clamp(min=0,max=1)
+          if hasattr(model, "nerf") and args.depth_images:
+            depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+              nerf.volumetric_integrate(
+                model.nerf.weights, model.nerf.ts[:, None, None, None, None]
+              )[0,...]
           if hasattr(model, "n") and hasattr(model, "nerf"):
             normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
               (nerf.volumetric_integrate(model.nerf.weights, F.normalize(model.n, dim=-1))[0,...]+1)/2
@@ -539,6 +560,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       items = [exp, got.clamp(min=0, max=1)]
       #if hasattr(model, "nerf"): items.append(acc)
       if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0,max=1))
+      if hasattr(model, "nerf") and args.depth_images:
+        depth = (depth-args.near)/(args.far - args.near)
+        items.append(depth.clamp(min=0, max=1))
       save_plot(name, *items)
       ls.append(psnr)
 

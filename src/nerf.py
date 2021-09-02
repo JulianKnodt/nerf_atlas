@@ -205,8 +205,6 @@ class CommonNeRF(nn.Module):
 
   def depths(self, depths):
     with torch.no_grad():
-      print(self.alpha.shape, depths.shape)
-      exit()
       return volumetric_integrate(self.alpha, depths[..., None, None, None])
 
   @property
@@ -256,6 +254,7 @@ class TinyNeRF(CommonNeRF):
       rays, self.t_near, self.t_far, self.steps,
       perturb = 1 if self.training else 0,
     )
+    self.ts = ts
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -299,6 +298,7 @@ class PlainNeRF(CommonNeRF):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
+    self.ts = ts
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -375,6 +375,7 @@ class NeRFAE(CommonNeRF):
       rays, self.t_near, self.t_far, self.steps,
       perturb = 1 if self.training else 0,
     )
+    self.ts = ts
     return self.from_pts(pts, ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
@@ -510,6 +511,7 @@ class VolSDF(CommonNeRF):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
+    self.ts = ts
     return self.from_pts(pts, ts, r_o, r_d)
   def total_latent_size(self): return self.sdf.latent_size
   def set_refl(self, refl): self.sdf.refl = refl
@@ -627,6 +629,7 @@ class DynamicNeRF(nn.Module):
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
+    self.ts = ts
     # small deviation for regularization
     if self.training and self.time_noise_std > 0:
       t = t + self.time_noise_std * torch.randn_like(t)
@@ -671,6 +674,7 @@ class DynamicNeRFAE(nn.Module):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
     )
+    self.ts = ts
     # small deviation for regularization
     if self.training and self.time_noise_std > 0: t = t + self.time_noise_std * torch.randn_like(t)
     t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
