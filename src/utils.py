@@ -17,6 +17,10 @@ def fourier(x, B):
   mapped = x @ B
   return torch.cat([mapped.sin(), mapped.cos()], dim=-1)
 
+#@torch.jit.script
+def smooth_min(v, k:float=32, dim:int=0):
+  return -torch.exp(-k * v).sum(dim).clamp(min=1e-4).log()/k
+
 @torch.jit.script
 def expected_sin(x, x_var):
   y = (-0.5 * x_var).exp() * x.sin()

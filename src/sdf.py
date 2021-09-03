@@ -6,7 +6,7 @@ import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder, NNEncoder )
-from .utils import ( autograd, eikonal_loss )
+from .utils import ( autograd, eikonal_loss, smooth_min )
 import src.refl as refl
 import src.march as march
 import src.renderers as renderers
@@ -170,9 +170,6 @@ class SDF(nn.Module):
     tput, _best_pos = march.throughput(self.underlying, r_o, r_d, self.near, self.far)
     return -self.alpha*tput.unsqueeze(-1)
 
-#@torch.jit.script
-def smooth_min(v, k:float=32, dim:int=0):
-  return -torch.exp(-k * v).sum(dim).clamp(min=1e-6).log()/k
 
 class SmoothedSpheres(SDFModel):
   def __init__(

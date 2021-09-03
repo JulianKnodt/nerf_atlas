@@ -8,7 +8,7 @@ import torchvision.transforms.functional as TVF
 from itertools import chain
 from typing import Optional, Union
 
-from .utils import ( fourier, create_fourier_basis, )
+from .utils import ( fourier, create_fourier_basis, smooth_min )
 
 class PositionalEncoder(nn.Module):
   def __init__(
@@ -365,13 +365,14 @@ class PointNet(nn.Module):
     self,
     feature_size:int=7,
     classes:int=2,
+    enc=None,
     intermediate_size=512,
   ):
     super().__init__()
     feats=feature_size
     self.first = SkipConnMLP(
       in_size=feats, out=intermediate_size,
-      enc=FourierEncoder(input_dims=feats),
+      enc=enc,
       xavier_init=True,
       num_layers=3, skip=999
     )
@@ -383,11 +384,11 @@ class PointNet(nn.Module):
   def forward(self, pos, feats):
     # input has shape (batches, num_samples, C)
     first = self.first(torch.cat([pos, feats], dim=-1))
-    # TODO this max pool will kill so many gradients
-    # maybe it makes sense to use something like averaging instead?
-    # TODO make this configurable with some parameter in the constructor
-    first_maxs = first.mean(dim=-2)[0]
-    return self.second(first_maxs)
+    #first_pool = -torch.logsumexp(-32 * first, dim=-2)/32
+    first_pool = torch.logsumexp(32 * first, dim=-2)/32
+    #first_pool = first.min(dim=-2)[0]
+    #first_pool = first.max(dim=-2)[0]
+    return self.second(first_pool)
 
 class StyleLoss(nn.Module):
   def __init__(self, feats):

@@ -273,13 +273,6 @@ class Rusin(Reflectance):
     super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
     _pos_size = space.dims
-    #self.pos = SkipConnMLP(
-    #  in_size=pos_size, out=3+32, latent_size=self.latent_size,
-    #  enc=FourierEncoder(input_dims=pos_size),
-    #  xavier_init=True,
-
-    #  num_layers=5, hidden_size=256,
-    #)
     rusin_size = 3
     self.rusin = SkipConnMLP(
       in_size=rusin_size, out=self.out_features, latent_size=self.latent_size,
@@ -295,10 +288,12 @@ class Rusin(Reflectance):
   @property
   def can_use_light(self): return True
 
-  def forward(self, x, view, normal, light, latent=None):
-    #raw_pos = self.pos(self.space(x), latent)
-    #color, pos_latent = raw_pos[..., :3], raw_pos[..., 3:]
+  # returns the raw results given rusin parameters
+  def raw(self, rusin_params, latent=None):
+    raw = self.rusin(rusin_params.cos(), latent)
+    return F.leaky_relu(raw)
 
+  def forward(self, x, view, normal, light, latent=None):
     # TODO would it be good to detach the normal? is it trying to fix the surface
     # to make it look better?
     frame = coordinate_system(normal)
@@ -308,7 +303,6 @@ class Rusin(Reflectance):
     rusin = rusin_params(wo, wi)
     # view dependent effects
     raw = self.rusin(rusin, latent)
-    #v = self.sph_ham(raw, view)
     return F.leaky_relu(raw)
 
 def nonzero_eps(v, eps: float=1e-7):
