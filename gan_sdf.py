@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import argparse
-from src.utils import ( autograd, eikonal_loss, save_image )
+from src.utils import ( autograd, eikonal_loss, save_image, save_plot )
 from src.neural_blocks import ( SkipConnMLP, FourierEncoder, PointNet )
 from src.cameras import ( OrthogonalCamera )
 from src.march import ( bisect )
@@ -40,7 +40,7 @@ def arguments():
     "--save-freq", type=int, default=1000, help="How often to save the model"
   )
   a.add_argument(
-    "--num-test-samples", type=int, default=16, help="How tests to run",
+    "--num-test-samples", type=int, default=64, help="How tests to run",
   )
   a.add_argument(
     "--load", action="store_true", help="Load old generator and discriminator"
@@ -324,7 +324,9 @@ def render(
 
   r_o, r_d = rays.split([3,3], dim=-1)
 
-  pts, hits, _, _ = bisect(sdf, r_o, r_d, eps=0, near=2, far=6)
+  near = 2
+  far = 6
+  pts, hits, best_pts, _ = bisect(sdf, r_o, r_d, eps=0, near=near, far=far)
   pts = pts.requires_grad_()
 
   with torch.enable_grad():
@@ -332,7 +334,11 @@ def render(
   normals = F.normalize(normals, dim=-1)
   normals = (normals+1)/2
   normals[~hits] = 0
-  return normals
+
+  t = torch.linalg.norm(pts - r_o, dim=-1, keepdim=True)
+  depths = (t - near)/(far - near)
+  depths[~hits] = 0
+  return normals, depths
 
 def save(model, disc, args):
   torch.save(model, "models/G_sdf.pt")
@@ -369,6 +375,7 @@ def main():
     args,
   )
   save(model, discrim, args)
+  #model.eval()
 
   sz = args.render_size
   # TODO render many to see outputs
@@ -380,7 +387,7 @@ def main():
 
       cam = OrthogonalCamera(
         pos = torch.tensor(
-          [[2*math.cos(i/6),2*math.sin(i/6), 3]],
+          [[3*math.cos(i * math.pi/64),3*math.sin(i * math.pi/64), 3]],
           device=device, dtype=torch.float,
         ),
         at = torch.tensor([[0,0,0]], device=device, dtype=torch.float),
@@ -390,10 +397,12 @@ def main():
 
       model.assigned_latent = start_l * (1 - i/nts) + end_l * i/nts
       # will create a random latent noise each time
-      normals = render(model, cam, (0,0,sz,sz), sz)
-      save_image(f"outputs/normals_{i:03}.png", normals.squeeze(0))
+      normals, depths = render(model, cam, (0,0,sz,sz), sz)
+      #save_image(f"outputs/normals_{i:03}.png", normals.squeeze(0))
+      #save_image(f"outputs/depths_{i:03}.png", depths.squeeze(0).expand(200, 200, 3))
+      save_plot(f"outputs/sdf_gan_{i:03}.png", normals.squeeze(0), depths.squeeze(0))
 
-    normals_exp = render(sphere, cam, (0,0,sz,sz), sz)
+    normals_exp, _ = render(sphere, cam, (0,0,sz,sz), sz)
     save_image("outputs/normals_expected.png", normals_exp.squeeze(0))
   return
 
