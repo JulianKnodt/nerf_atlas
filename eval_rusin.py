@@ -1,14 +1,9 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import argparse
-from src.utils import ( autograd, eikonal_loss, save_image )
-from src.neural_blocks import ( SkipConnMLP, FourierEncoder, PointNet )
-from src.cameras import ( OrthogonalCamera )
+from src.utils import ( save_image )
 import src.refl as refl
 from tqdm import trange
-import random
 
 def arguments():
   a = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -29,18 +24,27 @@ def main():
     model = torch.load(args.refl_model)
     assert(hasattr(model, "refl")), "The provided model must have a refl"
     r = model.refl
-    print("TODO figure out what to with latent", r.latent_size)
-    assert(isinstance(r, refl.Rusin)), "must provide a rusin refl"
-    degs = torch.cat(torch.meshgrid(
-      torch.arange(90, device=device),
-      torch.arange(90, device=device),
-      torch.arange(180, device=device),
-    ))
-    rads = torch.deg2rad(rads)
-    latent = None
-    out = r.raw(rads, latent)
-    print(out.shape)
+    if isinstance(r, refl.LightAndRefl): r = r.refl
+    # just check the first choice for now, can add a flag for it later
+    if isinstance(r, refl.WeightedChoice): r = r.choices[1]
+    # check again if it's another lit item
+    if isinstance(r, refl.LightAndRefl): r = r.refl
+    assert(isinstance(r, refl.Rusin)), f"must provide a rusin refl, got {type(r)}"
 
+    degs = torch.stack(torch.meshgrid(
+      # phi_d
+      torch.linspace(0, 90, 256, device=device, dtype=torch.float),
+      # theta_h
+      torch.linspace(0, 90, 256, device=device, dtype=torch.float),
+      # theta_d
+      torch.arange(180, device=device, dtype=torch.float),
+    ), dim=-1)
+    rads = torch.deg2rad(degs)
+    latent = torch.randn(*rads.shape[:-2], r.latent_size, device=device)
+    for i, theta_h in enumerate(rads.split(1, dim=2)):
+      theta_h = theta_h.squeeze(2)
+      out = r.raw(theta_h, latent)
+      save_image(f"outputs/rusin_eval_{i:03}.png", out)
   return
 
 if __name__ == "__main__": main()

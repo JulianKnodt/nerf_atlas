@@ -5,11 +5,12 @@ clean:
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 32 --crop --epochs 0 --crop-size 16 \
+	--size 128 --crop --epochs 30_000 --crop-size 16 \
 	--near 2 --far 6 --batch-size 8 --model volsdf --sdf-kind mlp \
-	-lr 1e-3 --loss-window 750 --valid-freq 250 \
-	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500 --sigmoid-kind fat \
-	--depth-images --refl-kind view \
+	-lr 5e-4 --loss-window 750 --valid-freq 250 \
+	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500 --sigmoid-kind thin \
+	--depth-images --refl-kind pos --omit-bg \
+  --color-space rgb xyz hsv \
 	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
 
 volsdf_with_normal: clean
@@ -102,13 +103,13 @@ nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind multi_rusin \
+	--size 200 --crop --crop-size 12 --epochs 50_000 --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
-	--loss-fns l2 l1 rmse --valid-freq 500 --occ-kind all-learned \
+	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz \
-  --notraintest --omit-bg \
-  --load models/nerv_${nerv_dataset}.pt
+  --notraintest \
+  #--load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
@@ -140,10 +141,10 @@ nerv_point_path: clean
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_path_${nerv_dataset}.pt \
 	--size 100 --crop --crop-size 6 --epochs 30_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 3 -lr 3e-4 --refl-kind multi_rusin \
+	--near 2 --far 6 --batch-size 3 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
 	--loss-fns l2 --valid-freq 100 --occ-kind all-learned \
-  --color-spaces rgb \
+  --color-spaces rgb xyz hsv \
   --integrator-kind path \
   #--load models/nerv_path_${nerv_dataset}.pt
 
@@ -178,7 +179,8 @@ ae: clean
 	--near 2 --far 6 --batch-size 5 --crop-size 20 --model ae -lr 1e-3 \
 	--valid-freq 499 --no-sched --loss-fns l2 #--load models/lego_ae.pt #--omit-bg
 
-single-video: clean
+# [WIP]
+single_video: clean
 	python3 runner.py -d data/video/fencing.mp4 \
 	--size 128 --crop --epochs 30_000 --save models/fencing.pt \
 	--near 2 --far 10 --batch-size 5 --mip cylinder --model ae -lr 1e-3 \
@@ -192,6 +194,27 @@ og_upsample: clean
 
 
 # [WIP]
-pixel-single: clean
+pixel_single: clean
 	python3 runner.py -d data/celeba_example.jpg --data-kind pixel-single --render-size 16 \
   --crop --crop-size 16 --save models/celeba_sp.pt --mip cylinder --model ae
+
+
+# scripts
+
+gan_sdf:
+	python3 gan_sdf.py --epochs 5000 --num-test-samples 256 --sample-size 2048 \
+  --eikonal-weight 1 --nosave --noglobal \
+  #--load
+
+volsdf_gan:
+	python3 gan_sdf.py --epochs 10_000 --num-test-samples 256 --sample-size 1024 \
+  --eikonal-weight 1e-1 --target volsdf --volsdf-model models/lego_volsdf.pt \
+	--refl-kind pos --bounds 2 --noglobal --render-size 128 --G-rep 2 --load
+
+volsdf_gan_no_refl:
+	python3 gan_sdf.py --epochs 0 --load --num-test-samples 256 --sample-size 1024 \
+  --eikonal-weight 1e-1 --target volsdf --volsdf-model models/lego_volsdf.pt \
+	--bounds 1.5 --noglobal --render-size 128
+
+eval_rusin:
+	python3 eval_rusin.py --refl-model models/nerv_hotdogs.pt

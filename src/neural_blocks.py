@@ -366,7 +366,7 @@ class PointNet(nn.Module):
     feature_size:int=7,
     classes:int=2,
     enc=None,
-    intermediate_size=512,
+    intermediate_size=128,
   ):
     super().__init__()
     feats=feature_size
@@ -377,18 +377,18 @@ class PointNet(nn.Module):
       num_layers=3, skip=999
     )
     self.second = SkipConnMLP(
-      in_size=intermediate_size, out=classes,
+      in_size=intermediate_size * 2, out=classes,
       xavier_init=True,
       num_layers=3, skip=999
     )
   def forward(self, pos, feats):
     # input has shape (batches, num_samples, C)
     first = self.first(torch.cat([pos, feats], dim=-1))
-    #first_pool = -torch.logsumexp(-32 * first, dim=-2)/32
-    first_pool = torch.logsumexp(32 * first, dim=-2)/32
-    #first_pool = first.min(dim=-2)[0]
-    #first_pool = first.max(dim=-2)[0]
-    return self.second(first_pool)
+    # smooth min & smooth max over items
+    first_pool = -torch.logsumexp(-first, dim=-2)
+    second_pool = torch.logsumexp(first, dim=-2)
+    pooled = torch.cat([first_pool, second_pool], dim=-1)
+    return self.second(pooled)
 
 class StyleLoss(nn.Module):
   def __init__(self, feats):

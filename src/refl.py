@@ -5,17 +5,17 @@ import random
 import math
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, thin_sigmoid )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, load_sigmoid )
 import src.lights as lights
 from .spherical_harmonics import eval_sh
 
 refl_kinds = [
-  "curr", "view", "basic", "diffuse", "rusin", "multi_rusin", "sph-har",
+  "curr", "pos", "view", "basic", "diffuse", "rusin", "multi_rusin", "sph-har",
   # meta refl models
   "weighted",
 ]
 
-def load(args, refl_kind, space_kind, latent_size):
+def load(args, refl_kind:str, space_kind:str, latent_size:int):
   if space_kind == "identity": space = IdentitySpace
   elif space_kind == "surface": space = SurfaceSpace
   elif space_kind == "none": space = NoSpace
@@ -23,6 +23,7 @@ def load(args, refl_kind, space_kind, latent_size):
 
   kwargs = {
     "latent_size": latent_size,
+    "act": args.sigmoid_kind,
     "out_features": args.feature_space,
     "normal": args.normal_kind,
     "space": space(),
@@ -31,6 +32,7 @@ def load(args, refl_kind, space_kind, latent_size):
     cons = Basic
     if args.light_kind is not None: kwargs["light"] = "elaz"
   elif refl_kind == "rusin": cons = Rusin
+  elif refl_kind == "pos": cons = Positional
   elif refl_kind == "view" or args.refl_kind == "curr": cons = View
   elif refl_kind == "diffuse": cons = Diffuse
   elif refl_kind == "sph-har":
@@ -100,7 +102,7 @@ class NoSpace(nn.Module):
 class Reflectance(nn.Module):
   def __init__(
     self,
-    act=torch.sigmoid,
+    act="thin",
     latent_size:int = 0,
     out_features:int = 3,
     spherical_harmonic_order:int = 0,
@@ -114,7 +116,7 @@ class Reflectance(nn.Module):
     self.latent_size = latent_size
     self.out_features = out_features * (sho + 1) * (sho + 1)
 
-    self.act = act
+    self.act = load_sigmoid(act)
 
   def forward(self, x, view,normal=None,light=None,latent=None): raise NotImplementedError()
   @property
@@ -197,6 +199,22 @@ class View(Reflectance):
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
     return self.act(self.mlp(v, latent))
+
+# Positional only (no view dependence)
+class Positional(Reflectance):
+  def __init__(
+    self,
+    space=None,
+
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    self.mlp = SkipConnMLP(
+      in_size=self.latent_size, out=self.out_features, latent_size=0,
+      num_layers=5, hidden_size=256, xavier_init=True,
+    )
+  def forward(self, x, view, normal=None, light=None, latent=None):
+    return self.act(self.mlp(latent))
 
 class Diffuse(Reflectance):
   def __init__(
@@ -290,20 +308,17 @@ class Rusin(Reflectance):
 
   # returns the raw results given rusin parameters
   def raw(self, rusin_params, latent=None):
-    raw = self.rusin(rusin_params.cos(), latent)
-    return F.leaky_relu(raw)
+    return F.leaky_relu(self.rusin(rusin_params.cos(), latent))
 
   def forward(self, x, view, normal, light, latent=None):
     # TODO would it be good to detach the normal? is it trying to fix the surface
     # to make it look better?
     frame = coordinate_system(normal)
+    # have to move view and light into basis of normal
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
-    # have to move view and light into basis of normal
     rusin = rusin_params(wo, wi)
-    # view dependent effects
-    raw = self.rusin(rusin, latent)
-    return F.leaky_relu(raw)
+    return F.leaky_relu(self.rusin(rusin, latent))
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter

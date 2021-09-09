@@ -42,6 +42,16 @@ def integrated_pos_enc_diag(x, x_cov, min_deg:int, max_deg:int):
     torch.cat([y_var, y_var], dim=-1),
   )[0]
 
+def laplace_cdf(sdf_vals, scale):
+  scaled = sdf_vals/scale
+  return torch.where(
+    scaled <= 0,
+    # clamps are necessary to prevent NaNs, even though the values should get filtered out
+    # later. They should be noops.
+    scaled.clamp(max=0).exp()/2,
+    1 - scaled.clamp(min=0).neg().exp()/2,
+  )
+
 @torch.jit.script
 def lift_gaussian(r_d, t_mean, t_var, r_var):
   mean = r_d[..., None] * t_mean[..., None, :]
