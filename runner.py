@@ -66,7 +66,7 @@ def arguments():
   )
   a.add_argument(
     "--sigmoid-kind", help="What sigmoid to use, curr keeps old", default="thin",
-    choices=["normal", "fat", "thin", "cyclic", "softmax", "curr"],
+    choices=list(utils.sigmoid_kinds.keys()),
   )
   a.add_argument("--sparsify-alpha", help="Weight for sparsifying alpha",type=float,default=0)
   a.add_argument("--backing-sdf", help="Use a backing SDF", action="store_true")

@@ -346,15 +346,23 @@ def spherical_pose(elev, azim, rad):
 # or prevent it from representing full density items.
 # fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
 def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
-def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps)
+def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps) + eps
 def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
   return ((v/period).sin()+1)/2 * (1+2*eps) - eps
+def upshifted_sigmoid(v, eps=1e-2): return v.sigmoid() * (1-eps) + eps
 
+# list of available sigmoids
+sigmoid_kinds = {
+  "normal": torch.sigmoid,
+  "thin": thin_sigmoid,
+  "fat": fat_sigmoid,
+  "cyclic": cyclic_sigmoid,
+  "upshifted": upshifted_sigmoid,
+  "softmax": nn.Softmax(dim=-1),
+  # oops this isn't a sigmoid
+  "leaky_relu": F.leaky_relu,
+}
 def load_sigmoid(kind="thin"):
-  if kind == "thin": act = thin_sigmoid
-  elif kind == "fat": act = fat_sigmoid
-  elif kind == "normal": act = torch.sigmoid
-  elif kind == "cyclic": act = cyclic_sigmoid
-  elif kind == "softmax": act = nn.Softmax(dim=-1)
-  else: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
-  return act
+  sigmoid = sigmoid_kinds.get(kind, None)
+  if sigmoid is None: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
+  return sigmoid
