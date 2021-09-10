@@ -194,7 +194,7 @@ def nerv_point(path=".", training=True, size=200, multi_point=False, with_mask=F
   cam_to_worlds=[]
 
   frames = tfs["frames"]
-  frames = frames[:100] if multi_point else frames[100:]
+  frames = frames[:100] if not multi_point else frames[100:]
   for frame in frames:
     img = load_exr(os.path.join(path, frame['file_path'] + '.exr')).permute(2,0,1)
     img = TVF.resize(img, size=(size, size))

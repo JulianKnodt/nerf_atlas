@@ -140,12 +140,12 @@ nerv_point_path: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_path_${nerv_dataset}.pt \
-	--size 32 --crop --crop-size 9 --epochs 25_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 3 -lr 1e-3 --refl-kind rusin \
+	--size 32 --crop --crop-size 9 --epochs 0 --loss-window 1500 \
+	--near 2 --far 6 --batch-size 3 -lr 5e-3 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 100 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --save-freq 2500 \
-  --integrator-kind path \
+  --integrator-kind path --depth-images --notraintest \
   --load models/nerv_path_${nerv_dataset}.pt
 
 nerv_point_subrefl: clean
