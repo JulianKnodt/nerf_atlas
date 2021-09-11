@@ -440,18 +440,21 @@ class VolSDF(CommonNeRF):
       elif integrator_kind == "path":
         self.secondary = self.path
         self.path_n = N = 3
-        seen = 3 * (N + 1)
+        missing_cmpts = 3 * (N + 1) + 6
 
+        # this is a function of the seen pts and the sampled lighting dir
         self.missing = SkipConnMLP(
-          in_size=seen, out=out_features, enc=FourierEncoder(input_dims=seen),
+          in_size=missing_cmpts, out=out_features, enc=FourierEncoder(input_dims=missing_cmpts),
           # here we care about the aggregate set of all point, so bundle them all up.
           latent_size = self.sdf.latent_size * (N + 1),
+          hidden_size=512,
         )
 
         self.transfer_fn = SkipConnMLP(
           in_size=6, out=1, enc=FourierEncoder(input_dims=6),
           # multiply by two here ince it's the pair of latent values at sets of point
           latent_size = self.sdf.latent_size * 2,
+          hidden_size=512,
         )
 
       else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
@@ -508,20 +511,22 @@ class VolSDF(CommonNeRF):
       # sum over the contributions at each point adding with each secondary contribution
       secondary = (first_step_bsdf * second_step).sum(dim=0)
       out = out + secondary
-    # because we have high sampling variance, add in a secondary component which accounts for
-    # unsampled values by taking the points sampled and the current set of points.
-    # This makes it possible to learn outside of the scope of what is possible, but should
-    #  converge faster?
-    # we explicitly allow it to be negative in case the points we pick are all sampled with
-    # super high value.
-    missing = self.missing(
-      torch.cat([ext_pts.reshape((*ext_pts.shape[1:-1], 3 * N)), pts], dim=-1),
-      torch.cat([
-        ext_latent.reshape((*ext_latent.shape[1:-1], self.sdf.latent_size * N)),
-        latent,
-      ], dim=-1),
-    )
-    return out + missing
+      # because we have high sampling variance, add in a secondary component which accounts for
+      # unsampled values by taking the points sampled and the current set of points.
+      # This makes it possible to learn outside of the scope of what is possible, but should
+      #  converge faster?
+      # we explicitly allow it to be negative in case the points we pick are all sampled with
+      # super high value.
+      missing = self.missing(
+        torch.cat([
+          ext_pts.reshape((*ext_pts.shape[1:-1], 3 * N)), pts, light_dir, view,
+        ], dim=-1),
+        torch.cat([
+          ext_latent.reshape((*ext_latent.shape[1:-1], self.sdf.latent_size * N)), latent,
+        ], dim=-1),
+      )
+      out = out + missing
+    return out
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
