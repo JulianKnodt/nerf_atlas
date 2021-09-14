@@ -180,8 +180,8 @@ def arguments():
     "--smooth-normals", help="Amount to attempt to smooth normals", type=float, default=0,
   )
   sdfa.add_argument(
-    "--smooth-eps", help="size of random uniform perturbation for smooth normals regularization", 
-    type=float, default=0,
+    "--smooth-eps", help="size of random uniform perturbation for smooth normals regularization",
+    type=float, default=1e-3,
   )
   sdfa.add_argument(
     "--sdf-kind", help="Which SDF model to use", type=str,
