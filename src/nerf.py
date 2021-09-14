@@ -521,7 +521,7 @@ class VolSDF(CommonNeRF):
           ext_latent.reshape((*ext_latent.shape[1:-1], self.sdf.latent_size * N)), latent,
         ], dim=-1),
       )
-      missing = F.relu(missing)
+      missing = self.feat_act(missing)
       out = out + missing
     return out
   def forward(self, rays):

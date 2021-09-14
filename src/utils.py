@@ -27,9 +27,15 @@ def expected_sin(x, x_var):
   y_var = (0.5 * (1 - (-2 * x_var).exp() * (2 * x).cos()) - y.square()).clamp(min=0)
   return y, y_var
 
-# E[normals] = 1
+# E[||normals||^2] = 1
 @torch.jit.script
 def eikonal_loss(normals): return (torch.linalg.norm(normals, dim=-1) - 1).square().mean()
+
+# E[||normals(pts) - normals(pts+eps)||^2] = 0
+def smooth_normals(compute_normal_fn: "pts -> normals", pts, normals, eps=1e-3):
+  perturb = F.normalize(torch.randn_like(pts), dim=-1) * eps
+  delta_n = normals + compute_normal_fn(pts + perturb)
+  return torch.linalg.norm(delta_n, dim=-1).square().mean()
 
 @torch.jit.script
 def integrated_pos_enc_diag(x, x_cov, min_deg:int, max_deg:int):

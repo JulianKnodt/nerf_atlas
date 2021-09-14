@@ -8,7 +8,11 @@ from tqdm import trange
 def arguments():
   a = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   a.add_argument(
-    "--refl-model", required=True, type=str,
+    "--refl-model", required=True, type=str, help="Which refl model to examine",
+  )
+  a.add_argument(
+    "--weighted-refl-idx", type=int, default=0,
+    help="If using weighted refl, which one to look at",
   )
   return a.parse_args()
 
@@ -26,7 +30,7 @@ def main():
     r = model.refl
     if isinstance(r, refl.LightAndRefl): r = r.refl
     # just check the first choice for now, can add a flag for it later
-    if isinstance(r, refl.WeightedChoice): r = r.choices[1]
+    if isinstance(r, refl.WeightedChoice): r = r.choices[args.weighted_refl_idx]
     # check again if it's another lit item
     if isinstance(r, refl.LightAndRefl): r = r.refl
     assert(isinstance(r, refl.Rusin)), f"must provide a rusin refl, got {type(r)}"
@@ -37,11 +41,11 @@ def main():
       # theta_h
       torch.linspace(0, 90, 256, device=device, dtype=torch.float),
       # theta_d
-      torch.arange(180, device=device, dtype=torch.float),
+      torch.linspace(0, 360, 256, device=device, dtype=torch.float),
     ), dim=-1)
     rads = torch.deg2rad(degs)
-    latent = torch.randn(*rads.shape[:-2], r.latent_size, device=device)
     for i, theta_h in enumerate(rads.split(1, dim=2)):
+      latent = torch.randn(*rads.shape[:-2], r.latent_size, device=device)
       theta_h = theta_h.squeeze(2)
       out = r.raw(theta_h, latent)
       save_image(f"outputs/rusin_eval_{i:03}.png", out)

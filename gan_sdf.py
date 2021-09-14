@@ -3,7 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import argparse
-from src.utils import ( autograd, eikonal_loss, save_image, save_plot, laplace_cdf )
+from src.utils import (
+  autograd, eikonal_loss, save_image, save_plot, laplace_cdf,
+  smooth_normals,
+)
 from src.neural_blocks import ( SkipConnMLP, FourierEncoder, PointNet )
 from src.cameras import ( OrthogonalCamera )
 from src.march import ( bisect )
@@ -78,6 +81,9 @@ def arguments():
   a.add_argument(
     "--crop-size", type=int, default=128, help="Render crop size, x <= 0 indicates no crop",
   )
+  a.add_argument(
+    "--smooth-normals", type=float, default=0, help="Weight to smooth normals, x <= 0 is none",
+  )
   return a.parse_args()
 
 
@@ -105,15 +111,6 @@ def subbound(bounds: [..., 6], half_size: float):
   ur = ur - half_size
   center = (center + ll) * (ur - ll)
   return torch.cat([center-half_size, center+half_size], dim=-1)
-
-def smooth_normal(pts, n):
-  delta_n = torch.autograd.grad(
-    inputs=pts, outputs=F.normalize(n, dim=-1), create_graph=True,
-    grad_outputs=torch.ones_like(n),
-  )[0]
-  print(delta_n.shape)
-  exit()
-  return torch.linalg.norm(delta_n, dim=-1).square().mean()
 
 # rescales the points inside of the bound to a canonical [-1, 1] space.
 # The half_size of the bounding box is necessary to compute the scaling factor.
@@ -154,29 +151,26 @@ def scaled_training_step(
 
   args,
 ):
-  # TODO maybe have this be the same subbd for both of them?
   D.zero_grad()
-  exp_sample_size = 0.5 + random.random()/2
-  subbd_exp = subbound(bounds, exp_sample_size)
-  exp_pts = random_samples_within(subbd_exp, args.sample_size)
-  exp_sub_vals = target(exp_pts, view)
-  exp_pts, exp_sub_vals = rescale_pts_in_bound(
-    subbd_exp[..., :3], exp_pts, exp_sub_vals, exp_sample_size,
+  subbd_sz = 0.5 + random.random()/2
+  subbd = subbound(bounds, subbd_sz)
+  train_pts = random_samples_within(subbd, args.sample_size)
+  dst_sz = 0.5 + random.random()/2
+  dst = subbound(bounds, dst_sz)
+  print(dst)
+  exit()
+  # TODO check all samples are in the subbd
 
-    1, subbound(bounds, 1)[..., :3],
+  exp_sub_vals = target(train_pts, view)
+  exp_pts, exp_sub_vals = rescale_pts_in_bound(
+    subbd[..., :3], train_pts, exp_sub_vals, subbd_sz, dst_sz, dst[..., :3],
   )
   s2_real = D(exp_pts.detach(), exp_sub_vals.detach())
 
-  got_sample_size = 0.5 + random.random()/2
-  subbd_got = subbound(bounds, got_sample_size)
-  #got_tgt_bd_sz = 0.25 + random.random()/2
-  #subbd_got_tgt = subbound(bounds, got_tgt_bd_sz)
-  got_pts = random_samples_within(subbd_got, args.sample_size)
-  got_sub_vals = G(got_pts, view, latent=latent_noise)
+  got_sub_vals = G(train_pts, view, latent=latent_noise)
   new_got_pts, got_sub_vals = rescale_pts_in_bound(
-    subbd_got[..., :3], got_pts, got_sub_vals, got_sample_size,
-
-    1, subbound(bounds, 1)[..., :3],
+    subbd[..., :3], train_pts, got_sub_vals, subbd_sz,
+    dst_sz, dst[..., :3],
   )
   s2_fake = D(new_got_pts.detach(), got_sub_vals.detach())
 
@@ -193,13 +187,11 @@ def scaled_training_step(
       # partial SDF training
       G.zero_grad()
 
-      # TODO probably want to find a new subbd each time to train more
-      got_pts = random_samples_within(subbd_got, args.sample_size)
-      got_sub_vals, got_n, _ = G.vals_normal(got_pts, view, latent=latent_noise)
+      got_sub_vals, got_n, _ = G.vals_normal(train_pts, view, latent=latent_noise)
       new_got_pts, got_sub_vals = rescale_pts_in_bound(
-        subbd_got[..., :3], got_pts, got_sub_vals, got_sample_size,
+        subbd[..., :3], train_pts, got_sub_vals, got_sample_size,
 
-        1, subbound(bounds, 1)[..., :3],
+        dst_sz, dst[..., :3],
       )
 
       s2_fool = D(new_got_pts.detach(), got_sub_vals)
@@ -276,7 +268,7 @@ def train(
   bounds = bounds[None,None,:].expand(batch_size, sample_size, 6)
   # if we do not have a reflectance model we do not need to sample view directions.
   get_view = lambda: None
-  if isinstance(model, SDFAndRefl):
+  if isinstance(G, SDFAndRefl):
     get_view = lambda: \
       F.normalize(torch.randn(batch_size, sample_size, 3, device=device), eps=1e-6, dim=-1)
 
@@ -287,16 +279,16 @@ def train(
     target = random.choice(targets)
     # whole SDF discriminator step
     view = get_view()
-    latent_noise = torch.randn(batch_size, 1, model.latent_size, device=device)\
+    latent_noise = torch.randn(batch_size, 1, G.latent_size, device=device)\
       .mul(5)\
-      .expand(batch_size, sample_size, model.latent_size)
+      .expand(batch_size, sample_size, G.latent_size)
 
     if not args.noglobal:
       D_loss, G_loss = whole_training_step(
         i, latent_noise, view,
 
         target, bounds, max_b,
-        model, opt_G, G_loss,
+        G, opt_G, G_loss,
         D, opt_D, D_loss,
 
         args,
@@ -311,18 +303,25 @@ def train(
         i, latent_noise, view,
 
         target, bounds, max_b,
-        model, opt_G, sG_loss,
+        G, opt_G, sG_loss,
         D, opt_D,
         args,
       )
       sG_losses.append(sG_loss)
       sD_losses.append(sD_loss)
       if args.noglobal: t.set_postfix(sD=f"{sD_loss:.03f}", sG=f"{sG_loss:.03f}")
+    if args.smooth_normals > 0:
+      G.zero_grad()
+      pts = torch.rand(args.sample_size, 3, device=device)
+      compute_normal_fn = lambda pts: G.vals_normal(pts, view, latent_noise)[1]
+      normals = compute_normal_fn(pts)
+      smooth_normals(compute_normal_fn, pts, normals, args.smooth_normals).backward()
+      G_opt.step()
 
     # not sure why I removed this but I don't see a super great need to re-enable it
-    if i != 0 and i % args.save_freq == 0: save(model, D, args)
+    if i != 0 and i % args.save_freq == 0: save(G, D, args)
     ...
-  save(model, D, args)
+  save(G, D, args)
   if len(G_losses) != 0: save_losses(args, G_losses, D_losses)
   if len(sG_losses) != 0: save_losses(args, sG_losses, sD_losses, scaled=True)
 
@@ -580,7 +579,7 @@ def load_model(args):
 
   model = cons(bounds=args.bounds,output_latent_size=output_latent_size)
 
-  if r is not None: model = SDFAndRefl(sdf=model, refl=r)
+  if r is not None: model = SDFAndRefl(sdf=model, refl=r, train_scale=True)
 
   discrim = PointNet(feature_size=feats, classes=1)
   return model.to(device), discrim.to(device)
@@ -591,8 +590,7 @@ def load_targets(args):
     volsdf = torch.load(args.volsdf_model)
     assert(isinstance(volsdf, VolSDF)), "Can only pass VolSDF model"
     sdf = volsdf.sdf
-    if args.refl_kind is not None:
-      return [SDFAndRefl(sdf=VolSDFWrapper(sdf), refl=sdf.refl)]
+    if args.refl_kind is not None: return [SDFAndRefl(sdf=VolSDFWrapper(sdf), refl=sdf.refl)]
     else: return [VolSDFWrapper(sdf, with_refl=False)]
   else: raise NotImplementedError
 

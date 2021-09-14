@@ -109,7 +109,7 @@ nerv_point: clean
 	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz --depth-images \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --notraintest \
+  --notraintest --smooth-normals 1e-4 --omit-bg \
   --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
@@ -217,5 +217,6 @@ volsdf_gan_no_refl:
   --eikonal-weight 1e-2 --target volsdf --volsdf-model models/lego_volsdf.pt \
 	--bounds 1.5 --noglobal --render-size 128 --G-model mlp
 
+# evaluates the reflectance of a rusin model
 eval_rusin:
 	python3 eval_rusin.py --refl-model models/nerv_hotdogs.pt
