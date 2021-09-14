@@ -103,13 +103,14 @@ nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 50_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin \
+	--size 200 --crop --crop-size 14 --epochs 50_000 --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
 	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
-  --color-spaces rgb hsv xyz \
+  --color-spaces rgb hsv xyz --depth-images \
+  --sigmoid-kind upshifted_softplus --skip-loss 100 \
   --notraintest \
-  #--load models/nerv_${nerv_dataset}.pt
+  --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
@@ -202,19 +203,19 @@ pixel_single: clean
 # scripts
 
 gan_sdf:
-	python3 gan_sdf.py --epochs 5000 --num-test-samples 256 --sample-size 2048 \
-  --eikonal-weight 1 --nosave --noglobal \
-  #--load
+	python3 gan_sdf.py --epochs 15_000 --num-test-samples 256 --sample-size 1000 \
+  --eikonal-weight 1 --nosave --noglobal --render-size 256 --crop-size 128 --load
 
 volsdf_gan:
-	python3 gan_sdf.py --epochs 10_000 --num-test-samples 256 --sample-size 1024 \
-  --eikonal-weight 1e-1 --target volsdf --volsdf-model models/lego_volsdf.pt \
-	--refl-kind pos --bounds 2 --noglobal --render-size 128 --G-rep 2 --load
+	python3 gan_sdf.py --epochs 25_000 --num-test-samples 256 --sample-size 900 \
+  --eikonal-weight 0 --target volsdf --volsdf-model models/lego_volsdf.pt \
+	--refl-kind pos --bounds 2 --noglobal --render-size 256 --crop-size 128 --G-model mlp \
+  --load --G-rep 3
 
 volsdf_gan_no_refl:
-	python3 gan_sdf.py --epochs 0 --load --num-test-samples 256 --sample-size 1024 \
-  --eikonal-weight 1e-1 --target volsdf --volsdf-model models/lego_volsdf.pt \
-	--bounds 1.5 --noglobal --render-size 128
+	python3 gan_sdf.py --epochs 25_000 --num-test-samples 256 --sample-size 1024 \
+  --eikonal-weight 1e-2 --target volsdf --volsdf-model models/lego_volsdf.pt \
+	--bounds 1.5 --noglobal --render-size 128 --G-model mlp
 
 eval_rusin:
 	python3 eval_rusin.py --refl-model models/nerv_hotdogs.pt

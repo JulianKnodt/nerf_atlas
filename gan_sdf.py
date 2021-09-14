@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import argparse
-from src.utils import ( autograd, eikonal_loss, save_image, save_plot )
+from src.utils import ( autograd, eikonal_loss, save_image, save_plot, laplace_cdf )
 from src.neural_blocks import ( SkipConnMLP, FourierEncoder, PointNet )
 from src.cameras import ( OrthogonalCamera )
 from src.march import ( bisect )
@@ -16,6 +16,11 @@ import os
 import random
 import math
 import numpy as np
+
+# smooth floor approximates the floor function, but smoothly.
+# If round to is 0.5, it will floor to i.e. 0., 0.5, 1., 1.5, etc.
+def smooth_floor(x, round_to:float=1.):
+  return x - (2 * math.pi * x / round_to).sin() * round_to
 
 def arguments():
   a = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -48,23 +53,31 @@ def arguments():
   a.add_argument(
     "--eikonal-weight", type=float, default=1e-2, help="Weight of eikonal loss",
   )
+  a.add_argument("--smooth-n-weight", type=float, default=0, help="Weight of eikonal loss")
+  a.add_argument(
+    "--G-model", type=str, choices=["mlp", "multi_res"], default="mlp",
+    help="What kind of model to use for the SDF",
+  )
   a.add_argument("--noglobal", action="store_true",help="Don't perform global discrimination")
   a.add_argument("--nolocal", action="store_true",help="Don't perform local discrimination")
   a.add_argument("--save-freq", type=int, default=5000, help="How often to save the model")
   a.add_argument("--num-test-samples", type=int, default=256, help="How many tests to run",)
   a.add_argument("--load", action="store_true", help="Load old generator and discriminator")
-  a.add_argument("--render-size", type=int, default=180, help="Size to render result images")
   a.add_argument(
     "--refl-kind", type=str, default=None,
     choices = [None] + [r for r in refl.refl_kinds if r != "weighted"],
     help="The reflectance model in GAN to learn textures, if any",
   )
   a.add_argument("--nosave", action="store_true", help="Do not save.")
-  a.add_argument("--G-lr", type=float, default=1e-3, help="Generator Learning rate")
-  a.add_argument("--D-lr", type=float, default=5e-4, help="Discriminator Learning rate")
-  a.add_argument("--D-decay", type=float, default=1e-5, help="D decay weight")
+  a.add_argument("--G-lr", type=float, default=5e-4, help="Generator Learning rate")
+  a.add_argument("--D-lr", type=float, default=3e-4, help="Discriminator Learning rate")
+  a.add_argument("--D-decay", type=float, default=1e-6, help="D decay weight")
   # TODO maybe have something special for spherical harmonics since that can be used for
   # regression without a specific viewing direction?
+  a.add_argument("--render-size", type=int, default=256, help="Size to render result images")
+  a.add_argument(
+    "--crop-size", type=int, default=128, help="Render crop size, x <= 0 indicates no crop",
+  )
   return a.parse_args()
 
 
@@ -93,21 +106,25 @@ def subbound(bounds: [..., 6], half_size: float):
   center = (center + ll) * (ur - ll)
   return torch.cat([center-half_size, center+half_size], dim=-1)
 
+def smooth_normal(pts, n):
+  delta_n = torch.autograd.grad(
+    inputs=pts, outputs=F.normalize(n, dim=-1), create_graph=True,
+    grad_outputs=torch.ones_like(n),
+  )[0]
+  print(delta_n.shape)
+  exit()
+  return torch.linalg.norm(delta_n, dim=-1).square().mean()
+
 # rescales the points inside of the bound to a canonical [-1, 1] space.
 # The half_size of the bounding box is necessary to compute the scaling factor.
-def rescale_pts_in_bound(ll, pts, sdf_values, half_size: float, end_size:float, dst_ll):
+def rescale_pts_in_bound(ll, pts, sdf_v, half_size: float, end_size:float, dst_ll):
   sz_ratio = end_size/half_size
   # TODO add different final location parameter
   rescaled_pts = ((pts - ll)/half_size - 1) * end_size
   # https://iquilezles.org/www/articles/distfunctions/distfunctions.htm
-  rescaled_sdf_values = sdf_values * sz_ratio
+  rescaled_sdf_values = torch.cat([sdf_v[..., 0, None] * sz_ratio, sdf_v[..., 1:]], dim=-1)
 
   return rescaled_pts, rescaled_sdf_values
-
-def pts_from_bd_to(ll1, ll2, pts, sdf_values, size_ratio: float):
-  new_pts = (pts - ll1) * size_ratio + ll2
-  new_sdf_values = sdf_values * size_ratio
-  return new_pts, new_sdf_values
 
 
 # [WIP] returns semi-equispaced samples within some bounds, sampling a fixed amt of times per
@@ -137,6 +154,7 @@ def scaled_training_step(
 
   args,
 ):
+  # TODO maybe have this be the same subbd for both of them?
   D.zero_grad()
   exp_sample_size = 0.5 + random.random()/2
   subbd_exp = subbound(bounds, exp_sample_size)
@@ -175,21 +193,23 @@ def scaled_training_step(
       # partial SDF training
       G.zero_grad()
 
+      # TODO probably want to find a new subbd each time to train more
       got_pts = random_samples_within(subbd_got, args.sample_size)
-      got_sub_vals, got_n, _sdf_latent = G.vals_normal(got_pts, view, latent=latent_noise)
+      got_sub_vals, got_n, _ = G.vals_normal(got_pts, view, latent=latent_noise)
       new_got_pts, got_sub_vals = rescale_pts_in_bound(
         subbd_got[..., :3], got_pts, got_sub_vals, got_sample_size,
 
         1, subbound(bounds, 1)[..., :3],
       )
 
-      s2_fool = D(got_pts, got_sub_vals)
+      s2_fool = D(new_got_pts.detach(), got_sub_vals)
       fooling_loss = F.binary_cross_entropy_with_logits(s2_fool, torch.ones_like(s2_fool))
 
-      G_loss = fooling_loss
-      (G_loss + args.eikonal_weight*eikonal_loss(got_n)).backward()
+      G_loss = fooling_loss + \
+        args.eikonal_weight * eikonal_loss(got_n)
+      G_loss.backward()
       opt_G.step()
-      G_loss = G_loss.item()
+      G_loss = fooling_loss.item()
   return D_loss.item(), G_loss
 
 def whole_training_step(
@@ -227,10 +247,12 @@ def whole_training_step(
     s1_fool = D(pt_samples1.detach(), got)
     fooling_loss = F.binary_cross_entropy_with_logits(s1_fool, torch.ones_like(s1_fool))
 
-    G_loss = fooling_loss
-    (G_loss + args.eikonal_weight*eikonal_loss(got_n)).backward()
+    G_loss = fooling_loss + \
+      args.eikonal_weight * eikonal_loss(got_n)
+    G_loss.backward()
     opt_G.step()
-    G_loss = G_loss.item()
+    # only report fooling loss
+    G_loss = fooling_loss.item()
   return D_loss, G_loss
 
 # trains a GAN with a target SDF, as well as a discriminator point net.
@@ -352,34 +374,25 @@ def values_normals(sdf, pts):
   return values, normals
 
 class SDFAndRefl(nn.Module):
-  def __init__(self, sdf, refl):
+  def __init__(self, sdf, refl, train_scale=False):
     super().__init__()
     self.model = sdf
     self.refl = refl
-    self.dropout = nn.Dropout(inplace=True)
+    self.scale = nn.Parameter(torch.tensor(1e-2, requires_grad=train_scale))
   def forward(self, x, view, latent=None):
     v = self.model(x, view, latent)
     v, sdf_latent = v[..., 0, None], v[..., 1:]
-    rgb = self.refl(x, view, latent=sdf_latent)
-    # we do not care about the color off the surface of the SDF, but really close is probably
-    # similar so regress with some epsilon.
-    #rgb = torch.where(v.abs() < 1e-1, rgb, torch.zeros_like(rgb))
-    # the farther the distance from the surface the less the color matters
-    scale = 1e-2
-    weight = laplace_cdf(v, scale)
-    print(weight.min().item(), weight.max().item()
-    density = 1/scale * weight
-    sigma_a = F.softplus(density-1)
-    alpha = 1 - torch.exp(-sigma_a * 1e-1) # some small delta to measure change
-    print(alpha.shape, rgb.shape)
-    exit()
-    rgb = rgb * alpha
 
-    return torch.cat([v, rgb], dim=-1)
+    return torch.cat([v, self.rgb(v, x, view, sdf_latent)], dim=-1)
 
   # returns the SDF of this (and any children's SDF if nested)
   @property
   def sdf(self): return self.model
+
+  def rgb(self, sdf_v, x, view, sdf_latent):
+    rgb = self.refl(x, view, latent=sdf_latent)
+    weight = laplace_cdf(sdf_v, self.scale)
+    return rgb * weight
 
   @property
   def latent_size(self): return self.model.latent_size
@@ -387,9 +400,8 @@ class SDFAndRefl(nn.Module):
 
   def vals_normal(self, x, view, latent=None):
     v, normal, sdf_latent = self.model.vals_normal(x, view, latent)
-    rgb = self.refl(x, view, latent=sdf_latent)
-    # return SDF latent here for consistency
-    return torch.cat([v, rgb], dim=-1), normal, sdf_latent
+    # return SDF latent here to match API
+    return torch.cat([v, self.rgb(v, x, view, sdf_latent)], dim=-1), normal, sdf_latent
 
   def set_to(self, sdf): self.model.set_to(sdf)
 
@@ -404,11 +416,9 @@ class MLP(nn.Module):
     self.latent_size = latent_size
     self.assigned_latent = None
     self.mlp = SkipConnMLP(
-      in_size=3, out=1 + output_latent_size,
-      latent_size=latent_size,
+      in_size=3, out=1 + output_latent_size, latent_size=latent_size,
       enc=FourierEncoder(input_dims=3),
-      activation=torch.sin,
-      num_layers=7, hidden_size=512,
+      activation=torch.sin, num_layers=7, hidden_size=512,
       skip=3,
       xavier_init=True,
     )
@@ -434,9 +444,9 @@ class MLP(nn.Module):
       pts = x if x.requires_grad else x.requires_grad_()
       values = self(pts, view, latent)
       sdf = values[..., 0, None]
-      latent = values[..., 1:]
+      new_latent = values[..., 1:]
       normals = autograd(pts, sdf)
-      return sdf, normals, latent
+      return sdf, normals, new_latent
   def set_to(self, sdf):
     opt = optim.Adam(self.parameters(), lr=1e-3)
     t = trange(1024)
@@ -449,6 +459,51 @@ class MLP(nn.Module):
       opt.step()
       # TODO could add eikonal loss, not sure if worth since it's a blind copy.
       t.set_postfix(l2=f"{loss:.03f}")
+
+class MultiRes(nn.Module):
+  def __init__(
+    self,
+
+    output_latent_size:int=0,
+    bounds:float=1.5,
+
+    # this latent size is per resolution
+    latent_size:int=32,
+
+    # number of different resolutions to try the SDF at.
+    resolutions:int=3,
+  ):
+    assert(resolutions > 0), "Must have at least 1 SDF resolution"
+    super().__init__()
+    self.latent_size = resolutions * latent_size
+    self.res = resolutions
+    self.tiers = nn.ModuleList([
+      SkipConnMLP(
+        in_size=3, out=1 + output_latent_size, latent_size=latent_size,
+        enc=FourierEncoder(input_dims=3), activation=torch.sin,
+        num_layers=4, hidden_size=256, skip=3, xavier_init=True,
+      ) for _ in range(resolutions)
+    ])
+    self.assigned_latent = None
+    self.bounds = bounds
+  def forward(self, x, view, latent=None):
+    l = latent if latent is not None else self.assigned_latent.expand(*x.shape[:-1], -1)
+    latents = l.chunk(self.res, dim=-1)
+    out = None
+    for i, (mlp, latent) in enumerate(zip(self.tiers, latents)):
+      smooth_x = x if i == 0 else smooth_floor(x, 1/i)
+      v = mlp(smooth_x, latent)
+      out = v if out is None else (out + v)
+    return out
+  def vals_normal(self, x, view=None, latent=None):
+    with torch.enable_grad():
+      pts = x if x.requires_grad else x.requires_grad_()
+      values = self(pts, view, latent)
+      sdf = values[..., 0, None]
+      latent = values[..., 1:]
+      normals = autograd(pts, sdf)
+      return sdf, normals, latent
+
 
 # wraps just the SDF component of a volsdf to make it compatible with the GAN API
 class VolSDFWrapper(nn.Module):
@@ -519,7 +574,11 @@ def load_model(args):
     output_latent_size = 64 # TODO make arg # output latent_size to pass to refl
     r = refl.load(args, args.refl_kind, "identity", output_latent_size)
     feats += 3 # RGB
-  model = MLP(bounds=args.bounds, output_latent_size=output_latent_size)
+
+  if args.G_model == "mlp": cons = MLP
+  elif args.G_model == "multi_res": cons = MultiRes
+
+  model = cons(bounds=args.bounds,output_latent_size=output_latent_size)
 
   if r is not None: model = SDFAndRefl(sdf=model, refl=r)
 
@@ -542,7 +601,8 @@ def main():
   if not args.load:
     model, discrim = load_model(args)
   else:
-    model, discrim = torch.load("models/G_sdf.pt"), torch.load("models/D_sdf.pt")
+    model = torch.load("models/G_sdf.pt", map_location=device)
+    discrim = torch.load("models/D_sdf.pt", map_location=device)
   opt_G = optim.Adam(model.parameters(), lr=args.G_lr)
   opt_D = optim.Adam(discrim.parameters(), lr=args.D_lr, weight_decay=args.D_decay)
   # select a set of target SDFs.
@@ -552,6 +612,7 @@ def main():
 
   model.eval()
   sz = args.render_size
+  cs = args.crop_size if args.crop_size > 0 else sz
   with torch.no_grad():
     start_l = torch.randn(model.latent_size, device=device) * 3
     end_l = torch.randn(model.latent_size, device=device) * 3
@@ -574,9 +635,22 @@ def main():
       model.set_assigned_latent(start_l * (1 - t) + end_l * t)
 
       # need to add learned reflectance here
-      normals, depths, rgb = render(model, cam, (0,0,sz,sz), sz)
-      items = [normals.squeeze(0), depths.squeeze(0)]
-      if rgb is not None: items.append(rgb)
+      N = math.ceil(sz/cs)
+      normals = torch.zeros(sz, sz, 3, device=device)
+      depths = torch.zeros(sz, sz, 1, device=device)
+      rgb = torch.zeros(sz, sz, 3, device=device)
+      has_rgb = False
+      for x in range(N):
+        for y in range(N):
+          c0, c1 = x*cs, y*cs
+          n, d, color = render(model, cam, (c0,c1,cs,cs), sz)
+          normals[c0:c0+cs, c1:c1+cs,:] = n[0]
+          depths[c0:c0+cs, c1:c1+cs,:] = d[0]
+          has_rgb = has_rgb or (color is not None)
+          if has_rgb: rgb[c0:c0+cs, c1:c1+cs,:] = color
+
+      items = [normals, depths]
+      if has_rgb: items.append(rgb)
       save_plot(f"outputs/sdf_gan_{i:03}.png", *items)
   return
 

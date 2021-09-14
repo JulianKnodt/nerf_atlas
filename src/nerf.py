@@ -6,7 +6,9 @@ import random
 from .neural_blocks import (
   SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder
 )
-from .utils import ( dir_to_elev_azim, autograd, sample_random_hemisphere, laplace_cdf )
+from .utils import (
+  dir_to_elev_azim, autograd, sample_random_hemisphere, laplace_cdf, load_sigmoid,
+)
 import src.refl as refl
 from .renderers import ( load_occlusion_kind, direct )
 import src.march as march
@@ -166,13 +168,7 @@ class CommonNeRF(nn.Module):
     else:
       raise NotImplementedError(f"Unexpected bg: {bg}")
 
-  def set_sigmoid(self, kind="thin"):
-    if kind == "thin": self.feat_act = thin_sigmoid
-    elif kind == "fat": self.feat_act = fat_sigmoid
-    elif kind == "normal": self.feat_act = torch.sigmoid
-    elif kind == "cyclic": self.feat_act = cyclic_sigmoid
-    elif kind == "softmax": self.feat_act = nn.Softmax(dim=-1)
-    else: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
+  def set_sigmoid(self, kind="thin"): self.feat_act = load_sigmoid(kind)
   def sky_from_mlp(self, elaz_r_d, weights):
     return (1-weights.sum(dim=0)).unsqueeze(-1) * fat_sigmoid(self.sky_mlp(elaz_r_d))
   def total_latent_size(self) -> int:
@@ -525,6 +521,7 @@ class VolSDF(CommonNeRF):
           ext_latent.reshape((*ext_latent.shape[1:-1], self.sdf.latent_size * N)), latent,
         ], dim=-1),
       )
+      missing = F.relu(missing)
       out = out + missing
     return out
   def forward(self, rays):

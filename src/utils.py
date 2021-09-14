@@ -350,6 +350,7 @@ def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps) + eps
 def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
   return ((v/period).sin()+1)/2 * (1+2*eps) - eps
 def upshifted_sigmoid(v, eps=1e-2): return v.sigmoid() * (1-eps) + eps
+def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 
 # list of available sigmoids
 sigmoid_kinds = {
@@ -361,6 +362,7 @@ sigmoid_kinds = {
   "softmax": nn.Softmax(dim=-1),
   # oops this isn't a sigmoid
   "leaky_relu": F.leaky_relu,
+  "upshifted_softplus": upshifted_softplus,
 }
 def load_sigmoid(kind="thin"):
   sigmoid = sigmoid_kinds.get(kind, None)

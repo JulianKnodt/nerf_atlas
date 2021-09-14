@@ -211,6 +211,7 @@ class Positional(Reflectance):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
       in_size=self.latent_size, out=self.out_features, latent_size=0,
+      #enc=FourierEncoder(input_dims=3),
       num_layers=5, hidden_size=256, xavier_init=True,
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
@@ -308,7 +309,7 @@ class Rusin(Reflectance):
 
   # returns the raw results given rusin parameters
   def raw(self, rusin_params, latent=None):
-    return F.leaky_relu(self.rusin(rusin_params.cos(), latent))
+    return self.act(self.rusin(rusin_params.cos(), latent))
 
   def forward(self, x, view, normal, light, latent=None):
     # TODO would it be good to detach the normal? is it trying to fix the surface
@@ -318,7 +319,7 @@ class Rusin(Reflectance):
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     rusin = rusin_params(wo, wi)
-    return F.leaky_relu(self.rusin(rusin, latent))
+    return self.act(self.rusin(rusin, latent))
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
