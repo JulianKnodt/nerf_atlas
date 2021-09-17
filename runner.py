@@ -132,6 +132,10 @@ def arguments():
     "--spherical-harmonic-order", default=2, type=int,
     help="Learn spherical harmonic coefficients up to given order. Used w/ --refl-kind=sph-har",
   )
+  a.add_argument(
+    "--path-learn-missing", action="store_true",
+    help="Learn missing sampled components during path tracing",
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -182,6 +186,10 @@ def arguments():
   sdfa.add_argument(
     "--smooth-eps", help="size of random uniform perturbation for smooth normals regularization",
     type=float, default=1e-3,
+  )
+  sdfa.add_argument(
+    "--smooth-eps-rng", action="store_true",
+    help="smooth by a random amount instead of smoothing by a fixed distance",
   )
   sdfa.add_argument(
     "--sdf-kind", help="Which SDF model to use", type=str,
@@ -458,10 +466,11 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     # dn/dx -> 0, hopefully smoothes out the local normals of the surface.
     # TODO does it matter to normalize the normal or not?
     if args.smooth_normals > 0:
-      if args.smooth_eps > 0:
+      s_eps = args.smooth_eps
+      if s_eps > 0:
+        if args.smooth_eps_rng: s_eps = random.random() * s_eps
         # epsilon-perturbation implementation from unisurf
-        perturbation = F.normalize(2*torch.rand(3, device=device)-1, dim=-1) * args.smooth_eps
-        perturbation = perturbation.expand(pts.shape)
+        perturbation = F.normalize(torch.randn_like(pts), dim=-1) * s_eps
         delta_n = n - model.sdf.normals(pts + perturbation)
       else:
         # TODO maybe lower dimensionality of n?
@@ -628,6 +637,7 @@ def load_model(args):
     constructor = nerf.VolSDF
     kwargs["sdf"] = sdf.load(args, with_integrator=False)
     kwargs["occ_kind"] = args.occ_kind
+    kwargs["w_missing"] = args.path_learn_missing
     kwargs["integrator_kind"] = args.integrator_kind or "direct"
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)

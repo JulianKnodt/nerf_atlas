@@ -410,7 +410,6 @@ class NeRFAE(CommonNeRF):
     sky = self.sky_color(None, self.weights)
     return color + sky
 
-
 # https://arxiv.org/pdf/2106.12052.pdf
 class VolSDF(CommonNeRF):
   def __init__(
@@ -420,6 +419,7 @@ class VolSDF(CommonNeRF):
     device: torch.device = "cuda",
 
     occ_kind=None,
+    w_missing:bool = False,
     integrator_kind="direct",
     **kwargs,
   ):
@@ -439,12 +439,14 @@ class VolSDF(CommonNeRF):
         missing_cmpts = 3 * (N + 1) + 6
 
         # this is a function of the seen pts and the sampled lighting dir
-        self.missing = SkipConnMLP(
-          in_size=missing_cmpts, out=out_features, enc=FourierEncoder(input_dims=missing_cmpts),
-          # here we care about the aggregate set of all point, so bundle them all up.
-          latent_size = self.sdf.latent_size * (N + 1),
-          hidden_size=512,
-        )
+        self.missing = None
+        if w_missing:
+          self.missing = SkipConnMLP(
+            in_size=missing_cmpts, out=out_features, enc=FourierEncoder(input_dims=missing_cmpts),
+            # here we care about the aggregate set of all point, so bundle them all up.
+            latent_size = self.sdf.latent_size * (N + 1),
+            hidden_size=512,
+          )
 
         self.transfer_fn = SkipConnMLP(
           in_size=6, out=1, enc=FourierEncoder(input_dims=6),
@@ -513,6 +515,7 @@ class VolSDF(CommonNeRF):
       #  converge faster?
       # we explicitly allow it to be negative in case the points we pick are all sampled with
       # super high value.
+      if self.missing is None: continue
       missing = self.missing(
         torch.cat([
           ext_pts.reshape((*ext_pts.shape[1:-1], 3 * N)), pts, light_dir, view,

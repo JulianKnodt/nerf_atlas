@@ -36,11 +36,11 @@ def main():
     assert(isinstance(r, refl.Rusin)), f"must provide a rusin refl, got {type(r)}"
 
     degs = torch.stack(torch.meshgrid(
-      # phi_d
-      torch.linspace(0, 90, 256, device=device, dtype=torch.float),
       # theta_h
       torch.linspace(0, 90, 256, device=device, dtype=torch.float),
       # theta_d
+      torch.linspace(0, 90, 256, device=device, dtype=torch.float),
+      # phi_d
       torch.linspace(0, 360, 256, device=device, dtype=torch.float),
     ), dim=-1)
     rads = torch.deg2rad(degs)

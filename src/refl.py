@@ -314,7 +314,7 @@ class Rusin(Reflectance):
   def forward(self, x, view, normal, light, latent=None):
     # TODO would it be good to detach the normal? is it trying to fix the surface
     # to make it look better?
-    frame = coordinate_system(normal)
+    frame = coordinate_system(normal.detach())
     # have to move view and light into basis of normal
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)

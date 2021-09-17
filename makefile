@@ -104,12 +104,12 @@ nerv_point: clean
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 14 --epochs 50_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind rusin \
+	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
 	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz --depth-images \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --notraintest --smooth-normals 1e-4 --omit-bg \
+  --omit-bg --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 \
   --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
@@ -120,7 +120,7 @@ nerv_point_sdf: clean
 	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind multi_rusin \
 	--sdf-eikonal 0.1 --light-kind dataset \
 	--loss-fns l2 l1 rmse --valid-freq 250 --save-freq 1000 --seed -1 \
-	--occ-kind learned --sdf-isect-kind bisect --replace occ \
+	--occ-kind learned --sdf-isect-kind bisect \
   --integrator-kind direct --color-spaces rgb hsv xyz \
 	--load models/nerv_sdf_${nerv_dataset}.pt
 
@@ -156,7 +156,7 @@ nerv_point_subrefl: clean
 	--size 200 --crop --crop-size 12 --epochs 30_000 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind weighted \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
-	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
+	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz \
   --notraintest --omit-bg \
   --load models/nerv_weighted_${nerv_dataset}.pt
