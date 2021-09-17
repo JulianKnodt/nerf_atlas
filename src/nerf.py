@@ -428,12 +428,16 @@ class VolSDF(CommonNeRF):
     # the reflectance model is in the SDF, so don't encode it here.
     self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
     self.secondary = None
+    self.out_features = out_features
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
         f"Must have light w/ volsdf integration {type(self.sdf.refl)}"
       self.occ = load_occlusion_kind(occ_kind, self.sdf.latent_size)
       if integrator_kind == "direct": self.secondary = self.direct
-      elif integrator_kind == "path":
+      elif integrator_kind == "path": self.convert_to_path(w_missing)
+      else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
+  def convert_to_path(self, w_missing: bool):
+        if self.secondary == self.path: return
         self.secondary = self.path
         self.path_n = N = 3
         missing_cmpts = 3 * (N + 1) + 6
@@ -442,7 +446,7 @@ class VolSDF(CommonNeRF):
         self.missing = None
         if w_missing:
           self.missing = SkipConnMLP(
-            in_size=missing_cmpts, out=out_features, enc=FourierEncoder(input_dims=missing_cmpts),
+            in_size=missing_cmpts, out=self.out_features, enc=FourierEncoder(input_dims=missing_cmpts),
             # here we care about the aggregate set of all point, so bundle them all up.
             latent_size = self.sdf.latent_size * (N + 1),
             hidden_size=512,
@@ -454,8 +458,6 @@ class VolSDF(CommonNeRF):
           latent_size = self.sdf.latent_size * 2,
           hidden_size=512,
         )
-
-      else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
   def direct(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
     for light in self.sdf.refl.light.iter():

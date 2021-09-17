@@ -121,6 +121,10 @@ def arguments():
   )
 
   a.add_argument(
+    "--volsdf-direct-to-path", action="store_true",
+    help="Convert an existing direct volsdf model to a path tracing model",
+  )
+  a.add_argument(
     "--volsdf-alternate", help="Use alternating volume rendering/SDF training volsdf",
     action="store_true",
   )
@@ -603,6 +607,11 @@ def set_per_run(model, args):
   if args.model == "sdf": return
   if not hasattr(model, "nerf"): return
   #if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
+
+  # converts from a volsdf with direct integration to one with indirect lighting
+  if args.volsdf_direct_to_path:
+    assert(isinstance(model, nerf.VolSDF)), "only applies to VolSDF"
+    model.convert_to_path(args.path_learn_missing)
 
 
 def load_model(args):

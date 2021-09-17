@@ -144,9 +144,10 @@ nerv_point_path: clean
 	--size 64 --crop --crop-size 6 --epochs 25000 --loss-window 500 \
 	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
-	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
+	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --save-freq 1000 --omit-bg \
   --integrator-kind path --depth-images --notraintest --skip-loss 100 \
+  --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 --path-learn-missing \
   --load models/nerv_path_${nerv_dataset}.pt
 
 nerv_point_subrefl: clean
