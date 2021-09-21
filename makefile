@@ -141,14 +141,14 @@ nerv_point_path: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_path_${nerv_dataset}.pt \
-	--size 64 --crop --crop-size 6 --epochs 25000 --loss-window 500 \
+	--size 200 --crop --crop-size 6 --epochs 25000 --loss-window 500 \
 	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
-  --color-spaces rgb xyz hsv --save-freq 1000 --omit-bg \
+  --color-spaces rgb xyz hsv --save-freq 1000 \
   --integrator-kind path --depth-images --notraintest --skip-loss 100 \
-  --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 --path-learn-missing \
-  --load models/nerv_path_${nerv_dataset}.pt
+  --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 \
+  --load models/nerv_path_${nerv_dataset}.pt #--path-learn-missing
 
 nerv_point_subrefl: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
@@ -221,3 +221,7 @@ volsdf_gan_no_refl:
 # evaluates the reflectance of a rusin model
 eval_rusin:
 	python3 eval_rusin.py --refl-model models/nerv_hotdogs.pt
+
+fieldgan: clean
+	python3 fieldgan.py --image data/mondrian.jpg --epochs 2500
+	#python3 fieldgan.py --image data/food/images/IMG_1268.png --epochs 2500

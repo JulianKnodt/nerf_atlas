@@ -556,12 +556,11 @@ def test(model, cam, labels, args, training: bool = True, light=None):
                 model.nerf.weights, model.nerf.ts[:, None, None, None, None]
               )[0,...]
           if hasattr(model, "n") and hasattr(model, "nerf"):
+            # do not normalize the values of n?
             normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              (nerf.volumetric_integrate(model.nerf.weights, F.normalize(model.n, dim=-1))[0,...]+1)/2
-          elif hasattr(model, "sdf"):
+              (nerf.volumetric_integrate(model.nerf.weights, model.n)[0,...]+1)/2
+          elif hasattr(model, "n") and hasattr(model, "sdf"):
             ...
-            #normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-            #  model.sdf.debug_normals(
 
       gots.append(got)
       loss = F.mse_loss(got, exp)

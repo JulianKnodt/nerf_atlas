@@ -508,6 +508,8 @@ class VolSDF(CommonNeRF):
         x=ext_pts, view=dirs, normal=ext_n, light=ext_light_dir, latent=ext_latent,
       )
       second_step = ext_light_val * path_bsdf
+      # TODO add missing to second step as a multiplication of each component?
+      #print(first_step.shape, second_step.shape)
       # sum over the contributions at each point adding with each secondary contribution
       secondary = (first_step_bsdf * second_step).sum(dim=0)
       out = out + secondary
