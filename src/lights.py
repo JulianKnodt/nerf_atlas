@@ -8,11 +8,8 @@ from .neural_blocks import ( SkipConnMLP, FourierEncoder )
 from .utils import ( autograd, elev_azim_to_dir )
 
 def load(args):
-  if args.light_kind == "field": cons = Field
-  elif args.light_kind == "point": cons = Point
-  elif args.light_kind == "dataset": cons = lambda **kwargs: None
-  else: raise NotImplementedError(f"light kind: {args.light_kind}")
-
+  cons = light_kinds.get(args.light_kind, None)
+  if cons is None: raise NotImplementedError(f"light kind: {args.light_kind}")
   return cons()
 
 class Light(nn.Module):
@@ -21,18 +18,31 @@ class Light(nn.Module):
   ):
     super().__init__()
   def __getitem__(self, _v): return self
-  @property
-  def can_sample(self): return False
   def forward(self, x): raise NotImplementedError()
 
 class Field(Light):
-  def __init__(self):
+  def __init__(self, act=nn.Softplus()):
     super().__init__()
-    self.mlp = SkipConnMLP(in_size=3, out=5, enc=FourierEncoder(input_dims=3))
-  def forward(self, x):
+    self.mlp = SkipConnMLP(
+      in_size=3, out=5,
+      # Do not use encoder, as we want a smooth approximation rather than overfitting to
+      # specific views.
+      #enc=FourierEncoder(input_dims=3),
+      hidden_size=256,
+      xavier_init=True,
+    )
+    # since this is a field it doesn't have a specific distance and thus is treated like ambient
+    # light
+    self.far_dist = 20
+    self.act = act
+  def __getitem__(self, v): return self
+  def iter(self): yield self
+  def forward(self, x, mask=None):
+    if mask is not None: raise NotImplementedError()
     intensity, elaz = self.mlp(x).split([3,2], dim=-1)
-    r_d = elev_azim_to_dir(elaz.tanh() * (math.pi-1e-6))
-    return intensity.sigmoid(), r_d
+    v = elaz.tanh() * (math.pi-1e-6)
+    r_d = elev_azim_to_dir(v)
+    return r_d, self.far_dist, self.act(intensity)
 
 class Point(Light):
   def __init__(
@@ -65,8 +75,6 @@ class Point(Light):
       intensity=self.intensity[v],
       train_intensity=self.train_intensity,
     )
-  @property
-  def can_sample(self): return True
   # return a singular light from a batch, altho it may be more efficient to use batching
   # this is conceptually nicer, and allows for previous code to work.
   def iter(self):
@@ -89,3 +97,10 @@ class Point(Light):
     if mask is not None: intn = intn.expand((*mask.shape, 3,))[mask]
     spectrum = intn/decay.clamp(min=1e-5).unsqueeze(-1)
     return d, dist, spectrum
+
+light_kinds = {
+  "field": Field,
+  "point": Point,
+  "dataset": lambda **kwargs: None,
+  None: None,
+}

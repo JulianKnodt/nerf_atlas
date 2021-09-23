@@ -26,6 +26,7 @@ import src.refl as refl
 import src.cameras as cameras
 import src.hyper_config as hyper_config
 import src.renderers as renderers
+from src.lights import light_kinds
 from src.utils import ( save_image, save_plot, load_image )
 from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer )
 
@@ -175,9 +176,8 @@ def arguments():
 
   lighta = a.add_argument_group("light")
   lighta.add_argument(
-    "--light-kind",
+    "--light-kind", choices=list(light_kinds.keys()), default=None,
     help="Kind of light to use while rendering. Dataset indicates light is in dataset",
-    choices=[None, "point", "field", "dataset"], default=None,
   )
 
   sdfa = a.add_argument_group("sdf")
@@ -252,6 +252,9 @@ def arguments():
   )
   rprt.add_argument(
     "--depth-images", action="store_true", help="Whether to render depth images",
+  )
+  rprt.add_argument(
+    "--normals-from-depth", action="store_true", help="Render extra normal images from depth",
   )
   rprt.add_argument(
     "--not-magma", action="store_true", help="Whether to use magma for depth maps",
@@ -505,11 +508,14 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
 
         if args.depth_images and hasattr(model, "nerf"):
-          depth = nerf.volumetric_integrate(
+          raw_depth = nerf.volumetric_integrate(
             model.nerf.weights, model.nerf.ts[:, None, None, None, None]
           )
-          depth = (depth[0,...]-args.near)/(args.far - args.near)
+          depth = (raw_depth[0,...]-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
+          if args.normals_from_depth:
+            depth_normal = (utils.depth_to_normals(raw_depth[0] * 50)+1)/2
+            items.append(depth_normal.clamp(min=0, max=1))
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
@@ -572,6 +578,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       items = [exp, got.clamp(min=0, max=1)]
       #if hasattr(model, "nerf"): items.append(acc)
       if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0,max=1))
+      if (depth != 0).any() and args.normals_from_depth:
+        depth_normals = (utils.depth_to_normals(depth * 50)+1)/2
+        items.append(depth_normals.clamp(min=0, max=1))
       if hasattr(model, "nerf") and args.depth_images:
         depth = (depth-args.near)/(args.far - args.near)
         items.append(depth.clamp(min=0, max=1))

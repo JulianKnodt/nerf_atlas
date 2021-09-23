@@ -72,7 +72,7 @@ class SmoothImageApprox(nn.Module):
     angle = torch.remainder(angle, 2*math.pi)
     dx = torch.cat([angle.cos(), angle.sin()], dim=-1)
     # Force there to be some movement
-    dx = F.normalize(dx, dim=-1, eps=1e-6) * t.square()
+    dx = F.normalize(dx, dim=-1, eps=1e-6) * (t * 2 * math.pi).sin()
     return wide_sigmoid(self.approx(torch.fmod(x + dx, 1), latent))
 
 device="cpu"

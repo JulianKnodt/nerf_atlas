@@ -210,7 +210,7 @@ def elev_azim_to_dir(elev_azim):
   direction = torch.cat([
     azim.sin() * elev.cos(),
     azim.cos() * elev.cos(),
-    elev.cos(),
+    elev.sin(),
   ], dim=-1)
   return direction
 
@@ -346,6 +346,15 @@ def spherical_pose(elev, azim, rad):
   c2w = rot_theta(theta/180.*np.pi) @ c2w
   c2w = torch.Tensor([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
   return c2w
+
+# converts a depth image (W, H, 1) into a normal map
+def depth_to_normals(depth_img):
+  dz_dx = depth_img[1:, 1:,...] - depth_img[:-1, 1:, ...]
+  dz_dy = depth_img[1:, 1:, ...] - depth_img[1:, :-1, ...]
+  assert(dz_dx.shape == dz_dy.shape)
+  z = torch.ones_like(dz_dx)
+  d = torch.cat([dz_dx/2, dz_dy/2, z], dim=-1)
+  return F.normalize(d, dim=-1)
 
 
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,

@@ -39,6 +39,17 @@ nerf-sh: clean
 	--refl sph-har --save models/${nerfactor_ds}-sh.pt \
   --load models/${nerfactor_ds}-sh.pt
 
+nerfactor_volsdf: clean
+	python3 runner.py -d data/nerfactor/${nerfactor_ds}/ \
+	--data-kind original --size 128 --crop --crop-size 14 --epochs 25_000 \
+	--near 2 --far 6 --batch-size 3 --model volsdf --sdf-kind mlp \
+	-lr 5e-4 --loss-window 750 --valid-freq 250 --loss-window 500 \
+	--loss-fns l2 rmse --save-freq 2500 --seed -1 --occ-kind all-learned \
+	--refl rusin --save models/${nerfactor_ds}_volsdf.pt --light-kind field \
+  --color-spaces rgb xyz hsv --depth-images --normals-from-depth \
+  --integrator-kind direct --smooth-normals 1e-2 --sdf-eikonal 0.1 --smooth-eps-rng \
+  #--load models/${nerfactor_ds}_volsdf.pt
+
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean
 	python3 runner.py -d data/food/ --data-kind shiny --size 64 \
@@ -141,13 +152,13 @@ nerv_point_path: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_path_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 6 --epochs 25000 --loss-window 500 \
+	--size 64 --crop --crop-size 6 --epochs 25_000 --loss-window 500 \
 	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --save-freq 1000 \
   --integrator-kind path --depth-images --notraintest --skip-loss 100 \
-  --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 \
+  --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 --normals-from-depth \
   --load models/nerv_path_${nerv_dataset}.pt #--path-learn-missing
 
 nerv_point_subrefl: clean
