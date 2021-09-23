@@ -286,7 +286,7 @@ class PlainNeRF(CommonNeRF):
     )
 
     self.refl = refl.View(
-      out_features=out_features, act=self.feat_act,
+      out_features=out_features,
       latent_size=self.latent_size+intermediate_size,
     )
 
@@ -356,7 +356,7 @@ class NeRFAE(CommonNeRF):
     )
 
     self.refl = refl.View(
-      out_features=out_features, act=self.feat_act,
+      out_features=out_features,
       latent_size=encoding_size+intermediate_size,
     )
     self.encoding_size = encoding_size

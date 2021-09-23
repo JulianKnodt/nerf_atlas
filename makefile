@@ -37,17 +37,18 @@ nerf-sh: clean
 	-lr 1e-3 --loss-window 750 --valid-freq 250 \
 	--loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
 	--refl sph-har --save models/${nerfactor_ds}-sh.pt \
-  --load models/${nerfactor_ds}-sh.pt
+  #--load models/${nerfactor_ds}-sh.pt
 
 nerfactor_volsdf: clean
 	python3 runner.py -d data/nerfactor/${nerfactor_ds}/ \
 	--data-kind original --size 128 --crop --crop-size 14 --epochs 25_000 \
-	--near 2 --far 6 --batch-size 3 --model volsdf --sdf-kind mlp \
-	-lr 5e-4 --loss-window 750 --valid-freq 250 --loss-window 500 \
-	--loss-fns l2 rmse --save-freq 2500 --seed -1 --occ-kind all-learned \
+	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind mlp \
+	-lr 8e-4 --loss-window 750 --valid-freq 250 --loss-window 500 \
+	--loss-fns l2 --save-freq 2500 --occ-kind all-learned \
 	--refl rusin --save models/${nerfactor_ds}_volsdf.pt --light-kind field \
-  --color-spaces rgb xyz hsv --depth-images --normals-from-depth \
-  --integrator-kind direct --smooth-normals 1e-2 --sdf-eikonal 0.1 --smooth-eps-rng \
+  --color-spaces rgb --depth-images --normals-from-depth \
+  --smooth-normals 1e-2 --sdf-eikonal 0.1 --smooth-eps-rng \
+  --sigmoid-kind upshifted_softplus \
   #--load models/${nerfactor_ds}_volsdf.pt
 
 # TODO fix this dataset, using it is a complete trash-fire
