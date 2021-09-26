@@ -32,24 +32,38 @@ rusin: clean
 nerfactor_ds := pinecone
 nerf-sh: clean
 	python3 runner.py -d data/nerfactor/${nerfactor_ds}/ \
-	--data-kind original --size 128 --crop --epochs 25_000 --crop-size 25 \
+	--data-kind original --size 128 --crop --epochs 0 --crop-size 25 \
 	--near 2 --far 6 --batch-size 5 --model plain \
 	-lr 1e-3 --loss-window 750 --valid-freq 250 \
-	--loss-fns l2 --save-freq 5000 --sigmoid-kind fat \
-	--refl sph-har --save models/${nerfactor_ds}-sh.pt \
-  #--load models/${nerfactor_ds}-sh.pt
+	--loss-fns l2 --save-freq 5000 --sigmoid-kind leaky_relu \
+	--refl-kind sph-har --save models/${nerfactor_ds}-sh.pt \
+  --notest --depth-images --normals-from-depth \
+  --load models/${nerfactor_ds}-sh.pt
 
 nerfactor_volsdf: clean
 	python3 runner.py -d data/nerfactor/${nerfactor_ds}/ \
-	--data-kind original --size 128 --crop --crop-size 14 --epochs 25_000 \
-	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind mlp \
-	-lr 8e-4 --loss-window 750 --valid-freq 250 --loss-window 500 \
+	--data-kind original --size 128 --crop --epochs 25_000 --crop-size 18 \
+	--near 2 --far 6 --batch-size 5 --model volsdf --sdf-kind siren \
+	-lr 1e-3 --loss-window 750 --valid-freq 250 \
+	--loss-fns l2 --color-spaces rgb --save-freq 2500 --sigmoid-kind leaky_relu \
+	--refl-kind view --save models/${nerfactor_ds}-volsdf.pt --depth-images \
+	--normals-from-depth \
+  --notest \
+  --sdf-eikonal 1e-2 \
+  --load models/${nerfactor_ds}-volsdf.pt \
+  #--smooth-normals 1e-2 --smooth-eps-rng \
+
+nerfactor_volsdf_direct: clean
+	python3 runner.py -d data/nerfactor/${nerfactor_ds}/ \
+	--data-kind original --size 128 --crop --crop-size 14 --epochs 50_000 \
+	--near 2 --far 6 --batch-size 4 --model volsdf --sdf-kind siren \
+	-lr 1e-3 --loss-window 750 --valid-freq 500 \
 	--loss-fns l2 --save-freq 2500 --occ-kind all-learned \
-	--refl rusin --save models/${nerfactor_ds}_volsdf.pt --light-kind field \
+	--refl-kind rusin --save models/${nerfactor_ds}-volsdfd.pt --light-kind field \
   --color-spaces rgb --depth-images --normals-from-depth \
-  --smooth-normals 1e-2 --sdf-eikonal 0.1 --smooth-eps-rng \
-  --sigmoid-kind upshifted_softplus \
-  #--load models/${nerfactor_ds}_volsdf.pt
+  --sdf-eikonal 1e-2 --smooth-normals 1e-2 --smooth-eps-rng \
+  --sigmoid-kind normal --notest \
+  --load models/${nerfactor_ds}-volsdfd.pt
 
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean
@@ -122,6 +136,7 @@ nerv_point: clean
   --color-spaces rgb hsv xyz --depth-images \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
   --omit-bg --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 \
+  --smooth-eps 1e-1 --display-smoothness \
   --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean

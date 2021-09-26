@@ -277,7 +277,7 @@ class SIREN(SDFModel):
     super().__init__(**kwargs)
     self.siren = SkipConnMLP(
       in_size=3, out=1+self.latent_size, enc=None,
-      num_layers=8, hidden_size=256,
+      num_layers=5, hidden_size=256,
       activation=torch.sin,
       # Do not have skip conns
       skip=1000,

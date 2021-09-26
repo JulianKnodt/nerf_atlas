@@ -410,6 +410,7 @@ class NeRFAE(CommonNeRF):
     sky = self.sky_color(None, self.weights)
     return color + sky
 
+def identity(x): return x
 # https://arxiv.org/pdf/2106.12052.pdf
 class VolSDF(CommonNeRF):
   def __init__(
@@ -421,6 +422,7 @@ class VolSDF(CommonNeRF):
     occ_kind=None,
     w_missing:bool = False,
     integrator_kind="direct",
+    scale_softplus=False,
     **kwargs,
   ):
     super().__init__(**kwargs, device=device)
@@ -429,6 +431,7 @@ class VolSDF(CommonNeRF):
     self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
     self.secondary = None
     self.out_features = out_features
+    self.scale_act = identity if not scale_softplus else nn.Softplus()
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
         f"Must have light w/ volsdf integration {type(self.sdf.refl)}"
@@ -549,7 +552,8 @@ class VolSDF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     sdf_vals, latent = self.sdf.from_pts(pts)
-    scale = self.scale #if self.training else 1e-2
+    if not hasattr(self, "scale_act"): self.scale_act = identity
+    scale = self.scale_act(self.scale) #if self.training else 1e-2
     density = 1/scale * laplace_cdf(-sdf_vals, scale)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
@@ -562,6 +566,9 @@ class VolSDF(CommonNeRF):
     else: rgb = self.secondary(r_o, self.weights, pts, view, n, latent)
 
     return volumetric_integrate(self.weights, rgb)
+  def set_sigmoid(self, kind="thin"):
+    if not hasattr(self, "sdf"): return
+    self.sdf.refl.act = load_sigmoid(kind)
 
 def alternating_volsdf_loss(model, nerf_loss, sdf_loss):
   def aux(x, ref): return nerf_loss(x, ref[..., :3]) if model.vol_render else sdf_loss(x, ref)

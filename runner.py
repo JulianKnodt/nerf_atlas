@@ -117,7 +117,7 @@ def arguments():
   # TODO really fix MPIs
   a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
   a.add_argument(
-    "--replace", nargs="*", choices=["refl", "occ", "bg"], default=[], type=str,
+    "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid"], default=[], type=str,
     help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
   )
 
@@ -231,6 +231,9 @@ def arguments():
   rprt.add_argument("--save-freq", help="# of epochs between saves", type=int, default=5000)
   rprt.add_argument(
     "--valid-freq", help="how often validation images are generated", type=int, default=500,
+  )
+  rprt.add_argument(
+    "--display-smoothness", action="store_true", help="Display smoothness regularization",
   )
   rprt.add_argument("--nosave", help="do not save", action="store_true")
   rprt.add_argument("--load", help="model to load from", type=str)
@@ -485,8 +488,10 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
           inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
           grad_outputs=torch.ones_like(n),
         )[0]
+      smoothness = args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
+      if args.display_smoothness: display["n-smooth"] = smoothness.item()
       # TODO maybe convert this to abs? seems to work for nerfactor, altho unisurf uses square?
-      loss = loss + args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
+      loss = loss + smoothness
 
     update(display)
     losses.append(l2_loss)
@@ -500,10 +505,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       with torch.no_grad():
         ref0 = ref[0,...,:3]
         items = [ref0, out[0,...,:3].clamp(min=0, max=1)]
-        if hasattr(model, "nerf") and args.model != "volsdf":
-          items.append(model.nerf.acc()[0,...,None].expand_as(ref0).clamp(min=0, max=1))
-          items.append(model.nerf.acc_smooth()[0,...].expand_as(ref0).clamp(min=0, max=1))
-        elif out.shape[-1] == 4:
+        if out.shape[-1] == 4:
           items.append(ref[0,...,-1,None].expand_as(ref0))
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
 
@@ -514,7 +516,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
           depth = (raw_depth[0,...]-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
           if args.normals_from_depth:
-            depth_normal = (utils.depth_to_normals(raw_depth[0] * 50)+1)/2
+            depth_normal = (utils.depth_to_normals(depth * 1000)+1)/2
             items.append(depth_normal.clamp(min=0, max=1))
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
     if i % args.save_freq == 0 and i != 0:
@@ -579,8 +581,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       #if hasattr(model, "nerf"): items.append(acc)
       if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0,max=1))
       if (depth != 0).any() and args.normals_from_depth:
-        depth_normals = (utils.depth_to_normals(depth * 50)+1)/2
-        items.append(depth_normals.clamp(min=0, max=1))
+        depth_normals = (utils.depth_to_normals(depth * 1000)+1)/2
+        items.append(depth_normals)
       if hasattr(model, "nerf") and args.depth_images:
         depth = (depth-args.near)/(args.far - args.near)
         items.append(depth.clamp(min=0, max=1))
@@ -611,6 +613,8 @@ def set_per_run(model, args):
   if "bg" in args.replace:
     if isinstance(model, nerf.CommonNeRF): model.set_bg(args.bg)
     elif hasattr(model, "nerf"): model.nerf.set_bg(args.bg)
+  if "sigmoid" in args.replace and hasattr(model, "nerf"):
+    model.nerf.set_sigmoid(args.sigmoid_kind)
 
   if args.model == "sdf": return
   if not hasattr(model, "nerf"): return
@@ -782,13 +786,12 @@ def main():
   if args.no_sched: sched = None
   train(model, cam, labels, opt, args, light=light, sched=sched)
 
-  if args.notest: return
 
   if not args.notraintest: test(model, cam, labels, args, training=True, light=light)
 
-  if not args.notest:
-    test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
-    test(model, test_cam, test_labels, args, training=False, light=test_light)
+  if args.notest: return
+  test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
+  test(model, test_cam, test_labels, args, training=False, light=test_light)
 
   if args.sphere_visualize is not None:
     sphere_visualize(args, model)
