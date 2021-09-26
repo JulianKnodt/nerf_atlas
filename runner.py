@@ -575,7 +575,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
             r_o, r_d = torch.squeeze(rays[0,...]).split([3,3], dim=-1)
             isectpts = r_o + r_d * depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
             normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              (F.normalize(model.sdf.normals(isectpts))+1)/2
+              (F.normalize(model.sdf.normals(isectpts), dim=-1)+1)/2
           elif hasattr(model, "n") and hasattr(model, "sdf"):
             ...
 
