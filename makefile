@@ -124,7 +124,7 @@ dtu: clean
 # -- Begin NeRV tests
 
 # hotdogs | armadillo, fun datasets :)
-nerv_dataset := hotdogs
+nerv_dataset := armadillo
 nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
@@ -135,9 +135,9 @@ nerv_point: clean
 	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz --depth-images \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --omit-bg --smooth-normals 1e-2 --smooth-eps-rng --decay 1e-5 \
+  --omit-bg --smooth-normals 1e-2 --smooth-eps-rng \
   --smooth-eps 1e-1 --display-smoothness \
-  --load models/nerv_${nerv_dataset}.pt
+  #--load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \

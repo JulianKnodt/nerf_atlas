@@ -422,7 +422,7 @@ class VolSDF(CommonNeRF):
     occ_kind=None,
     w_missing:bool = False,
     integrator_kind="direct",
-    scale_softplus=False,
+    scale_softplus=True,
     **kwargs,
   ):
     super().__init__(**kwargs, device=device)
@@ -552,8 +552,9 @@ class VolSDF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     sdf_vals, latent = self.sdf.from_pts(pts)
-    if not hasattr(self, "scale_act"): self.scale_act = identity
-    scale = self.scale_act(self.scale) #if self.training else 1e-2
+    # turn this line on if things are broken due to not having a scale_act.
+    #if not hasattr(self, "scale_act"): self.scale_act = identity
+    scale = self.scale_act(self.scale) if self.training else 5e-3
     density = 1/scale * laplace_cdf(-sdf_vals, scale)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
