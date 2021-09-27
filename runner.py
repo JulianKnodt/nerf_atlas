@@ -545,6 +545,12 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       if args.backing_sdf: got_sdf = torch.zeros_like(got)
       if light is not None: model.refl.light = light[i:i+1]
 
+      ii, jj = torch.meshgrid(
+        torch.arange(args.render_size, device=device, dtype=torch.float),
+        torch.arange(args.render_size, device=device, dtype=torch.float),
+      )
+      positions = torch.stack([ii.transpose(-1, -2), jj.transpose(-1, -2)], dim=-1)
+
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
         for y in range(N):
@@ -564,9 +570,12 @@ def test(model, cam, labels, args, training: bool = True, light=None):
                 model.nerf.weights, model.nerf.ts[:, None, None, None, None]
               )[0,...]
           if hasattr(model, "n") and hasattr(model, "nerf"):
-            # do not normalize the values of n?
+            positions_crop = positions[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
+            rays = cam.sample_positions(positions_crop, size=args.render_size, with_noise=False)
+            r_o, r_d = torch.squeeze(rays[0,...]).split([3,3], dim=-1)
+            isectpts = r_o + r_d * depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
             normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              (nerf.volumetric_integrate(model.nerf.weights, model.n)[0,...]+1)/2
+              (F.normalize(model.sdf.normals(isectpts), dim=-1)+1)/2
           elif hasattr(model, "n") and hasattr(model, "sdf"):
             ...
 
