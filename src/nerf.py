@@ -554,7 +554,8 @@ class VolSDF(CommonNeRF):
     sdf_vals, latent = self.sdf.from_pts(pts)
     # turn this line on if things are broken due to not having a scale_act.
     #if not hasattr(self, "scale_act"): self.scale_act = identity
-    scale = self.scale_act(self.scale) if self.training else 5e-3
+    scale = self.scale_act(self.scale)
+    #if not self.training: scale = scale.clamp(max=1e-5)
     density = 1/scale * laplace_cdf(-sdf_vals, scale)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 

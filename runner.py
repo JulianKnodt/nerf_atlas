@@ -260,6 +260,9 @@ def arguments():
     "--normals-from-depth", action="store_true", help="Render extra normal images from depth",
   )
   rprt.add_argument(
+    "--depth-query-normal", action="store_true", help="Render extra normal images from depth",
+  )
+  rprt.add_argument(
     "--not-magma", action="store_true", help="Whether to use magma for depth maps",
   )
 
@@ -488,10 +491,10 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
           inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
           grad_outputs=torch.ones_like(n),
         )[0]
-      smoothness = args.smooth_normals * torch.linalg.norm(delta_n, dim=-1).square().mean()
+      smoothness = torch.linalg.norm(delta_n, dim=-1).square().mean()
       if args.display_smoothness: display["n-smooth"] = smoothness.item()
       # TODO maybe convert this to abs? seems to work for nerfactor, altho unisurf uses square?
-      loss = loss + smoothness
+      loss = loss + args.smooth_normals * smoothness
 
     update(display)
     losses.append(l2_loss)
@@ -565,23 +568,21 @@ def test(model, cam, labels, args, training: bool = True, light=None):
             acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
               model.nerf.acc_smooth()[0,...].clamp(min=0,max=1)
           if hasattr(model, "nerf") and args.depth_images:
-            ts = model.nerf.ts[:, None, None, None, None]
+            model_ts = model.nerf.ts[:, None, None, None, None]
             depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              nerf.volumetric_integrate(model.nerf.weights, ts)[0,...]
+              nerf.volumetric_integrate(model.nerf.weights, model_ts)[0,...]
           if hasattr(model, "n") and hasattr(model, "nerf") :
             if args.depth_query_normal:
               positions_crop = positions[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
               rays = cam.sample_positions(positions_crop, size=args.render_size, with_noise=False)
               r_o, r_d = torch.squeeze(rays[0,...]).split([3,3], dim=-1)
-              isectpts = r_o + r_d * depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
+              isect = r_o + r_d * depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
               normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-                (F.normalize(model.sdf.normals(isectpts), dim=-1)+1)/2
+                (F.normalize(model.sdf.normals(isect), dim=-1)+1)/2
             else:
               model_n = F.normalize(model.n, dim=-1)
-              render_n = F.normalize(
-                nerf.volumetric_integrate(model.nerf.weights, model_n)[0,...], dim=-1,
-              )
-              normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = (render_n+1)/2
+              render_n = F.normalize(nerf.volumetric_integrate(model.nerf.weights, model_n), dim=-1)
+              normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = (render_n[0]+1)/2
           elif hasattr(model, "n") and hasattr(model, "sdf"):
             ...
 
