@@ -212,7 +212,7 @@ def nerv_point(path=".", training=True, size=200, multi_point=False, with_mask=F
     w = torch.tensor(frame.get('light_weights', [[1,1,1]]),dtype=torch.float,device=device)
     w = w[..., :3]
     # TODO figure out the weight of other lights
-    weights = 100 if w.shape[0] == 1 else 66
+    weights = 100 if w.shape[0] == 1 else 54
     light_weights.append(w * weights)
 
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device).clamp(min=0, max=1)

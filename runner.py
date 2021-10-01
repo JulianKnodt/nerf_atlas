@@ -115,7 +115,7 @@ def arguments():
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
   # TODO really fix MPIs
-  a.add_argument("--mpi", help="Use multi-plain imaging", action="store_true")
+  a.add_argument("--mpi", help="[WIP] Use multi-plain imaging", action="store_true")
   a.add_argument(
     "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid"], default=[], type=str,
     help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
@@ -209,6 +209,10 @@ def arguments():
     help="Marching kind to use when computing SDF intersection.",
   )
 
+  sdfa.add_argument(
+    "--volsdf-scale-decay", type=float, default=0, help="Decay weight for volsdf scale",
+  )
+
   dnerfa = a.add_argument_group("dnerf")
   dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
   dnerfa.add_argument(
@@ -263,7 +267,7 @@ def arguments():
     "--depth-query-normal", action="store_true", help="Render extra normal images from depth",
   )
   rprt.add_argument(
-    "--not-magma", action="store_true", help="Whether to use magma for depth maps",
+    "--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)",
   )
 
   meta = a.add_argument_group("meta runner parameters")
@@ -470,14 +474,13 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
 
     # prepare one set of points for either smoothing normals or eikonal.
     if args.sdf_eikonal > 0 or args.smooth_normals > 0:
-      pts = 8*(torch.rand(1<<13, 3, device=device, requires_grad=True)-0.5)
+      pts = 10*(torch.rand(((1<<13) * 5)//4 , 3, device=device, requires_grad=True)-0.5)
       n = model.sdf.normals(pts)
 
     # E[d sdf(x)/dx] = 1, enforces that the SDF is valid.
     if args.sdf_eikonal > 0: loss = loss + args.sdf_eikonal * utils.eikonal_loss(n)
 
     # dn/dx -> 0, hopefully smoothes out the local normals of the surface.
-    # TODO does it matter to normalize the normal or not?
     if args.smooth_normals > 0:
       s_eps = args.smooth_eps
       if s_eps > 0:
@@ -486,15 +489,19 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         perturbation = F.normalize(torch.randn_like(pts), dim=-1) * s_eps
         delta_n = n - model.sdf.normals(pts + perturbation)
       else:
-        # TODO maybe lower dimensionality of n?
         delta_n = torch.autograd.grad(
-          inputs=pts, outputs=F.normalize(n,dim=-1), create_graph=True,
+          inputs=pts, outputs=F.normalize(n, dim=-1), create_graph=True,
           grad_outputs=torch.ones_like(n),
         )[0]
-      smoothness = torch.linalg.norm(delta_n, dim=-1).square().mean()
+      # TODO should this be mean or sum? Unisurf uses sum but should be equivalent
+      # TODO this ord can either be 1 or 2? probably have a flag for it.
+      smoothness = torch.linalg.norm(delta_n, ord=1, dim=-1).sum() + \
+                   torch.linalg.norm(delta_n, ord=2, dim=-1).sum()
       if args.display_smoothness: display["n-smooth"] = smoothness.item()
-      # TODO maybe convert this to abs? seems to work for nerfactor, altho unisurf uses square?
       loss = loss + args.smooth_normals * smoothness
+
+    if args.volsdf_scale_decay > 0:
+      loss = loss + args.volsdf_scale_decay * model.scale_post_act
 
     update(display)
     losses.append(l2_loss)
@@ -519,7 +526,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
           depth = (raw_depth[0,...]-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
           if args.normals_from_depth:
-            depth_normal = (utils.depth_to_normals(depth * 1000)+1)/2
+            depth_normal = (utils.depth_to_normals(depth)+1)/2
             items.append(depth_normal.clamp(min=0, max=1))
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
     if i % args.save_freq == 0 and i != 0:
@@ -580,8 +587,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
               normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
                 (F.normalize(model.sdf.normals(isect), dim=-1)+1)/2
             else:
-              model_n = F.normalize(model.n, dim=-1)
-              render_n = F.normalize(nerf.volumetric_integrate(model.nerf.weights, model_n), dim=-1)
+              render_n = nerf.volumetric_integrate(model.nerf.weights, model.n)
               normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = (render_n[0]+1)/2
           elif hasattr(model, "n") and hasattr(model, "sdf"):
             ...
@@ -596,7 +602,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       items = [exp, got.clamp(min=0, max=1)]
       if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0,max=1))
       if (depth != 0).any() and args.normals_from_depth:
-        depth_normals = (utils.depth_to_normals(depth * 1000)+1)/2
+        depth_normals = (utils.depth_to_normals(depth * 50)+1)/2
         items.append(depth_normals)
       if hasattr(model, "nerf") and args.depth_images:
         depth = (depth-args.near)/(args.far - args.near)
@@ -605,16 +611,17 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       ls.append(psnr)
 
   print(f"""[Summary ({"training" if training else "test"})]:
-          mean {np.mean(ls):.03f}
-          min {min(ls):.03f}
-          max {max(ls):.03f}
-          var {np.var(ls):.03f}""")
+\tmean {np.mean(ls):.03f}
+\tmin {min(ls):.03f}
+\tmax {max(ls):.03f}
+\tvar {np.var(ls):.03f}""")
   if args.msssim_loss:
-    msssim = utils.msssim_loss(gots, refs)
-    print(f"\tms-ssim {mssim:.03f}")
+    msssim = utils.msssim_loss(gots, labels)
+    print(f"\tms-ssim {msssim:.03f}")
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
+  if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
   if len(args.replace) == 0: return
   ls = model.total_latent_size()
   if "occ" in args.replace:

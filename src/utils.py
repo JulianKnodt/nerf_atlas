@@ -172,7 +172,7 @@ def msssim_loss(xs, refs):
   # only import here in case not installed.
   from pytorch_msssim import ( ms_ssim )
   xs = torch.stack(xs, dim=0).permute(0, 3, 1, 2)
-  refs = torch.stack(refs, dim=0).permute(0, 3, 1, 2)
+  refs = refs.permute(0, 3, 1, 2)
   return ms_ssim(xs, refs, data_range=1, size_average=True).item()
 
 # tone mapping is used in NeRV before the loss function. It will accentuate smaller loss items.
@@ -218,6 +218,8 @@ def elev_azim_to_dir(elev_azim):
 def dir_to_elev_azim(direc):
   lim = 1 - 1e-6
   x, y, z = F.normalize(direc, dim=-1).clamp(min=-lim, max=lim).split([1,1,1], dim=-1)
+  # TODO this should be asin to match above... but they're never passed directly to each
+  # other.
   elev = z.acos()
   azim = torch.atan2(y,x)
   return torch.cat([elev, azim], dim=-1)

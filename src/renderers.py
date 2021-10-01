@@ -59,7 +59,7 @@ class LearnedLighting(nn.Module):
     latent_size:int=0,
   ):
     super().__init__()
-    in_size=6
+    in_size=5
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size, num_layers=5, hidden_size=128,
       enc=FourierEncoder(input_dims=in_size), xavier_init=True,
@@ -69,10 +69,14 @@ class LearnedLighting(nn.Module):
     dir, dist, spectrum = lights(pts, mask=mask)
     far = dist.max().item() if mask.any() else 6
     # TODO why doesn't this isect fn seem to work?
-    visible = isect_fn(r_o=pts, r_d=dir, near=2e-3, far=3, eps=1e-3)
-    att = self.attenuation(torch.cat([pts, dir], dim=-1), latent).sigmoid()
+    visible = isect_fn(r_o=pts, r_d=dir, near=2e-3, far=far, eps=1e-3)
+    elaz = dir_to_elev_azim(dir)
+    att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
+
+# softplus with a leaky component for smoother learning.
+def leaky_softplus(x, alpha=0.05): return alpha * x + (1-alpha) * F.softplus(x)
 
 class AllLearnedOcc(nn.Module):
   def __init__(
@@ -80,24 +84,23 @@ class AllLearnedOcc(nn.Module):
     latent_size:int=0,
   ):
     super().__init__()
-    in_size=6
+    in_size=5
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
-      enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      #enc=FourierEncoder(input_dims=in_size),
+      num_layers=6, hidden_size=180, xavier_init=True, skip=999,
+      activation=leaky_softplus,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)
-    att = self.attenuation(torch.cat([pts, dir], dim=-1), latent).sigmoid()
+    elaz = dir_to_elev_azim(dir)
+    att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
     return dir, spectrum * att
 
 class Renderer(nn.Module):
   def __init__(
-    self,
-    shape,
-    refl,
-
+    self, shape, refl,
     occlusion,
   ):
     super().__init__()
@@ -114,7 +117,7 @@ class Direct(Renderer):
   def sdf(self): return self.shape
   def total_latent_size(self): return self.shape.latent_size
   def set_refl(self, refl): self.refl = refl
-  def forward(self, rays): return direct(self.shape, self.refl, self.occ, rays, self.training)
+  def forward(s, rays): return direct(s.shape, s.refl, s.occ, rays, s.training)
 
 # Functional version of integration
 def direct(shape, refl, occ, rays, training=True):

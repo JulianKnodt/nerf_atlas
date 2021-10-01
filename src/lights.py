@@ -89,7 +89,7 @@ class Point(Light):
     if mask is not None: loc = loc.expand((*mask.shape, 3))[mask]
     # direction from pts to the light
     d = loc - x
-    dist = torch.linalg.norm(d, dim=-1)
+    dist = torch.linalg.norm(d, ord=2, dim=-1)
     d = F.normalize(d, eps=1e-6, dim=-1)
     decay = dist.square()
     intn = self.intensity[:, None, None, :]
