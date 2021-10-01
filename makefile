@@ -131,12 +131,12 @@ nerv_point: clean
 	--save models/nerv_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 14 --epochs 50_000 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind rusin \
-	--sdf-eikonal 1e-1 --light-kind dataset --seed -1 \
+	--sdf-eikonal 1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
-  --color-spaces rgb hsv xyz --depth-images \
+  --color-spaces rgb hsv xyz --depth-images --depth-query-normal \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --smooth-normals 1e-3 --notraintest \
-  --normals-from-depth --msssim-loss \
+  --smooth-normals 1e-2 --smooth-eps 1e-3 --notraintest \
+  --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
   --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean

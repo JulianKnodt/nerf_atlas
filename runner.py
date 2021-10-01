@@ -544,22 +544,22 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
   ls = []
   gots = []
+
+  ii, jj = torch.meshgrid(
+    torch.arange(args.render_size, device=device, dtype=torch.float),
+    torch.arange(args.render_size, device=device, dtype=torch.float),
+  )
+  positions = torch.stack([ii.transpose(-1, -2), jj.transpose(-1, -2)], dim=-1)
+
   with torch.no_grad():
     for i in range(labels.shape[0]):
       ts = None if times is None else times[i:i+1, ...]
       exp = labels[i,...,:3]
       got = torch.zeros_like(exp)
-      acc = torch.zeros_like(got)
       normals = torch.zeros_like(got)
       depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
       if args.backing_sdf: got_sdf = torch.zeros_like(got)
       if light is not None: model.refl.light = light[i:i+1]
-
-      ii, jj = torch.meshgrid(
-        torch.arange(args.render_size, device=device, dtype=torch.float),
-        torch.arange(args.render_size, device=device, dtype=torch.float),
-      )
-      positions = torch.stack([ii.transpose(-1, -2), jj.transpose(-1, -2)], dim=-1)
 
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
@@ -571,21 +571,22 @@ def test(model, cam, labels, args, training: bool = True, light=None):
             with_noise=False, times=ts, args=args,
           ).squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
-          if hasattr(model, "nerf"):
-            acc[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              model.nerf.acc_smooth()[0,...].clamp(min=0,max=1)
+
           if hasattr(model, "nerf") and args.depth_images:
             model_ts = model.nerf.ts[:, None, None, None, None]
             depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
               nerf.volumetric_integrate(model.nerf.weights, model_ts)[0,...]
           if hasattr(model, "n") and hasattr(model, "nerf") :
-            if args.depth_query_normal:
+            if args.depth_query_normal and args.depth_images:
               positions_crop = positions[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
-              rays = cam.sample_positions(positions_crop, size=args.render_size, with_noise=False)
-              r_o, r_d = torch.squeeze(rays[0,...]).split([3,3], dim=-1)
-              isect = r_o + r_d * depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
-              normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+              rays = cam[i:i+1].sample_positions(positions_crop,size=args.render_size,with_noise=False)
+              r_o, r_d = rays.squeeze(0).split([3,3], dim=-1)
+              depth_region = depth[c0:c0+args.crop_size, c1:c1+args.crop_size]
+              isect = r_o + r_d * depth_region
+              normals[c0:c0+args.crop_size, c1:c1+args.crop_size] = \
                 (F.normalize(model.sdf.normals(isect), dim=-1)+1)/2
+              too_far_mask = depth_region > (args.far - 1e-1)
+              normals[c0:c0+args.crop_size, c1:c1+args.crop_size][too_far_mask[...,0]] = 0
             else:
               render_n = nerf.volumetric_integrate(model.nerf.weights, model.n)
               normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = (render_n[0]+1)/2
@@ -644,7 +645,7 @@ def set_per_run(model, args):
 
   # converts from a volsdf with direct integration to one with indirect lighting
   if args.volsdf_direct_to_path:
-    assert(isinstance(model, nerf.VolSDF)), "only applies to VolSDF"
+    assert(isinstance(model, nerf.VolSDF)), "--volsdf-direct-to-path only applies to VolSDF"
     model.convert_to_path(args.path_learn_missing)
 
 
