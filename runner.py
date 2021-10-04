@@ -27,7 +27,7 @@ import src.cameras as cameras
 import src.hyper_config as hyper_config
 import src.renderers as renderers
 from src.lights import light_kinds
-from src.utils import ( save_image, save_plot, load_image )
+from src.utils import ( save_image, save_plot, load_image, dir_to_elev_azim )
 from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer )
 
 import os
@@ -174,6 +174,10 @@ def arguments():
     help="Occlusion method for shadows to use in integration",
   )
 
+  rdra.add_argument(
+    "--smooth-occ", default=0, type=float, help="Weight to smooth occlusion/shadows by."
+  )
+
   lighta = a.add_argument_group("light")
   lighta.add_argument(
     "--light-kind", choices=list(light_kinds.keys()), default=None,
@@ -184,6 +188,7 @@ def arguments():
   sdfa.add_argument(
     "--sdf-eikonal", help="Weight of SDF eikonal loss", type=float, default=0,
   )
+  # normal smoothing arguments
   sdfa.add_argument(
     "--smooth-normals", help="Amount to attempt to smooth normals", type=float, default=0,
   )
@@ -195,6 +200,12 @@ def arguments():
     "--smooth-eps-rng", action="store_true",
     help="smooth by a random amount instead of smoothing by a fixed distance",
   )
+  sdfa.add_argument(
+    "--smooth-n-ord", nargs="+", default=[2], choices=[1,2], type=int,
+    help="Order of vector to use when smoothing normals",
+  )
+
+
   sdfa.add_argument(
     "--sdf-kind", help="Which SDF model to use", type=str,
     choices=["spheres", "siren", "local", "mlp", "triangles"], default="mlp",
@@ -472,9 +483,11 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if args.dnerf_tf_smooth_weight > 0:
       loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
 
+    pts = None
     # prepare one set of points for either smoothing normals or eikonal.
     if args.sdf_eikonal > 0 or args.smooth_normals > 0:
-      pts = 10*(torch.rand(((1<<13) * 5)//4 , 3, device=device, requires_grad=True)-0.5)
+      # NOTE the number of points just fits in memory, can modify it at will
+      pts = 5*(torch.randn(((1<<13) * 5)//4 , 3, device=device))
       n = model.sdf.normals(pts)
 
     # E[d sdf(x)/dx] = 1, enforces that the SDF is valid.
@@ -486,22 +499,38 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       if s_eps > 0:
         if args.smooth_eps_rng: s_eps = random.random() * s_eps
         # epsilon-perturbation implementation from unisurf
-        perturbation = F.normalize(torch.randn_like(pts), dim=-1) * s_eps
-        delta_n = n - model.sdf.normals(pts + perturbation)
+        perturb = F.normalize(torch.randn_like(pts), dim=-1) * s_eps
+        delta_n = n - model.sdf.normals(pts + perturb)
       else:
         delta_n = torch.autograd.grad(
           inputs=pts, outputs=F.normalize(n, dim=-1), create_graph=True,
           grad_outputs=torch.ones_like(n),
         )[0]
-      # TODO should this be mean or sum? Unisurf uses sum but should be equivalent
-      # TODO this ord can either be 1 or 2? probably have a flag for it.
-      smoothness = torch.linalg.norm(delta_n, ord=1, dim=-1).sum() + \
-                   torch.linalg.norm(delta_n, ord=2, dim=-1).sum()
+      smoothness = 0
+      for o in args.smooth_n_ord:
+        smoothness = smoothness + torch.linalg.norm(delta_n, ord=o, dim=-1).sum()
       if args.display_smoothness: display["n-smooth"] = smoothness.item()
       loss = loss + args.smooth_normals * smoothness
 
     if args.volsdf_scale_decay > 0:
       loss = loss + args.volsdf_scale_decay * model.scale_post_act
+
+    # smoothing the shadow, randomly over points and directions.
+    if args.smooth_occ > 0:
+      if pts is None:
+        pts = 5*(torch.randn(((1<<13) * 5)//4 , 3, device=device, requires_grad=True))
+      elaz = dir_to_elev_azim(torch.randn_like(pts, requires_grad=True))
+      pts_elaz = torch.cat([pts, elaz], dim=-1)
+      noise = torch.randn(pts.shape[0], model.total_latent_size(),device=device)
+      att = model.occ.attenuation(pts_elaz, noise).sigmoid()
+      perturb = F.normalize(torch.randn_like(pts_elaz), dim=-1) * 5e-2
+      att_shifted = model.occ.attenuation(pts_elaz + perturb, noise)
+      delta_att = att - att_shifted
+      #delta_att = torch.autograd.grad(
+      #  inputs=pts_elaz, outputs=att, create_graph=True,
+      #  grad_outputs=torch.ones_like(att),
+      #)[0]
+      loss = loss + args.smooth_occ * delta_att.abs().mean()
 
     update(display)
     losses.append(l2_loss)
@@ -599,7 +628,6 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       ts = "" if ts is None else f",t={ts.item():.02f}"
       print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
       name = f"train_{i:03}.png" if training else f"test_{i:03}.png"
-      name = os.path.join(args.outdir, name)
       items = [exp, got.clamp(min=0, max=1)]
       if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0,max=1))
       if (depth != 0).any() and args.normals_from_depth:
@@ -608,7 +636,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       if hasattr(model, "nerf") and args.depth_images:
         depth = (depth-args.near)/(args.far - args.near)
         items.append(depth.clamp(min=0, max=1))
-      save_plot(name, *items)
+      save_plot(os.path.join(args.outdir, name), *items)
+      save_image(os.path.join(args.outdir, f"got_{i:03}.png"), got)
       ls.append(psnr)
 
   print(f"""[Summary ({"training" if training else "test"})]:
@@ -623,6 +652,11 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
+  if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
+    if args.smooth_occ != 0:
+      print("[warn]: Zeroing smooth occ since it does not apply")
+      args.smooth_occ = 0
+
   if len(args.replace) == 0: return
   ls = model.total_latent_size()
   if "occ" in args.replace:
