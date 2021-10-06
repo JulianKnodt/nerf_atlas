@@ -124,20 +124,20 @@ dtu: clean
 # -- Begin NeRV tests
 
 # hotdogs | armadillo, fun datasets :)
-nerv_dataset := armadillo
+nerv_dataset := hotdogs
 nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 400 --crop --crop-size 14 --epochs 0 --loss-window 1500 \
+	--size 200 --crop --crop-size 12 --epochs 10_000 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind rusin \
 	--sdf-eikonal 1 --light-kind dataset --seed 131 \
 	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz --depth-images --depth-query-normal \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --smooth-normals 1e-1 --smooth-eps 3e-3 --smooth-occ 1e-1 --notraintest \
+  --smooth-normals 1e-1 --smooth-eps 2e-3 --smooth-occ 1e-1 --notraintest \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  \
+  --omit-bg \
   --load models/nerv_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
@@ -169,13 +169,15 @@ nerv_point_path: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_path_${nerv_dataset}.pt \
-	--size 32 --crop --crop-size 6 --epochs 25_000 --loss-window 500 \
+	--size 32 --crop --crop-size 6 --epochs 20_000 --loss-window 500 \
 	--near 2 --far 6 --batch-size 3 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
-	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
-  --color-spaces rgb xyz hsv --save-freq 1000 \
-  --integrator-kind path --depth-images --notraintest --skip-loss 100 \
-  --smooth-normals 1e-2 --decay 1e-5 --normals-from-depth \
+	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
+  --color-spaces rgb --save-freq 1000 \
+  --integrator-kind path --depth-images --notraintest --skip-loss 500 \
+  --smooth-eps 2e-3 --smooth-occ 1e-1 --sigmoid-kind upshifted_softplus \
+  --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
+  --smooth-normals 1e-1 --normals-from-depth \
   --load models/nerv_path_${nerv_dataset}.pt #--path-learn-missing
 
 nerv_point_subrefl: clean

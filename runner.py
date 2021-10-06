@@ -629,7 +629,10 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
       name = f"train_{i:03}.png" if training else f"test_{i:03}.png"
       items = [exp, got.clamp(min=0, max=1)]
-      if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0,max=1))
+      if hasattr(model, "n") and hasattr(model, "nerf"):
+        normals = normals.clamp(min=0, max=1)
+        items.append(normals)
+        #save_image(os.path.join(args.outdir, f"normals_{i:03}.png"), normals)
       if (depth != 0).any() and args.normals_from_depth:
         depth_normals = (utils.depth_to_normals(depth * 50)+1)/2
         items.append(depth_normals)
@@ -637,7 +640,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         depth = (depth-args.near)/(args.far - args.near)
         items.append(depth.clamp(min=0, max=1))
       save_plot(os.path.join(args.outdir, name), *items)
-      save_image(os.path.join(args.outdir, f"got_{i:03}.png"), got)
+      #save_image(os.path.join(args.outdir, f"got_{i:03}.png"), got)
       ls.append(psnr)
 
   print(f"""[Summary ({"training" if training else "test"})]:
@@ -646,8 +649,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 \tmax {max(ls):.03f}
 \tvar {np.var(ls):.03f}""")
   if args.msssim_loss:
-    msssim = utils.msssim_loss(gots, labels)
-    print(f"\tms-ssim {msssim:.03f}")
+    with torch.no_grad():
+      msssim = utils.msssim_loss(gots, labels)
+      print(f"\tms-ssim {msssim:.03f}")
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
@@ -701,7 +705,6 @@ def load_model(args):
     "per_pixel_latent_size": per_pixel_latent_size,
     "per_point_latent_size": per_pt_latent_size,
     "instance_latent_size": instance_latent_size,
-    "sigmoid_kind": args.sigmoid_kind,
     "sigmoid_kind": args.sigmoid_kind if args.sigmoid_kind != "curr" else "thin",
     "bg": args.bg,
   }

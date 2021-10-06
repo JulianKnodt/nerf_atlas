@@ -553,7 +553,6 @@ class VolSDF(CommonNeRF):
 
     sdf_vals, latent = self.sdf.from_pts(pts)
     # turn this line on if things are broken due to not having a scale_act.
-    #if not hasattr(self, "scale_act"): self.scale_act = identity
     scale = self.scale_act(self.scale)
     self.scale_post_act = scale
     #if not self.training: scale = scale.clamp(max=1e-5)
