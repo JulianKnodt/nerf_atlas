@@ -233,6 +233,7 @@ def dir_to_uv(d):
   elaz = dir_to_elev_azim(d)
   return elev_azim_to_uv(elaz)
 
+# x is usually the point, y is usually the SDF value
 def autograd(x, y):
   assert(x.requires_grad)
   grad_outputs = torch.ones_like(y)

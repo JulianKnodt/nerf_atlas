@@ -69,7 +69,6 @@ def arguments():
     "--sigmoid-kind", help="What sigmoid to use, curr keeps old", default="thin",
     choices=list(utils.sigmoid_kinds.keys()),
   )
-  a.add_argument("--sparsify-alpha", help="Weight for sparsifying alpha",type=float,default=0)
   a.add_argument("--backing-sdf", help="Use a backing SDF", action="store_true")
 
   a. add_argument(
@@ -191,6 +190,9 @@ def arguments():
   # normal smoothing arguments
   sdfa.add_argument(
     "--smooth-normals", help="Amount to attempt to smooth normals", type=float, default=0,
+  )
+  sdfa.add_argument(
+    "--smooth-surface", help="Amount to attempt to smooth surface normals", type=float, default=0,
   )
   sdfa.add_argument(
     "--smooth-eps", help="size of random uniform perturbation for smooth normals regularization",
@@ -346,9 +348,9 @@ def render(
 
   rays = cam.sample_positions(positions, size=size, with_noise=with_noise)
 
-  if times is not None: return model((rays, times))
-  elif args.data_kind == "pixel-single": return model((rays, positions))
-  return model(rays)
+  if times is not None: return model((rays, times)), rays
+  elif args.data_kind == "pixel-single": return model((rays, positions)), rays
+  return model(rays), rays
 
 def sqr(x): return x * x
 
@@ -460,7 +462,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if args.omit_bg and (i % args.save_freq) != 0 and (i % args.valid_freq) != 0 and \
       ref.mean() + 0.3 < sqr(random.random()): continue
 
-    out = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
+    out, rays = render(model, cam[idxs], crop, size=args.render_size, times=ts, args=args)
     loss = loss_fn(out, ref)
     assert(loss.isfinite()), f"Got {loss.item()} loss"
     l2_loss = loss.item()
@@ -475,13 +477,9 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       s = sdf.sigmoid_loss(model.min_along_rays, model.nerf.acc())
       loss = loss + eik + s
 
-    if args.latent_l2_weight > 0:
-      loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
+    if args.latent_l2_weight > 0: loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
 
-    # experiment with emptying the model at the beginning
-    if args.sparsify_alpha > 0: loss = loss + args.sparsify_alpha * (model.nerf.alpha).square().mean()
-    if args.dnerf_tf_smooth_weight > 0:
-      loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
+    if args.dnerf_tf_smooth_weight > 0: loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
 
     pts = None
     # prepare one set of points for either smoothing normals or eikonal.
@@ -492,6 +490,9 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
 
     # E[d sdf(x)/dx] = 1, enforces that the SDF is valid.
     if args.sdf_eikonal > 0: loss = loss + args.sdf_eikonal * utils.eikonal_loss(n)
+
+    if args.volsdf_scale_decay > 0: loss = loss + args.volsdf_scale_decay * model.scale_post_act
+
 
     # dn/dx -> 0, hopefully smoothes out the local normals of the surface.
     if args.smooth_normals > 0:
@@ -509,11 +510,31 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       smoothness = 0
       for o in args.smooth_n_ord:
         smoothness = smoothness + torch.linalg.norm(delta_n, ord=o, dim=-1).sum()
-      if args.display_smoothness: display["n-smooth"] = smoothness.item()
+      if args.display_smoothness: display["n-*"] = smoothness.item()
       loss = loss + args.smooth_normals * smoothness
 
-    if args.volsdf_scale_decay > 0:
-      loss = loss + args.volsdf_scale_decay * model.scale_post_act
+    # smooth_both occlusion and the normals on the surface
+    if args.smooth_surface > 0:
+      model_ts = model.nerf.ts[:, None, None, None, None]
+      depth_region = nerf.volumetric_integrate(model.nerf.weights, model_ts)[0,...]
+      r_o, r_d = rays.split([3,3], dim=-1)
+      isect = r_o + r_d * depth_region
+      perturb = F.normalize(torch.randn_like(isect), dim=-1) * 1e-3
+      delta_n = model.sdf.normals(isect) - model.sdf.normals(isect + perturb)
+      smoothness = 0
+      for o in args.smooth_n_ord:
+        smoothness = smoothness + torch.linalg.norm(delta_n, ord=o, dim=-1).sum()
+      if args.display_smoothness: display["n-s"] = smoothness.item()
+      loss = loss + args.smooth_surface * smoothness
+
+      # smooth occ on the surface
+      noise = torch.randn([*isect.shape[:-1], model.total_latent_size()], device=device)
+      elaz = dir_to_elev_azim(torch.randn_like(isect, requires_grad=False))
+      isect_elaz = torch.cat([isect, elaz], dim=-1)
+      att = model.occ.attenuation(isect_elaz, noise).sigmoid()
+      perturb = F.normalize(torch.randn_like(isect_elaz), dim=-1) * 5e-2
+      att_shifted = model.occ.attenuation(isect_elaz + perturb, noise)
+      loss = loss + args.smooth_surface * (att - att_shifted).abs().mean()
 
     # smoothing the shadow, randomly over points and directions.
     if args.smooth_occ > 0:
@@ -523,14 +544,9 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       pts_elaz = torch.cat([pts, elaz], dim=-1)
       noise = torch.randn(pts.shape[0], model.total_latent_size(),device=device)
       att = model.occ.attenuation(pts_elaz, noise).sigmoid()
-      perturb = F.normalize(torch.randn_like(pts_elaz), dim=-1) * 5e-2
+      perturb = F.normalize(torch.randn_like(pts_elaz), dim=-1) * 1e-2
       att_shifted = model.occ.attenuation(pts_elaz + perturb, noise)
-      delta_att = att - att_shifted
-      #delta_att = torch.autograd.grad(
-      #  inputs=pts_elaz, outputs=att, create_graph=True,
-      #  grad_outputs=torch.ones_like(att),
-      #)[0]
-      loss = loss + args.smooth_occ * delta_att.abs().mean()
+      loss = loss + args.smooth_occ * (att - att_shifted).abs().mean()
 
     update(display)
     losses.append(l2_loss)
@@ -540,6 +556,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     opt.step()
     if sched is not None: sched.step()
 
+    # Save outputs within the cropped region.
     if i % args.valid_freq == 0:
       with torch.no_grad():
         ref0 = ref[0,...,:3]
@@ -558,6 +575,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
             depth_normal = (utils.depth_to_normals(depth)+1)/2
             items.append(depth_normal.clamp(min=0, max=1))
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
+
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
       save_losses(args, losses)
@@ -574,12 +592,6 @@ def test(model, cam, labels, args, training: bool = True, light=None):
   ls = []
   gots = []
 
-  ii, jj = torch.meshgrid(
-    torch.arange(args.render_size, device=device, dtype=torch.float),
-    torch.arange(args.render_size, device=device, dtype=torch.float),
-  )
-  positions = torch.stack([ii.transpose(-1, -2), jj.transpose(-1, -2)], dim=-1)
-
   with torch.no_grad():
     for i in range(labels.shape[0]):
       ts = None if times is None else times[i:i+1, ...]
@@ -587,6 +599,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       got = torch.zeros_like(exp)
       normals = torch.zeros_like(got)
       depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
+
       if args.backing_sdf: got_sdf = torch.zeros_like(got)
       if light is not None: model.refl.light = light[i:i+1]
 
@@ -595,10 +608,11 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         for y in range(N):
           c0 = x * args.crop_size
           c1 = y * args.crop_size
-          out = render(
+          out, rays = render(
             model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
             with_noise=False, times=ts, args=args,
-          ).squeeze(0)
+          )
+          out = out.squeeze(0)
           got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
 
           if hasattr(model, "nerf") and args.depth_images:
@@ -607,8 +621,6 @@ def test(model, cam, labels, args, training: bool = True, light=None):
               nerf.volumetric_integrate(model.nerf.weights, model_ts)[0,...]
           if hasattr(model, "n") and hasattr(model, "nerf") :
             if args.depth_query_normal and args.depth_images:
-              positions_crop = positions[c0:c0+args.crop_size, c1:c1+args.crop_size, :]
-              rays = cam[i:i+1].sample_positions(positions_crop,size=args.render_size,with_noise=False)
               r_o, r_d = rays.squeeze(0).split([3,3], dim=-1)
               depth_region = depth[c0:c0+args.crop_size, c1:c1+args.crop_size]
               isect = r_o + r_d * depth_region
@@ -634,7 +646,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         items.append(normals)
         #save_image(os.path.join(args.outdir, f"normals_{i:03}.png"), normals)
       if (depth != 0).any() and args.normals_from_depth:
-        depth_normals = (utils.depth_to_normals(depth * 50)+1)/2
+        depth_normals = (utils.depth_to_normals(depth * 100)+1)/2
         items.append(depth_normals)
       if hasattr(model, "nerf") and args.depth_images:
         depth = (depth-args.near)/(args.far - args.near)
