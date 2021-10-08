@@ -5,7 +5,7 @@ import random
 import math
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, fat_sigmoid )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, fat_sigmoid, leaky_softplus )
 from .refl import ( LightAndRefl )
 
 def load(args, shape, light_and_refl: LightAndRefl):
@@ -75,9 +75,6 @@ class LearnedLighting(nn.Module):
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
 
-# softplus with a leaky component for smoother learning.
-def leaky_softplus(x, alpha=0.05): return alpha * x + (1-alpha) * F.softplus(x)
-
 class AllLearnedOcc(nn.Module):
   def __init__(
     self,
@@ -87,7 +84,6 @@ class AllLearnedOcc(nn.Module):
     in_size=5
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
-      #enc=FourierEncoder(input_dims=in_size),
       num_layers=6, hidden_size=180, xavier_init=True, skip=999,
       activation=leaky_softplus,
     )

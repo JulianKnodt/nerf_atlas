@@ -6,7 +6,7 @@ import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder, NNEncoder )
-from .utils import ( autograd, eikonal_loss, smooth_min )
+from .utils import ( autograd, eikonal_loss, smooth_min, leaky_softplus )
 import src.refl as refl
 import src.march as march
 import src.renderers as renderers
@@ -249,10 +249,7 @@ class Triangles(SDFModel):
     # apply thickness to each triangle to allow certain ones to take up more space.
     out = out.squeeze(-1) - 4e-2
     # smooth min or just normal union?
-    out = smooth_min(out,dim=-1).reshape(p.shape[:-1] + (1,))
-    #if out.numel() == 0: return out.reshape(p.shape[:-1] + (1,))
-    #out = out.min(dim=-1)[0].reshape(p.shape[:-1] + (1,))
-    return out
+    return smooth_min(out,dim=-1).reshape(p.shape[:-1] + (1,))
 
 class MLP(SDFModel):
   def __init__(
@@ -262,8 +259,9 @@ class MLP(SDFModel):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
       in_size=3, out=1+self.latent_size,
-      enc=FourierEncoder(input_dims=3),
+      enc=FourierEncoder(input_dims=3, sigma=1<<4),
       num_layers=6, hidden_size=256,
+      activation=leaky_softplus,
       xavier_init=True,
     )
   def forward(self, x): return self.mlp(x)
