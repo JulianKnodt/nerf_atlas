@@ -9,8 +9,7 @@ import matplotlib.pyplot as plt
 
 def create_fourier_basis(batch_size, features=3, freq=40, device="cuda"):
   B = freq * torch.randn(batch_size, features, device=device).T
-  out_size = batch_size * 2 + features
-  return B, out_size
+  return B
 
 @torch.jit.script
 def fourier(x, B):

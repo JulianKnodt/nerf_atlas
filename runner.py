@@ -28,7 +28,7 @@ import src.hyper_config as hyper_config
 import src.renderers as renderers
 from src.lights import light_kinds
 from src.utils import ( save_image, save_plot, load_image, dir_to_elev_azim )
-from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer )
+from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer, FourierEncoder )
 
 import os
 
@@ -140,6 +140,10 @@ def arguments():
     "--path-learn-missing", action="store_true",
     help="Learn missing sampled components during path tracing",
   )
+  a.add_argument(
+    "--inc-fourier-freqs", action="store_true",
+    help="Multiplicatively increase the fourier frequency standard deviation on each run",
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -233,7 +237,6 @@ def arguments():
   )
   dnerfa.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
   dnerfa.add_argument("--gru-flow", help="Use GRU for Δx", action="store_true")
-  dnerfa.add_argument("--nicepath", help="Render a nice path for DNeRF", action="store_true")
   dnerfa.add_argument("--with-canon", help="Preload a canonical NeRF", type=str, default=None)
   dnerfa.add_argument("--fix-canon", help="Do not train canonical NeRF", action="store_true")
 
@@ -256,7 +259,6 @@ def arguments():
   rprt.add_argument("--load", help="model to load from", type=str)
   rprt.add_argument("--loss-window", help="# epochs to smooth loss over", type=int, default=250)
   rprt.add_argument("--notraintest", help="Do not test on training set", action="store_true")
-  rprt.add_argument("--sphere_visualize", help="Radius to use for spherical visualization", default=None, type=int)
   rprt.add_argument(
     "--duration-sec", help="Max number of seconds to run this for, s <= 0 implies None",
     type=float, default=0,
@@ -472,11 +474,6 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     }
     if sched is not None: display["lr"] = f"{sched.get_last_lr()[0]:.1e}"
 
-    if args.backing_sdf:
-      eik = sdf.eikonal_loss(model.sdf.normals)
-      s = sdf.sigmoid_loss(model.min_along_rays, model.nerf.acc())
-      loss = loss + eik + s
-
     if args.latent_l2_weight > 0: loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
 
     if args.dnerf_tf_smooth_weight > 0: loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
@@ -555,6 +552,10 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     loss.backward()
     opt.step()
     if sched is not None: sched.step()
+    if args.inc_fourier_freqs:
+      for module in model.modules():
+        if not isinstance(module, FourierEncoder): continue
+        module.scale_freqs()
 
     # Save outputs within the cropped region.
     if i % args.valid_freq == 0:
@@ -600,7 +601,6 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       normals = torch.zeros_like(got)
       depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
 
-      if args.backing_sdf: got_sdf = torch.zeros_like(got)
       if light is not None: model.refl.light = light[i:i+1]
 
       N = math.ceil(args.render_size/args.crop_size)
@@ -705,7 +705,7 @@ def load_model(args):
   if args.model != "ae": args.latent_l2_weight = 0
   mip = utils.load_mip(args)
   per_pixel_latent_size = 64 if args.data_kind == "pixel-single" else 0
-  per_pt_latent_size = (1 + 3 + 64) if args.backing_sdf else 0
+  per_pt_latent_size = 0
   instance_latent_size = 0
   kwargs = {
     "mip": mip,
@@ -741,8 +741,7 @@ def load_model(args):
     refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
     model.set_refl(refl_inst)
 
-  if args.model == "ae" and args.latent_l2_weight > 0:
-    model.set_regularize_latent()
+  if args.model == "ae" and args.latent_l2_weight > 0: model.set_regularize_latent()
 
   if args.mpi: model = MPI(canonical=model, device=device)
 
@@ -767,7 +766,6 @@ def load_model(args):
     model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
 
   og_model = model
-  if args.backing_sdf: model = sdf.SDFNeRF(model, sdf.SDF()).to(device)
   # tack on neural upsampling if specified
   if args.neural_upsample:
     upsampler =  Upsampler(
@@ -798,32 +796,6 @@ def save(model, args):
     setattr(args, "curr_time", datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
     with open(args.log, 'w') as f:
       json.dump(args.__dict__, f, indent=2)
-
-def sphere_visualize(args, model):
-  # TODO check this
-  for i in range(args.sphere_visualize):
-    for j in range(args.sphere_visualize):
-      p = utils.spherical_pose(math.pi/(2 * j), 2 * math.pi/i, args.far + 1)
-      cam = cameras.OrthogonalCamera(
-        pos=p,
-        at=torch.tensor([0,0,0], requires_grad=False),
-        up=torch.tensor([0,1,0], requires_grad=False),
-        view_width=args.far - args.near,
-      )
-
-      got = torch.zeros(args.render_size, args.render_size, 3, device=device)
-      N = math.ceil(args.render_size/args.crop_size)
-      for x in range(N):
-        for y in range(N):
-          c0 = x * args.crop_size
-          c1 = y * args.crop_size
-          out = render(
-            model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
-            with_noise=False, args=args,
-          ).squeeze(0)
-          got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
-      save_image(os.path.join(args.outdir, f"visualize_{i:03}_{j:03}.png"), got)
-
 
 def seed(s):
   if s == -1: return
@@ -864,9 +836,6 @@ def main():
   if args.notest: return
   test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
   test(model, test_cam, test_labels, args, training=False, light=test_light)
-
-  if args.sphere_visualize is not None:
-    sphere_visualize(args, model)
 
 if __name__ == "__main__": main()
 

@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import random
 
 from .neural_blocks import (
-  SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder
+  SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder,
+  EncodedGRU,
 )
 from .utils import (
   dir_to_elev_azim, autograd, sample_random_hemisphere, laplace_cdf, load_sigmoid,
@@ -422,7 +423,7 @@ class VolSDF(CommonNeRF):
     occ_kind=None,
     w_missing:bool = False,
     integrator_kind="direct",
-    scale_softplus=True,
+    scale_softplus=False,
     **kwargs,
   ):
     super().__init__(**kwargs, device=device)
@@ -569,6 +570,64 @@ class VolSDF(CommonNeRF):
   def set_sigmoid(self, kind="thin"):
     if not hasattr(self, "sdf"): return
     self.sdf.refl.act = load_sigmoid(kind)
+
+class RecurrentNeRF(CommonNeRF):
+  def __init__(
+    self,
+    intermediate_size: int = 64,
+    out_features: int = 3,
+
+    device: torch.device = "cuda",
+
+    **kwargs,
+  ):
+    super().__init__(**kwargs, device=device)
+    self.latent_size = self.total_latent_size()
+
+    self.first = EncodedGRU(
+      encs=[
+        FourierEncoder(input_dims=3, sigma=1<<1, device=device),
+        FourierEncoder(input_dims=3, sigma=1<<2, device=device),
+        FourierEncoder(input_dims=3, sigma=1<<3, device=device),
+        FourierEncoder(input_dims=3, sigma=1<<3, device=device),
+        FourierEncoder(input_dims=3, sigma=1<<4, device=device),
+        FourierEncoder(input_dims=3, sigma=1<<4, device=device),
+        FourierEncoder(input_dims=3, sigma=1<<5, device=device),
+      ],
+      state_size=256,
+      in_size=3, out=1,
+      latent_out=intermediate_size,
+    )
+
+    self.refl = refl.View(
+      out_features=out_features,
+      latent_size=self.latent_size+intermediate_size,
+    )
+
+  def forward(self, rays):
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+    )
+    self.ts = ts
+    return self.from_pts(pts, ts, r_o, r_d)
+
+  def from_pts(self, pts, ts, r_o, r_d):
+    latent = self.curr_latent(pts.shape)
+
+    densities, intermediate = self.first(pts, latent if latent.shape[-1] != 0 else None)
+    acc_density = (torch.cumsum(densities, dim=-1) - densities).detach() + densities
+    if self.training and self.noise_std > 0:
+      acc_density = acc_density + torch.randn_like(acc_density) * self.noise_std
+
+    view = r_d[None, ...].expand_as(pts)
+    rgb = self.refl(x=pts, view=view, latent=torch.cat([latent, intermediate], dim=-1))
+    images = []
+    for i in range(acc_density.shape[-1]):
+      density = acc_density[..., i]
+      alpha, weights = alpha_from_density(density, ts, r_d)
+      img = volumetric_integrate(weights, rgb)
+      images.append(img)
+    return images
 
 def alternating_volsdf_loss(model, nerf_loss, sdf_loss):
   def aux(x, ref): return nerf_loss(x, ref[..., :3]) if model.vol_render else sdf_loss(x, ref)

@@ -36,6 +36,7 @@ class FourierEncoder(nn.Module):
   def __init__(
     self,
     input_dims: int = 3,
+    # TODO rename this num freqs to be more accurate.
     freqs: int = 16,
     sigma: int = 1 << 5,
     device="cpu",
@@ -43,10 +44,14 @@ class FourierEncoder(nn.Module):
     super().__init__()
     self.input_dims = input_dims
     self.freqs = freqs
-    self.basis, _ = create_fourier_basis(freqs, features=input_dims, freq=sigma, device=device)
+    self.basis = create_fourier_basis(freqs, features=input_dims, freq=sigma, device=device)
     self.basis = nn.Parameter(self.basis, requires_grad=False)
+    self.extra_scale = 1
   def output_dims(self): return self.freqs * 2
-  def forward(self, x): return fourier(x, self.basis)
+  def forward(self, x): return fourier(x, self.extra_scale * self.basis)
+  def scale_freqs(self, amt: 1+1e-5, cap=2):
+    self.extra_scale *= amt
+    self.extra_scale = min(self.extra_scale, cap)
 
 # It seems a cheap approximation to SIREN works just as well? Not entirely sure.
 class NNEncoder(nn.Module):
@@ -145,6 +150,74 @@ class SkipConnMLP(nn.Module):
     adjusted = sample + noise * torch.rand_like(sample)
     adjusted = self(adjusted)
     return (values-adjusted).square().mean()
+
+class RecurrentUnit(nn.Module):
+  def __init__(
+    self,
+    in_size=3,
+    state_size:int = 128,
+    enc: Optional[Union[FourierEncoder, PositionalEncoder, NNEncoder]] = None,
+  ):
+    super().__init__()
+    self.enc = enc
+    total_in = enc.output_dims() + in_size
+    self.r_i = nn.Linear(total_in, state_size)
+    self.r_s = nn.Linear(state_size, state_size)
+
+    self.z_i = nn.Linear(total_in, state_size)
+    self.z_s = nn.Linear(state_size, state_size)
+
+    self.n_i = nn.Linear(total_in, state_size)
+    self.n_s = nn.Linear(state_size, state_size)
+  def forward(self, x, state):
+    x = torch.cat([x, self.enc(x)], dim=-1)
+
+    reset = torch.sigmoid(self.r_i(x) + self.r_s(state))
+    update = torch.sigmoid(self.z_i(x) + self.z_s(state))
+    new = torch.tanh(self.n_i(x) + reset * self.n_s(state))
+    new_state = (1-update) * new + update * state
+    return new_state
+
+
+class EncodedGRU(nn.Module):
+  def __init__(
+    self,
+    encs: [Union[FourierEncoder, PositionalEncoder, NNEncoder]],
+
+    state_size:int=128,
+
+    in_size:int=3,
+    out:int=3,
+    latent_out:int=128,
+  ):
+    super(EncodedGRU, self).__init__()
+    self.in_size = in_size
+
+    self.state_size = state_size
+
+    hidden_layers = [
+      RecurrentUnit(in_size=3, state_size=state_size, enc=enc) for enc in encs
+    ]
+    self.layers = nn.ModuleList(hidden_layers)
+
+    self.last = nn.Linear(state_size, out + latent_out)
+    self.out = out
+
+  def forward(self, x, state=None):
+    batches = x.shape[:-1]
+    init = x.reshape(-1, x.shape[-1])
+
+    if state is None:
+      state = torch.zeros(*init.shape[:-1], self.state_size, device=x.device)
+
+    out = []
+    for l in self.layers:
+      state = l(init, state)
+      out.append(state[..., :self.out])
+    last = self.last(state)
+    out.append(last[..., :self.out])
+    return torch.cat(out, dim=-1).reshape(*batches, -1), \
+      last[..., self.out:].reshape(*batches, -1)
 
 class Upsampler(nn.Module):
   def __init__(
@@ -248,6 +321,7 @@ class UpdateOperator(nn.Module):
     # returns total delta, rather than the shifted input
     out = (x - init_x).permute(2,0,3,4,1)[..., :self.out_size]
     return out
+
 
 class SpatialEncoder(nn.Module):
   # Encodes an image into a latent vector, for use in PixelNeRF

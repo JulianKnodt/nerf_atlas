@@ -301,6 +301,15 @@ class Rusin(Reflectance):
       num_layers=3, hidden_size=256,
     )
     self.space = space
+    # add a prior of a BSDF to the model so that it will learn a diffuse color at a specific
+    # point
+    self.diffuse_color = SkipConnMLP(
+      in_size=3, out=self.out_features, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=rusin_size),
+      xavier_init=True,
+
+      num_layers=3, hidden_size=256,
+    )
 
   @property
   def can_use_normal(self): return True
@@ -319,7 +328,10 @@ class Rusin(Reflectance):
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     rusin = rusin_params(wo, wi)
-    return self.act(self.rusin(rusin, latent))
+    learned = self.act(self.rusin(rusin, latent))
+    diffuse = self.act(self.diffuse_color(x, latent)) * \
+      (normal * light).sum(keepdim=True, dim=-1)
+    return learned + diffuse
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
