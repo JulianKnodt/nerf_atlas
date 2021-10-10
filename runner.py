@@ -794,7 +794,7 @@ def save(model, args):
   else: torch.save(model, args.save)
   if args.log is not None:
     setattr(args, "curr_time", datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
-    with open(args.log, 'w') as f:
+    with open(os.join(args.outdir, args.log), 'w') as f:
       json.dump(args.__dict__, f, indent=2)
 
 def seed(s):
