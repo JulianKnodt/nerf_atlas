@@ -10,7 +10,9 @@ import src.lights as lights
 from .spherical_harmonics import eval_sh
 
 refl_kinds = [
-  "curr", "pos", "view", "basic", "diffuse", "rusin", "multi_rusin", "sph-har",
+  "pos", "view", "basic", "diffuse", "rusin", "multi_rusin",
+  # classical models with some order mechanism
+  "sph-har", "fourier",
   # meta refl models
   "weighted",
 ]
@@ -35,13 +37,13 @@ def load(args, refl_kind:str, space_kind:str, latent_size:int):
   elif refl_kind == "pos": cons = Positional
   elif refl_kind == "view" or args.refl_kind == "curr": cons = View
   elif refl_kind == "diffuse": cons = Diffuse
+  elif refl_kind == "fourier": cons = FourierBasis
   elif refl_kind == "sph-har":
     cons = SphericalHarmonic
     kwargs["order"] = args.spherical_harmonic_order
   elif refl_kind == "weighted":
     cons = WeightedChoice
     subs = args.weighted_subrefl_kinds
-    # TODO should this warn if only one subrefl is used?
     assert(len(subs) > 1), "Specifying one subrefl is pointless."
     kwargs["choices"] = [load(args, c, "none", latent_size) for c in subs]
   else: raise NotImplementedError(f"refl kind: {args.refl_kind}")
@@ -233,7 +235,7 @@ class Diffuse(Reflectance):
       in_size=in_size, out=self.out_features,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=3, hidden_dims=64, xavier_init=True,
+      num_layers=3, hidden_size=128, xavier_init=True,
     )
 
   @property
@@ -242,8 +244,9 @@ class Diffuse(Reflectance):
   def can_use_light(self): return True
 
   def forward(self, x, view, normal, light, latent=None):
-    rgb = self.act(self.diffuse_color(self.space(x)))
+    rgb = self.act(self.diffuse_color(self.space(x), latent))
     # TODO make this attentuation clamped to 0? Should be for realism.
+    # No, if the normals are incorrect have to update them to be correct for the normals.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
     return rgb * attenuation
 
