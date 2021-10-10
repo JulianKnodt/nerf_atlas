@@ -368,7 +368,8 @@ def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
 def upshifted_sigmoid(v, eps=1e-2): return v.sigmoid() * (1-eps) + eps
 def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 # a leaky softplus implementation
-def leaky_softplus(v, alpha=0.01): return alpha * v + (1-alpha) * v
+def leaky_softplus(v, alpha=0.01):
+  return torch.where(v >= 0, F.softplus(v-3), alpha * x + 0.0485873515737)
 
 # list of available sigmoids
 sigmoid_kinds = {

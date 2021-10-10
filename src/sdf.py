@@ -261,7 +261,6 @@ class MLP(SDFModel):
       in_size=3, out=1+self.latent_size,
       enc=FourierEncoder(input_dims=3, sigma=1<<4),
       num_layers=6, hidden_size=256,
-      activation=leaky_softplus,
       xavier_init=True,
     )
   def forward(self, x): return self.mlp(x)

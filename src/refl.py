@@ -247,6 +247,54 @@ class Diffuse(Reflectance):
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
     return rgb * attenuation
 
+# https://pbr-book.org/3ed-2018/Reflection_Models/Fourier_Basis_BSDFs
+class FourierBasis(Reflectance):
+  def __init__(
+    self,
+    space=None,
+    order:int = 16,
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    if space is None: space = IdentitySpace()
+    self.space = space
+    self.order = order
+
+    in_size = space.dims
+    self.fourier_coeffs = SkipConnMLP(
+      in_size=in_size, out=order * self.out_features,
+      latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=3, hidden_dims=64, xavier_init=True,
+    )
+  @property
+  def can_use_normal(self): return True
+  @property
+  def can_use_light(self): return True
+
+  def forward(self, x, view, normal, light, latent=None):
+    frame = coordinate_system(normal)
+    wo = to_local(frame, F.normalize(view, dim=-1))
+    wi = to_local(frame, light)
+    mu_i = -wi[..., 2]
+    mu_o = wo[..., 2]
+    cos_phi = cos_D_phi(-wi, wo)
+    cos_k_phis = [ torch.ones_like(cos_phi), cos_phi, ]
+    for i in range(2, self.order):
+      cos_k_phi = 2 * cos_phi * cos_k_phis[-1] - cos_k_phis[-2]
+      cos_k_phis.append(cos_k_phi)
+    cos_k_phi = torch.cat(cos_k_phis, dim=-1)
+    fourier_coeffs = self.fourier_coeffs(x).reshape(x.shape[:-1], self.out_features, self.order)
+    rgb = (fourier_coeffs * cos_k_phis).sum(dim=-1)
+    return self.act(rgb)
+
+def cos_D_phi(wo, wi):
+  wox,woy,woz = wo.split([1,1,1], dim=-1)
+  wix,wiy,wiz = wi.split([1,1,1], dim=-1)
+  cos_d_phi = (wox * wix + woy * wiy)/\
+    torch.sqrt((wox*wox + woy*woy)*(wix*wix + wiy*wiy))
+  return cos_d_phi.clamp(min=-1, max=1)
+
 class WeightedChoice(Reflectance):
   def __init__(
     self,
