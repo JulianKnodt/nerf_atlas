@@ -148,7 +148,7 @@ def arguments():
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
     "--refl-kind", help="What kind of reflectance model to use",
-    choices=refl.refl_kinds,
+    choices=refl.refl_kinds, default=["view"],
   )
   refla.add_argument(
     "--weighted-subrefl-kinds",
@@ -573,7 +573,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
           depth = (raw_depth[0,...]-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
           if args.normals_from_depth:
-            depth_normal = (utils.depth_to_normals(depth)+1)/2
+            depth_normal = (50*utils.depth_to_normals(depth)+1)/2
             items.append(depth_normal.clamp(min=0, max=1))
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
 
@@ -794,7 +794,7 @@ def save(model, args):
   else: torch.save(model, args.save)
   if args.log is not None:
     setattr(args, "curr_time", datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
-    with open(os.join(args.outdir, args.log), 'w') as f:
+    with open(os.path.join(args.outdir, args.log), 'w') as f:
       json.dump(args.__dict__, f, indent=2)
 
 def seed(s):

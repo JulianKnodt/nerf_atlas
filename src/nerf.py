@@ -412,6 +412,7 @@ class NeRFAE(CommonNeRF):
     return color + sky
 
 def identity(x): return x
+
 # https://arxiv.org/pdf/2106.12052.pdf
 class VolSDF(CommonNeRF):
   def __init__(
@@ -551,10 +552,8 @@ class VolSDF(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     sdf_vals, latent = self.sdf.from_pts(pts)
-    # turn this line on if things are broken due to not having a scale_act.
     scale = self.scale_act(self.scale)
     self.scale_post_act = scale
-    #if not self.training: scale = scale.clamp(max=1e-5)
     density = 1/scale * laplace_cdf(-sdf_vals, scale)
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
