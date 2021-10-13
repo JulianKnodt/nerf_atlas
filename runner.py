@@ -92,7 +92,7 @@ def arguments():
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
   a.add_argument(
     "--train-parts", help="Which parts of the model should be trained",
-    choices=["all", "refl", "occ", "[TODO]Camera"], default="all",
+    choices=["all", "refl", "occ", "[TODO]Camera"], default=["all"], nargs="+",
   )
   a.add_argument(
     "--loss-fns", help="Loss functions to use", nargs="+", type=str,
@@ -822,16 +822,18 @@ def main():
   model = load_model(args) if args.load is None else torch.load(args.load, map_location=device)
   set_per_run(model, args)
 
-  if args.train_parts == "all": parameters = model.parameters()
-  elif args.train_parts == "refl":
-    assert(hasattr(model, "refl")), "Model must have a reflectance parameter to optimize over"
-    parameters = model.refl.parameters()
-  elif args.train_parts == "occ":
-    assert(hasattr(model, "occ")), "Model must have occlusion field (maybe internal bug)"
-    parameters = model.occ.parameters()
-  elif args.train_parts == "camera":
-    parameters = cam.parameters()
-  else: raise NotImplementedError()
+  if "all" in args.train_parts: parameters = model.parameters()
+  else:
+    parameters = []
+    if "refl" in args.train_parts:
+      assert(hasattr(model, "refl")), "Model must have a reflectance parameter to optimize over"
+      parameters.append(model.refl.parameters())
+    if "occ" in args.train_parts:
+      assert(hasattr(model, "occ")), "Model must have occlusion field (maybe internal bug)"
+      parameters.append(model.occ.parameters())
+    if "camera" in args.train_parts:
+      parameters.append(cam.parameters())
+    parameters = chain(*parameters)
 
   # for some reason AdamW doesn't seem to work here
   # eps = 1e-7 was in the original paper.

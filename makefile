@@ -143,7 +143,7 @@ nerv_point: clean
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
   --notraintest --draw-colormap \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  #--load models/nerv_${nerv_dataset}.pt \
+  --load models/nerv_${nerv_dataset}.pt \
 
 nerv_point_diffuse: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
