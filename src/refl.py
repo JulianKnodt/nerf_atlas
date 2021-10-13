@@ -245,8 +245,9 @@ class Diffuse(Reflectance):
 
   def forward(self, x, view, normal, light, latent=None):
     rgb = self.act(self.diffuse_color(self.space(x), latent))
-    # TODO make this attentuation clamped to 0? Should be for realism.
-    # No, if the normals are incorrect have to update them to be correct for the normals.
+    # XXX this attentuation could be clamped to 0,
+    # but, if the normals are incorrect have to be able to propagate gradient
+    # to be correct for the normals.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
     return rgb * attenuation
 
@@ -524,7 +525,19 @@ def coordinate_system(n):
   s = F.normalize(n.cross(t, dim=-1), eps=1e-6, dim=-1)
   return torch.stack([s, t, n], dim=-1)
 
+# https://www.pbr-book.org/3ed-2018/Geometry_and_Transformations/Vectors
+def coordinate_system2(n):
+  n = F.normalize(n, eps=1e-6, dim=-1)
+  x,y,z = n.split([1,1,1], dim=-1)
+  s = torch.where(
+    x.abs() > y.abs(),
+    F.normalize(torch.cat([-z, torch.zeros_like(y), x], dim=-1), dim=-1),
+    F.normalize(torch.cat([torch.zeros_like(x), z, -y], dim=-1), dim=-1),
+  )
+  t = torch.cross(n, s, dim=-1)
+  return torch.stack([s,t,n], dim=-1)
 # frame: [..., 3, 3], wo: [..., 3], return a vector of wo in the reference frame
+
 @torch.jit.script
 def to_local(frame, wo):
   return F.normalize((frame * wo.unsqueeze(-1)).sum(dim=-2), eps=1e-7, dim=-1)
