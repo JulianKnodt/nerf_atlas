@@ -268,8 +268,9 @@ class FourierBasis(Reflectance):
       in_size=in_size, out=order * self.out_features,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=3, hidden_dims=64, xavier_init=True,
+      num_layers=6, hidden_size=128, xavier_init=True,
     )
+    # this model does not use an activation function
   @property
   def can_use_normal(self): return True
   @property
@@ -279,17 +280,96 @@ class FourierBasis(Reflectance):
     frame = coordinate_system(normal)
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
-    mu_i = -wi[..., 2]
-    mu_o = wo[..., 2]
+    #mu_i = -wi[..., 2]
+    #mu_o = wo[..., 2]
     cos_phi = cos_D_phi(-wi, wo)
     cos_k_phis = [ torch.ones_like(cos_phi), cos_phi, ]
     for i in range(2, self.order):
       cos_k_phi = 2 * cos_phi * cos_k_phis[-1] - cos_k_phis[-2]
       cos_k_phis.append(cos_k_phi)
-    cos_k_phi = torch.cat(cos_k_phis, dim=-1)
-    fourier_coeffs = self.fourier_coeffs(x).reshape(x.shape[:-1], self.out_features, self.order)
-    rgb = (fourier_coeffs * cos_k_phis).sum(dim=-1)
-    return self.act(rgb)
+    cos_k_phis = torch.cat(cos_k_phis, dim=-1)
+    fourier_coeffs = self.fourier_coeffs(x, latent)
+    fourier_coeffs = fourier_coeffs.reshape(*x.shape[:-1], self.out_features, self.order)
+    rgb = (fourier_coeffs * cos_k_phis.unsqueeze(-2)).sum(dim=-1)
+    return rgb
+
+# https://graphicscompendium.com/gamedev/15-pbr
+# https://link.springer.com/referenceworkentry/10.1007%2F978-0-387-31439-6_531
+class CookTorrance(Reflectance):
+  def __init__(
+    self,
+    space=None,
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    if space is None: space = IdentitySpace()
+    self.space = space
+
+    in_size = space.dims
+    self.spec_frac = SkipConnMLP(
+      in_size=in_size, out=1,
+      latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
+    )
+    self.ior = SkipConnMLP(
+      in_size=in_size, out=1,
+      latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
+    )
+    self.facet_slope_dist = SkipConnMLP(
+      in_size=in_size + 1, out=1,
+      latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
+    )
+    self.diffuse_color = SkipConnMLP(
+      in_size=in_size, out=3,
+      latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
+    )
+  @property
+  def can_use_normal(self): return True
+  @property
+  def can_use_light(self): return True
+
+  def forward(self, x, view, normal, light, latent=None):
+    H = F.normalize(view + light, dim=-1) # Half vector between light and view
+    n_dot_l = (normal * light).sum(dim=-1, keepdim=True)
+    n_dot_v = (normal *  view).sum(dim=-1, keepdim=True)
+    n_dot_h = (normal *     H).sum(dim=-1, keepdim=True)
+    c = (view * H).sum(dim=-1, keepdim=True)
+
+    # For now treat index of refraction in [1,3.5]
+    ior = F.sigmoid(self.ior(x, latent)) * 2.5 + 1
+    g_sq = ior * ior + c * c - 1
+    g = g_sq.clamp(min=1e-8).sqrt()
+    g_minus_c = g - c
+    g_plus_c = g + c
+
+    # TODO is below numerically stable?
+    F = 0.5 * \
+      g_minus_c.square()/g_plus_c.square().clamp(min=1e-8) * \
+      (1 + (c * g_plus_c + 1).square()/(c * g_minus_c + 1).square().clamp(min=1e-8))
+
+    G = torch.minimum(
+      2 * n_dot_h * n_dot_v/c,
+      2 * n_dot_h * n_dot_l/c,
+    ).clamp(max=1)
+    # TODO this should be normalized to 1 over the hemisphere?
+    D = self.facet_slope_dist(torch.cat([x, n_dot_h], dim=-1), latent).sigmoid()
+    r_s = F * D * G / (4 * n_dot_l * n_dot_v)
+
+    r_d = self.diffuse_color(x, latent)
+
+    spec_frac = self.spec_frac(x, latent).sigmoid()
+    rgb = spec_frac * r_s + (1 - spec_frac) * r_d
+
+    return rgb * n_dot_l
+
+#def schlicks_approx(
 
 def cos_D_phi(wo, wi):
   wox,woy,woz = wo.split([1,1,1], dim=-1)
@@ -380,6 +460,8 @@ class Rusin(Reflectance):
     wi = to_local(frame, light)
     rusin = rusin_params(wo, wi)
     learned = self.act(self.rusin(rusin, latent))
+    # TODO can I just multiply the learned rusin component by inner product of
+    # normal & light
     diffuse = self.act(self.diffuse_color(x, latent)) * \
       (normal * light).sum(keepdim=True, dim=-1)
     return learned + diffuse

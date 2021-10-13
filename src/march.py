@@ -1,6 +1,8 @@
 # march.py contains a bunch of SDF marching algorithms.
 # all functions should return (pts, hits, dist, None|throughput)
 # throughput should be returned if computed, otherwise it should just return None.
+# What is throughput? Throughput is the minimum SDF value along a ray. When returned, the SDF
+# will be differentiable w.r.t. the throughput.
 
 import torch
 import torch.nn.functional as F
@@ -99,6 +101,7 @@ def throughput_with_sign_change(
       last_pos = torch.where(mask, i, last_pos)
       first_neg = torch.where(mask, i + 1, first_neg)
     idxs = idxs.unsqueeze(-1)
+    # TODO return best distances.
     # convert from indeces to t
     best_pos = r_o  + (near + idxs * step) * r_d
     first_neg = first_neg.unsqueeze(-1) * step

@@ -130,21 +130,20 @@ dtu: clean
 # -- Begin NeRV tests
 
 # hotdogs | armadillo, fun datasets :)
-nerv_dataset := armadillo
+nerv_dataset := hotdogs
 nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 11 --epochs 50_000  --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind rusin \
+	--size 64 --crop --crop-size 14 --epochs 50_000  --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind diffuse \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz --depth-images --depth-query-normal \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --load models/nerv_${nerv_dataset}.pt \
-  --smooth-normals 1e-5 --smooth-eps 1e-3 --notraintest \
+  --notraintest --draw-colormap \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --smooth-surface 1e-5
+  #--load models/nerv_${nerv_dataset}.pt \
 
 nerv_point_diffuse: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
@@ -212,6 +211,22 @@ nerv_point_subrefl: clean
   --color-spaces rgb hsv xyz \
   --notraintest --omit-bg \
   --load models/nerv_weighted_${nerv_dataset}.pt
+
+nerv_point_fourier: clean
+	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
+	--data-kind nerv_point --model volsdf --sdf-kind mlp \
+	--save models/nerv_fourier_${nerv_dataset}.pt \
+	--size 200 --crop --crop-size 14 --epochs 50_000 --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind fourier \
+	--sdf-eikonal 0.1 --light-kind dataset --seed -1 \
+	--loss-fns l2 rmse --valid-freq 500 --occ-kind all-learned \
+  --color-spaces rgb hsv xyz \
+  --notraintest --depth-images \
+  --smooth-normals 1e-3 --smooth-eps 1e-3 --notraintest \
+  --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
+  --smooth-surface 1e-3 --sdf-isect-kind bisect \
+  --draw-colormap \
+  --load models/nerv_fourier_${nerv_dataset}.pt
 
 # -- End NeRV tests
 

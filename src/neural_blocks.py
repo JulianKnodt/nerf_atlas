@@ -53,6 +53,23 @@ class FourierEncoder(nn.Module):
     self.extra_scale *= amt
     self.extra_scale = min(self.extra_scale, cap)
 
+class LearnedFourierEncoder(nn.Module):
+  def __init__(
+    self,
+    input_dims: int = 3,
+    num_freqs: int = 16,
+    sigma: int = 1 << 5,
+    device="cpu",
+  ):
+    super().__init__()
+    self.input_dims = input_dims
+    self.n_freqs = num_freqs
+    self.basis = create_fourier_basis(num_freqs, features=input_dims, freq=sigma, device=device)
+    self.basis = nn.Parameter(self.basis, requires_grad=False)
+    self.extra_scale = nn.Parameter(torch.tensor(1, requires_grad=True), requires_grad=True)
+  def output_dims(self): return self.n_freqs * 2
+  def forward(self, x): return fourier(x, self.extra_scale * self.basis)
+
 # It seems a cheap approximation to SIREN works just as well? Not entirely sure.
 class NNEncoder(nn.Module):
   def __init__(

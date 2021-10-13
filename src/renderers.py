@@ -5,7 +5,7 @@ import random
 import math
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, fat_sigmoid, leaky_softplus )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim )
 from .refl import ( LightAndRefl )
 
 def load(args, shape, light_and_refl: LightAndRefl):
@@ -24,15 +24,6 @@ def load(args, shape, light_and_refl: LightAndRefl):
 
   return integ
 
-def load_occlusion_kind(kind=None, latent_size:int=0):
-  if kind is None: occ = lighting_wo_isect
-  elif kind == "hard": occ = LightingWIsect()
-  elif kind == "learned": occ = LearnedLighting(latent_size=latent_size)
-  elif kind == "all-learned": occ = AllLearnedOcc(latent_size=latent_size)
-  else: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
-
-  return occ
-
 # no shadow
 def lighting_wo_isect(pts, lights, isect_fn, latent=None, mask=None):
   dir, _, spectrum = lights(pts if mask is None else pts[mask], mask=mask)
@@ -40,12 +31,12 @@ def lighting_wo_isect(pts, lights, isect_fn, latent=None, mask=None):
 
 # hard shadow lighting
 class LightingWIsect(nn.Module):
-  def __init__(self): super().__init__()
+  def __init__(self, latent_size:int): super().__init__()
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, dist, spectrum = lights(pts, mask=mask)
     far = dist.max().item() if mask.any() else 6
-    visible = isect_fn(pts, dir, near=0.1, far=far)
+    visible, _, _ = isect_fn(pts, dir, near=0.1, far=far)
     spectrum = torch.where(
       visible[...,None],
       spectrum,
@@ -69,7 +60,7 @@ class LearnedLighting(nn.Module):
     dir, dist, spectrum = lights(pts, mask=mask)
     far = dist.max().item() if mask.any() else 6
     # TODO why doesn't this isect fn seem to work?
-    visible = isect_fn(r_o=pts, r_d=dir, near=2e-3, far=far, eps=1e-3)
+    visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=2e-3, far=far, eps=1e-3)
     elaz = dir_to_elev_azim(dir)
     att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
@@ -81,18 +72,60 @@ class AllLearnedOcc(nn.Module):
     latent_size:int=0,
   ):
     super().__init__()
-    in_size=5
+    in_size=8
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
-      num_layers=6, hidden_size=180, xavier_init=True, skip=999,
-      activation=leaky_softplus,
+      enc=FourierEncoder(input_dims=in_size, sigma=1<<5),
+      num_layers=6, hidden_size=180, xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)
     elaz = dir_to_elev_azim(dir)
-    att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
+    att = self.attenuation(torch.cat([pts, elaz, dir], dim=-1), latent).sigmoid()
+    # This prevents fully hard shadows so points cannot be fully occluded
+    eps = 1e-3
+    att = att * (1-eps) + eps
+
     return dir, spectrum * att
+
+# Learned approximate penumbra based on the SDF values based on how close nearby points
+# are.
+# Inspired by https://iquilezles.org/www/articles/rmshadows/rmshadows.htm
+# Oh god this doesn't work
+class ApproximateSmoothShadow(nn.Module):
+  def __init__(
+    self,
+    latent_size:int=0,
+  ):
+    super().__init__()
+    self.attenuation = SkipConnMLP(
+      in_size=2, out=1, latent_size=latent_size,
+      num_layers=6, hidden_size=180, xavier_init=True, skip=999,
+    )
+  def forward(self, pts, lights, isect_fn, latent=None, mask=None):
+    pts = pts if mask is None else pts[mask]
+    dir, dist, spectrum = lights(pts, mask=mask)
+    far = dist.max().item()
+    visible, min_sdf_val, point_of_min = \
+      isect_fn(r_o=pts, r_d=dir, near=2e-3, far=far, eps=1e-3)
+    assert(min_sdf_val is not None), "Cannot use Approx Smooth Shadow w/o throughput"
+    dists = torch.linalg.norm(pts - point_of_min, dim=-1, ord=2, keepdim=True)
+    att = self.attenuation(torch.cat([min_sdf_val, dists], dim=-1), latent).sigmoid()
+    return dir, spectrum * att
+
+occ_kinds = {
+  None: lambda **kwargs: lighting_wo_isect,
+  "hard": LightingWIsect,
+  "learned": LearnedLighting,
+  "all-learned": AllLearnedOcc,
+  #"approx-soft": ApproximateSmoothShadow,
+}
+
+def load_occlusion_kind(kind=None, latent_size:int=0):
+  con = occ_kinds.get(kind, -1)
+  if con == -1: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
+  return con(latent_size=latent_size)
 
 class Renderer(nn.Module):
   def __init__(

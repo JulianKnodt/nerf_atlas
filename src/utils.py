@@ -357,6 +357,22 @@ def depth_to_normals(depth_img):
   d = torch.cat([dz_dx/2, dz_dy/2, z], dim=-1)
   return F.normalize(d, dim=-1)
 
+# returns a tensor of a color map for a given camera
+def color_map(camera, size=256) -> ["size", "size", 3]:
+  x, y = torch.meshgrid(
+    torch.linspace(-1, 1, size, device=camera.device),
+    torch.linspace(-1, 1, size, device=camera.device),
+  )
+  z_sq =  1 - x * x - y * y
+  z = z_sq.sqrt()
+  dir = torch.stack([x,y,z], dim=-1)
+  # multiply dir by world to camera transformation (should be 3x3 matrix)
+  dir = (camera.cam_to_world[..., :3, :3].inverse() * dir.unsqueeze(-2)).sum(dim=-1)
+  dir = dir[..., :3]/dir[..., -1:].clamp(min=1e-8)
+  dir = (F.normalize(dir, dim=-1) + 1)/2
+  dir[z_sq < 0] = 0
+  return dir
+
 
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,
 # or prevent it from representing full density items.
@@ -369,7 +385,7 @@ def upshifted_sigmoid(v, eps=1e-2): return v.sigmoid() * (1-eps) + eps
 def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 # a leaky softplus implementation
 def leaky_softplus(v, alpha=0.01):
-  return torch.where(v >= 0, F.softplus(v-3), alpha * x + 0.0485873515737)
+  return torch.where(v >= 0, F.softplus(v-3), alpha * v + 0.0485873515737)
 
 # list of available sigmoids
 sigmoid_kinds = {

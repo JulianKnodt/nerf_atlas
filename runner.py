@@ -92,7 +92,7 @@ def arguments():
   a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
   a.add_argument(
     "--train-parts", help="Which parts of the model should be trained",
-    choices=["all", "refl", "[TODO]Camera"], default="all",
+    choices=["all", "refl", "occ", "[TODO]Camera"], default="all",
   )
   a.add_argument(
     "--loss-fns", help="Loss functions to use", nargs="+", type=str,
@@ -173,7 +173,7 @@ def arguments():
     help="Integrator to use for surface rendering",
   )
   rdra.add_argument(
-    "--occ-kind", choices=[None, "hard", "learned", "all-learned"], default=None,
+    "--occ-kind", choices=list(renderers.occ_kinds.keys()), default=None,
     help="Occlusion method for shadows to use in integration",
   )
 
@@ -222,7 +222,7 @@ def arguments():
     help="Intersect the learned SDF with a bounding sphere at the origin, < 0 is no sphere",
   )
   sdfa.add_argument(
-    "--sdf-isect-kind", choices=["sphere", "secant", "bisect"], default="sphere",
+    "--sdf-isect-kind", choices=["sphere", "secant", "bisect"], default="bisect",
     help="Marching kind to use when computing SDF intersection.",
   )
 
@@ -288,6 +288,7 @@ def arguments():
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
   meta.add_argument("--train-imgs", help="# training examples", type=int, default=-1)
+  meta.add_argument("--draw-colormap", help="Draw a colormap for each view", action="store_true")
 
   ae = a.add_argument_group("auto encoder parameters")
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
@@ -525,6 +526,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       loss = loss + args.smooth_surface * smoothness
 
       # smooth occ on the surface
+    if args.smooth_occ > 0 and args.smooth_surface > 0:
       noise = torch.randn([*isect.shape[:-1], model.total_latent_size()], device=device)
       elaz = dir_to_elev_azim(torch.randn_like(isect, requires_grad=False))
       isect_elaz = torch.cat([isect, elaz], dim=-1)
@@ -651,6 +653,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       if hasattr(model, "nerf") and args.depth_images:
         depth = (depth-args.near)/(args.far - args.near)
         items.append(depth.clamp(min=0, max=1))
+      if args.draw_colormap:
+        colormap = utils.color_map(cam[i:i+1])
+        items.append(colormap)
       save_plot(os.path.join(args.outdir, name), *items)
       #save_image(os.path.join(args.outdir, f"got_{i:03}.png"), got)
       ls.append(psnr)
@@ -668,10 +673,6 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
-  if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
-    if args.smooth_occ != 0:
-      print("[warn]: Zeroing smooth occ since it does not apply")
-      args.smooth_occ = 0
 
   if len(args.replace) == 0: return
   ls = model.total_latent_size()
@@ -697,6 +698,11 @@ def set_per_run(model, args):
   if args.volsdf_direct_to_path:
     assert(isinstance(model, nerf.VolSDF)), "--volsdf-direct-to-path only applies to VolSDF"
     model.convert_to_path(args.path_learn_missing)
+
+  if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
+    if args.smooth_occ != 0:
+      print("[warn]: Zeroing smooth occ since it does not apply")
+      args.smooth_occ = 0
 
 
 def load_model(args):
@@ -817,8 +823,14 @@ def main():
   set_per_run(model, args)
 
   if args.train_parts == "all": parameters = model.parameters()
-  elif args.train_parts == "refl": parameters = model.refl.parameters()
-  elif args.train_parts == "camera": raise NotImplementedError("TODO")
+  elif args.train_parts == "refl":
+    assert(hasattr(model, "refl")), "Model must have a reflectance parameter to optimize over"
+    parameters = model.refl.parameters()
+  elif args.train_parts == "occ":
+    assert(hasattr(model, "occ")), "Model must have occlusion field (maybe internal bug)"
+    parameters = model.occ.parameters()
+  elif args.train_parts == "camera":
+    parameters = cam.parameters()
   else: raise NotImplementedError()
 
   # for some reason AdamW doesn't seem to work here
