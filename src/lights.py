@@ -50,6 +50,7 @@ class Point(Light):
     train_center=False,
     intensity=[1],
     train_intensity=False,
+    distance_decay=False,
   ):
     super().__init__()
     if type(center) == torch.Tensor: self.center = center
@@ -65,6 +66,7 @@ class Point(Light):
         .expand_as(self.center)
       self.intensity = nn.Parameter(intensity)
     self.train_intensity = train_intensity
+    self.distance_decay = distance_decay
 
   # returns some subset of the training batch
   def __getitem__(self, v):
@@ -73,6 +75,7 @@ class Point(Light):
       train_center=self.train_center,
       intensity=self.intensity[v],
       train_intensity=self.train_intensity,
+      distance_decay=self.distance_decay,
     )
   # return a singular light from a batch, altho it may be more efficient to use batching
   # this is conceptually nicer, and allows for previous code to work.
@@ -83,6 +86,7 @@ class Point(Light):
         train_center=self.train_center,
         intensity=self.intensity[:, i, :],
         train_intensity=self.train_intensity,
+        distance_decay=self.distance_decay,
       )
   def forward(self, x, mask=None):
     loc = self.center[:, None, None, :]
@@ -91,10 +95,13 @@ class Point(Light):
     d = loc - x
     dist = torch.linalg.norm(d, ord=2, dim=-1)
     d = F.normalize(d, eps=1e-6, dim=-1)
-    decay = dist.square()
     intn = self.intensity[:, None, None, :]
     if mask is not None: intn = intn.expand((*mask.shape, 3,))[mask]
-    spectrum = intn/decay.clamp(min=1e-5).unsqueeze(-1)
+    if self.distance_decay:
+      decay = dist.square()
+      spectrum = intn/decay.clamp(min=1e-5).unsqueeze(-1)
+    else: spectrum=intn
+
     return d, dist, spectrum
 
 light_kinds = {
