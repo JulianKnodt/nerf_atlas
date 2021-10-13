@@ -15,6 +15,8 @@ refl_kinds = [
   "sph-har", "fourier",
   # meta refl models
   "weighted",
+  # alternating optimiziation between diffuse and learned model
+  "alt-opt",
 ]
 
 def load(args, refl_kind:str, space_kind:str, latent_size:int):
@@ -466,6 +468,33 @@ class Rusin(Reflectance):
     diffuse = self.act(self.diffuse_color(x, latent)) * \
       (normal * light).sum(keepdim=True, dim=-1)
     return learned + diffuse
+
+class AlternatingOptimization(nn.Module):
+  def __init__(
+    self,
+    old_analytic=None,
+    old_learned=None,
+    **kwargs,
+  ):
+    # TODO possibly allow for different constructors
+    self.analytic = old_analytic if old_analytic is not None else Diffuse(**kwargs)
+    self.learned = old_learned if old_learned is not None else Rusin(**kwargs)
+
+    # always start by optimizing diffuse, else the learned rusinkiewicz is fixed
+    self.learn_analytic = True
+    for p in self.learned.parameters():
+      p.requires_grad = False
+
+  def toggle(self):
+    self.learn_analytic = not self.learn_analytic
+    for p in self.analytic.parameters():
+      p.requires_grad = self.learn_analytic
+    for p in self.learned.parameters():
+      p.requires_grad = not self.learn_analytic
+
+  def forward(self, x, view, normal, light, latent=None):
+    return self.learned(x, view, normal,light, latent) + \
+      self.analytic(x, view, normal, light, latent)
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter

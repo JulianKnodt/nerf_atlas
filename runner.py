@@ -144,6 +144,10 @@ def arguments():
     "--inc-fourier-freqs", action="store_true",
     help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
+  a.add_argument(
+    "--toggle-freq", type=int, default=0,
+    help="How often to toggle between optimizing the analytic and the learned model",
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -289,6 +293,8 @@ def arguments():
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
   meta.add_argument("--train-imgs", help="# training examples", type=int, default=-1)
   meta.add_argument("--draw-colormap", help="Draw a colormap for each view", action="store_true")
+  meta.add_argument("--convert-analytic-to-alt", action="store_true",
+    help="Combine a model with an analytic BRDF with a learned BRDF for alternating optimization")
 
   ae = a.add_argument_group("auto encoder parameters")
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
@@ -309,6 +315,7 @@ def arguments():
 
   if not args.not_magma: plt.magma()
 
+  assert(args.valid_freq > 0), "Must pass a valid frequency > 0"
   return args
 
 loss_map = {
@@ -582,6 +589,8 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
       save_losses(args, losses)
+    if args.toggle_freq != 0 and i != 0 and i % args.toggle_freq == 0:
+      model.refl.toggle()
   save(model, args)
   save_losses(args, losses)
 
@@ -703,6 +712,16 @@ def set_per_run(model, args):
     if args.smooth_occ != 0:
       print("[warn]: Zeroing smooth occ since it does not apply")
       args.smooth_occ = 0
+  if args.convert_analytic_to_alt:
+    assert(hasattr(model, "refl")), "Model does not have a reflectance in the right place"
+    assert(not isinstance(model.refl, refl.AlternatingOptimization)), \
+      "Nesting alternating optimizers is not supported"
+    model.refl = refl.AlternatingOptimization(old_analytic=model.refl)
+
+  if not hasattr(model, "refl") or not isinstance(model.refl, refl.AlternatingOptimization)
+    if args.toggle_freq > 0:
+      print("[warn]: Zeroing toggle freq since it does not apply")
+      args.toggle_freq = 0
 
 
 def load_model(args):
