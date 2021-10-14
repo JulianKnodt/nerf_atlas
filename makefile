@@ -136,7 +136,7 @@ nerv_point: clean
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
 	--size 32 --crop --crop-size 14 --epochs 80_000  --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind diffuse \
+	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind rusin \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
 	--loss-fns l2 --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb --depth-images --depth-query-normal \

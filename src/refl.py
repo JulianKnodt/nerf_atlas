@@ -425,21 +425,13 @@ class Rusin(Reflectance):
   ):
     super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
-    _pos_size = space.dims
+    pos_size = space.dims
     rusin_size = 3
-    self.rusin = SkipConnMLP(
-      in_size=rusin_size, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=rusin_size),
-      xavier_init=True,
-
-      num_layers=3, hidden_size=256,
-    )
     self.space = space
-    # add a prior of a BSDF to the model so that it will learn a diffuse color at a specific
-    # point
-    self.diffuse_color = SkipConnMLP(
-      in_size=3, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=rusin_size),
+    in_size = rusin_size + pos_size
+    self.rusin = SkipConnMLP(
+      in_size=in_size, out=self.out_features, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
       xavier_init=True,
 
       num_layers=3, hidden_size=256,
@@ -462,13 +454,11 @@ class Rusin(Reflectance):
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     rusin = rusin_params(wo, wi)
-    learned = self.act(self.rusin(rusin, latent))
-    # TODO can I just multiply the learned rusin component by inner product of
-    # normal & light
-    diffuse = self.act(self.diffuse_color(x, latent)) * \
-      (normal * light).sum(keepdim=True, dim=-1)
-    return learned + diffuse
+    return self.act(self.rusin(torch.cat([x, rusin], dim=-1), latent))
 
+# The sum of an analytic and learned BRDF, intended to be the case that only one of them will
+# have their parameters with gradients at a time so that optimizing them will guarantee the
+# correctness of the SDF.
 class AlternatingOptimization(nn.Module):
   def __init__(
     self,
