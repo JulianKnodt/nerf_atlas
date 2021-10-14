@@ -66,22 +66,49 @@ class LearnedLighting(nn.Module):
     spectrum = torch.where(visible.reshape_as(att), spectrum, spectrum * att)
     return dir, spectrum
 
-class AllLearnedOcc(nn.Module):
+class LearnedConstantSoftLighting(nn.Module):
   def __init__(
     self,
     latent_size:int=0,
   ):
     super().__init__()
-    in_size=8
+    in_size=5
+    self.alpha = nn.Parameter(torch.tensor(0, requires_grad=True), requires_grad=True)
+  def forward(self, pts, lights, isect_fn, latent=None, mask=None):
+    pts = pts if mask is None else pts[mask]
+    dir, dist, spectrum = lights(pts, mask=mask)
+    far = dist.max().item() if mask.any() else 6
+    # TODO why doesn't this isect fn seem to work?
+    visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=2e-3, far=far, eps=1e-3)
+    spectrum = torch.where(
+      visible.reshape_as(att),
+      spectrum,
+      spectrum * self.alpha.sigmoid(),
+    )
+    return dir, spectrum
+
+def elaz_and_3d(dir): return torch.cat([dir_to_elev_azim(dir), dir], dim=-1)
+
+class AllLearnedOcc(nn.Module):
+  def __init__(
+    self,
+    latent_size:int=0,
+    with_dir=False,
+  ):
+    super().__init__()
+    in_size=5 + (3 if with_dir else 0)
+    # it seems that passing in the fourier encoder with just the elaz is good enough,
+    # can also pass in the direction to handle the edge case.
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
+      enc=FourierEncoder(input_dims=in_size),
       num_layers=6, hidden_size=180, xavier_init=True,
     )
+    self.encode_dir = elaz_and_3d if with_dir else dir_to_elev_azim
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)
-    elaz = dir_to_elev_azim(dir)
-    att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
+    att = self.attenuation(torch.cat([pts, self.encode_dir(dir)], dim=-1), latent).sigmoid()
 
     return dir, spectrum * att
 

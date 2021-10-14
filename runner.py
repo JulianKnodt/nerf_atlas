@@ -715,9 +715,10 @@ def set_per_run(model, args):
       args.smooth_occ = 0
   if args.convert_analytic_to_alt:
     assert(hasattr(model, "refl")), "Model does not have a reflectance in the right place"
-    assert(not isinstance(model.refl, refl.AlternatingOptimization)), \
-      "Nesting alternating optimizers is not supported"
-    model.refl = refl.AlternatingOptimization(old_analytic=model.refl)
+    if not isinstance(model.refl, refl.AlternatingOptimization):
+      #  "Nesting alternating optimizers is not supported"
+      model.refl = refl.AlternatingOptimization(old_analytic=model.refl)
+    else: print("[note]: redundant alternating optimization, ignoring")
 
   if not hasattr(model, "refl") or not isinstance(model.refl, refl.AlternatingOptimization):
     if args.toggle_freq > 0:
