@@ -75,24 +75,20 @@ class AllLearnedOcc(nn.Module):
     in_size=8
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
-      enc=FourierEncoder(input_dims=in_size, sigma=1<<5),
       num_layers=6, hidden_size=180, xavier_init=True,
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)
     elaz = dir_to_elev_azim(dir)
-    att = self.attenuation(torch.cat([pts, elaz, dir], dim=-1), latent).sigmoid()
-    # This prevents fully hard shadows so points cannot be fully occluded
-    eps = 1e-3
-    att = att * (1-eps) + eps
+    att = self.attenuation(torch.cat([pts, elaz], dim=-1), latent).sigmoid()
 
     return dir, spectrum * att
 
 # Learned approximate penumbra based on the SDF values based on how close nearby points
 # are.
 # Inspired by https://iquilezles.org/www/articles/rmshadows/rmshadows.htm
-# Oh god this doesn't work
+# Doesn't work so well, maybe worth continuing to experiment with it?
 class ApproximateSmoothShadow(nn.Module):
   def __init__(
     self,

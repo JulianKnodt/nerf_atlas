@@ -249,6 +249,7 @@ def arguments():
   cam.add_argument("--far", help="far plane for camera", type=float, default=6)
 
   rprt = a.add_argument_group("reporting parameters")
+  rprt.add_argument("--name", help="Display name for convenience in log file")
   rprt.add_argument("-q", "--quiet", help="Silence tqdm", action="store_true")
   rprt.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
   rprt.add_argument("--log", help="Where to save log of arguments", type=str, default="log.json")
@@ -718,7 +719,7 @@ def set_per_run(model, args):
       "Nesting alternating optimizers is not supported"
     model.refl = refl.AlternatingOptimization(old_analytic=model.refl)
 
-  if not hasattr(model, "refl") or not isinstance(model.refl, refl.AlternatingOptimization)
+  if not hasattr(model, "refl") or not isinstance(model.refl, refl.AlternatingOptimization):
     if args.toggle_freq > 0:
       print("[warn]: Zeroing toggle freq since it does not apply")
       args.toggle_freq = 0
