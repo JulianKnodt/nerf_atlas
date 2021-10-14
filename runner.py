@@ -144,10 +144,6 @@ def arguments():
     "--inc-fourier-freqs", action="store_true",
     help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
-  a.add_argument(
-    "--toggle-freq", type=int, default=0,
-    help="How often to toggle between optimizing the analytic and the learned model",
-  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -169,6 +165,10 @@ def arguments():
   refla.add_argument(
     "--space-kind", choices=["identity", "surface", "none"], default="identity",
     help="Space to encode texture: surface builds a map from 3D (identity) to 2D",
+  )
+  refla.add_argument(
+    "--alt-train", choices=["analytic", "learned"], default="learned",
+    help="Whether to train the analytic or the learned model in this session",
   )
 
   rdra = a.add_argument_group("integrator")
@@ -591,8 +591,6 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if i % args.save_freq == 0 and i != 0:
       save(model, args)
       save_losses(args, losses)
-    if args.toggle_freq != 0 and i != 0 and i % args.toggle_freq == 0:
-      model.refl.toggle()
   save(model, args)
   save_losses(args, losses)
 
@@ -726,11 +724,12 @@ def set_per_run(model, args):
       else: model.refl = new_alt_opt(model.refl)
       model.refl = model.refl.to(device)
     else: print("[note]: redundant alternating optimization, ignoring")
+  if hasattr(model, "refl"):
+    if isinstance(model.refl, refl.AlternatingOptimization):
+      model.refl.toggle(args.alt_train == "analytic")
+    elif isinstance(model.refl, refl.LightAndRefl) and isinstance(model.refl.refl, refl.AlternatingOptimization):
+      model.refl.refl.toggle(args.alt_train == "analytic")
 
-  if not hasattr(model, "refl") or not isinstance(model.refl, refl.AlternatingOptimization):
-    if args.toggle_freq > 0:
-      print("[warn]: Zeroing toggle freq since it does not apply")
-      args.toggle_freq = 0
 
 
 def load_model(args):
