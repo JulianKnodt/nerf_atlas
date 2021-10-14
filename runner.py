@@ -249,7 +249,7 @@ def arguments():
   cam.add_argument("--far", help="far plane for camera", type=float, default=6)
 
   rprt = a.add_argument_group("reporting parameters")
-  rprt.add_argument("--name", help="Display name for convenience in log file")
+  rprt.add_argument("--name", help="Display name for convenience in log file", type=str, default="")
   rprt.add_argument("-q", "--quiet", help="Silence tqdm", action="store_true")
   rprt.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
   rprt.add_argument("--log", help="Where to save log of arguments", type=str, default="log.json")
@@ -307,7 +307,8 @@ def arguments():
   # runtime checks
   hyper_config.load(args)
   if args.timed_outdir:
-    args.outdir = os.path.join(args.outdir, datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
+    now = datetime.today().strftime('%Y-%m-%d-%H:%M:%S')
+    args.outdir = os.path.join(args.outdir, f"{args.name}{'@' if args.name != '' else ''}{now}")
   if not os.path.exists(args.outdir): os.mkdir(args.outdir)
 
   if not args.neural_upsample:
