@@ -150,16 +150,32 @@ nerv_point_diffuse: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_diffuse_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 12 --epochs 0  --loss-window 1500 \
+	--size 200 --crop --crop-size 14 --epochs 30_000  --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind diffuse \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz --depth-images --depth-query-normal \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --load models/nerv_diffuse_${nerv_dataset}.pt \
   --smooth-normals 1e-5 --smooth-eps 1e-3 --notraintest \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --smooth-surface 1e-5
+  --smooth-surface 1e-5 \
+  --load models/nerv_diffuse_${nerv_dataset}.pt
+
+nerv_point_diffuse_to_learned: clean
+	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
+  --name learned_from_diffuse${nerv_dataset} \
+	--data-kind nerv_point --model volsdf --sdf-kind mlp \
+	--save models/nerv_from_diffuse_${nerv_dataset}.pt \
+	--size 200 --crop --crop-size 14 --epochs 30_000  --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 8e-4 \
+	--sdf-eikonal 1 --light-kind dataset --seed -1 \
+	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
+  --color-spaces rgb hsv xyz --depth-images --depth-query-normal \
+  --sigmoid-kind upshifted_softplus --skip-loss 100 \
+  --notraintest --timed-outdir \
+  --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
+  --smooth-surface 1e-5 --train-parts refl occ --convert-analytic-to-alt \
+  --load models/nerv_diffuse_${nerv_dataset}.pt
 
 nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \

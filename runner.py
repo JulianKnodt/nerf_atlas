@@ -685,7 +685,6 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 def set_per_run(model, args):
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
-  if len(args.replace) == 0: return
   ls = model.total_latent_size()
   if "occ" in args.replace:
     if args.occ_kind != None and hasattr(model, "occ"):
@@ -702,8 +701,6 @@ def set_per_run(model, args):
     model.nerf.set_sigmoid(args.sigmoid_kind)
 
   if args.model == "sdf": return
-  if not hasattr(model, "nerf"): return
-  #if args.sigmoid_kind != "curr": model.nerf.set_sigmoid(args.sigmoid_kind)
 
   # converts from a volsdf with direct integration to one with indirect lighting
   if args.volsdf_direct_to_path:
@@ -717,8 +714,17 @@ def set_per_run(model, args):
   if args.convert_analytic_to_alt:
     assert(hasattr(model, "refl")), "Model does not have a reflectance in the right place"
     if not isinstance(model.refl, refl.AlternatingOptimization):
-      #  "Nesting alternating optimizers is not supported"
-      model.refl = refl.AlternatingOptimization(old_analytic=model.refl)
+      new_alt_opt = lambda old: refl.AlternatingOptimization(
+        old_analytic=model.refl.refl,
+        latent_size=ls,
+        act = args.sigmoid_kind,
+        out_features=args.feature_space,
+        normal = args.normal_kind,
+      )
+      # need to change the nested feature
+      if isinstance(model.refl, refl.LightAndRefl): model.refl.refl = new_alt_opt(model.refl.refl)
+      else: model.refl = new_alt_opt(model.refl)
+      model.refl = model.refl.to(device)
     else: print("[note]: redundant alternating optimization, ignoring")
 
   if not hasattr(model, "refl") or not isinstance(model.refl, refl.AlternatingOptimization):

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 import math
+from typing import Optional
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
 from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, load_sigmoid )
@@ -246,7 +247,7 @@ class Diffuse(Reflectance):
   def can_use_light(self): return True
 
   def forward(self, x, view, normal, light, latent=None):
-    rgb = self.act(self.diffuse_color(self.space(x), latent))
+    rgb = F.leaky_relu(self.diffuse_color(self.space(x), latent))
     # XXX this attentuation could be clamped to 0,
     # but, if the normals are incorrect have to be able to propagate gradient
     # to be correct for the normals.
@@ -466,6 +467,7 @@ class AlternatingOptimization(nn.Module):
     old_learned=None,
     **kwargs,
   ):
+    super().__init__()
     # TODO possibly allow for different constructors
     self.analytic = old_analytic if old_analytic is not None else Diffuse(**kwargs)
     self.learned = old_learned if old_learned is not None else Rusin(**kwargs)
@@ -475,16 +477,24 @@ class AlternatingOptimization(nn.Module):
     for p in self.learned.parameters():
       p.requires_grad = False
 
-  def toggle(self):
-    self.learn_analytic = not self.learn_analytic
+  @property
+  def can_use_normal(self): return self.analytic.can_use_normal or self.learned.can_use_normal
+  @property
+  def latent_size(self): return self.analytic.latent_size
+  @property
+  def can_use_light(self): return self.analytic.can_use_light or self.learned.can_use_light
+
+  def toggle(self, learn_analytic:Optional[bool]=None):
+    self.learn_analytic = not self.learn_analytic if learn_analytic is None else learn_analytic
     for p in self.analytic.parameters():
       p.requires_grad = self.learn_analytic
     for p in self.learned.parameters():
       p.requires_grad = not self.learn_analytic
 
   def forward(self, x, view, normal, light, latent=None):
-    return self.learned(x, view, normal,light, latent) + \
-      self.analytic(x, view, normal, light, latent)
+    learned = self.learned(x, view, normal,light, latent)
+    analytic = self.analytic(x, view, normal, light, latent)
+    return learned + analytic
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
