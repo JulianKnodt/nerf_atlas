@@ -681,6 +681,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
+  if isinstance(model, nerf.CommonNeRF): model.steps = args.steps
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
   ls = model.total_latent_size()
