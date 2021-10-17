@@ -435,7 +435,7 @@ class Rusin(Reflectance):
       enc=FourierEncoder(input_dims=in_size),
       xavier_init=True,
 
-      num_layers=3, hidden_size=256,
+      num_layers=5, hidden_size=256,
     )
 
   @property
@@ -448,9 +448,8 @@ class Rusin(Reflectance):
     return self.act(self.rusin(rusin_params.cos(), latent))
 
   def forward(self, x, view, normal, light, latent=None):
-    # TODO would it be good to detach the normal? is it trying to fix the surface
-    # to make it look better?
-    frame = coordinate_system(normal.detach())
+    # NOTE detach the normals since there is no grounding of them w/ Rusin reflectance
+    frame = coordinate_system(normal)
     # have to move view and light into basis of normal
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
