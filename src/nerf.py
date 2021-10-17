@@ -555,6 +555,8 @@ class VolSDF(CommonNeRF):
     scale = self.scale_act(self.scale)
     self.scale_post_act = scale
     density = 1/scale * laplace_cdf(-sdf_vals, scale)
+    if self.training and self.noise_std > 0:
+      density = density + torch.randn_like(density) * self.noise_std
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
     n = None
@@ -690,7 +692,7 @@ class DynamicNeRF(nn.Module):
         activation=nn.Softplus(),
         zero_init=True,
       )
-    self.time_noise_std = 1e-2
+    self.time_noise_std = 3e-3
     self.smooth_delta = False
     self.delta_smoothness = 0
 
