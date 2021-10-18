@@ -429,13 +429,13 @@ class Rusin(Reflectance):
     pos_size = space.dims
     rusin_size = 3
     self.space = space
-    in_size = rusin_size + pos_size
+    in_size = rusin_size#+ pos_size
     self.rusin = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
       xavier_init=True,
 
-      num_layers=5, hidden_size=256,
+      num_layers=3, hidden_size=256,
     )
 
   @property
@@ -449,12 +449,12 @@ class Rusin(Reflectance):
 
   def forward(self, x, view, normal, light, latent=None):
     # NOTE detach the normals since there is no grounding of them w/ Rusin reflectance
-    frame = coordinate_system(normal)
+    frame = coordinate_system(normal.detach())
     # have to move view and light into basis of normal
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     rusin = rusin_params(wo, wi)
-    return self.act(self.rusin(torch.cat([x, rusin], dim=-1), latent))
+    return self.act(self.rusin(rusin, latent))
 
 # The sum of an analytic and learned BRDF, intended to be the case that only one of them will
 # have their parameters with gradients at a time so that optimizing them will guarantee the

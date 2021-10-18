@@ -442,27 +442,27 @@ class VolSDF(CommonNeRF):
       elif integrator_kind == "path": self.convert_to_path(w_missing)
       else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
   def convert_to_path(self, w_missing: bool):
-        if self.secondary == self.path: return
-        self.secondary = self.path
-        self.path_n = N = 3
-        missing_cmpts = 3 * (N + 1) + 6
+    if self.secondary == self.path: return
+    self.secondary = self.path
+    self.path_n = N = 3
+    missing_cmpts = 3 * (N + 1) + 6
 
-        # this is a function of the seen pts and the sampled lighting dir
-        self.missing = None
-        if w_missing:
-          self.missing = SkipConnMLP(
-            in_size=missing_cmpts, out=self.out_features, enc=FourierEncoder(input_dims=missing_cmpts),
-            # here we care about the aggregate set of all point, so bundle them all up.
-            latent_size = self.sdf.latent_size * (N + 1),
-            hidden_size=512,
-          )
+    # this is a function of the seen pts and the sampled lighting dir
+    self.missing = None
+    if w_missing:
+      self.missing = SkipConnMLP(
+        in_size=missing_cmpts, out=self.out_features, enc=FourierEncoder(input_dims=missing_cmpts),
+        # here we care about the aggregate set of all point, so bundle them all up.
+        latent_size = self.sdf.latent_size * (N + 1),
+        hidden_size=512,
+      )
 
-        self.transfer_fn = SkipConnMLP(
-          in_size=6, out=1, enc=FourierEncoder(input_dims=6),
-          # multiply by two here ince it's the pair of latent values at sets of point
-          latent_size = self.sdf.latent_size * 2,
-          hidden_size=512,
-        )
+    self.transfer_fn = SkipConnMLP(
+      in_size=6, out=1, enc=FourierEncoder(input_dims=6),
+      # multiply by two here ince it's the pair of latent values at sets of point
+      latent_size = self.sdf.latent_size * 2,
+      hidden_size=512,
+    )
   def direct(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
     for light in self.sdf.refl.light.iter():
@@ -555,8 +555,6 @@ class VolSDF(CommonNeRF):
     scale = self.scale_act(self.scale)
     self.scale_post_act = scale
     density = 1/scale * laplace_cdf(-sdf_vals, scale)
-    if self.training and self.noise_std > 0:
-      density = density + torch.randn_like(density) * self.noise_std
     self.alpha, self.weights = alpha_from_density(density, ts, r_d, softplus=False)
 
     n = None
