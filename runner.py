@@ -190,6 +190,9 @@ def arguments():
     "--light-kind", choices=list(light_kinds.keys()), default=None,
     help="Kind of light to use while rendering. Dataset indicates light is in dataset",
   )
+  lighta.add_argument(
+    "--light-intensity", type=int, default=100, help="Intensity of light to use with loaded dataset",
+  )
 
   sdfa = a.add_argument_group("sdf")
   sdfa.add_argument(

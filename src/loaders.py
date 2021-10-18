@@ -37,6 +37,7 @@ def load(args, training=True, device="cuda"):
   elif kind == "nerv_point":
     return nerv_point(
       args.data, training=training, size=size,
+      light_intensity=args.light_intensity,
       with_mask = with_mask,
       multi_point = args.nerv_multi_point,
       device=device,
@@ -179,7 +180,13 @@ def dtu(path=".", training=True, size=256, with_mask=False, device="cuda"):
   return exp_imgs, cameras.DTUCamera(pose=poses, intrinsic=intrinsics), None
 
 # https://docs.google.com/document/d/1KI7YtWl3nAuS6xH2WFWug87o-1G6PP4GHrnNzZ0LeUk/edit
-def nerv_point(path=".", training=True, size=200, multi_point=False, with_mask=False, device="cuda"):
+def nerv_point(
+  path=".",
+  training=True,
+  size=200, light_intensity:int=100,
+  multi_point=False, with_mask=False,
+  device="cuda",
+):
   import imageio
   def load_exr(path): return torch.from_numpy(imageio.imread(path))
 
@@ -211,7 +218,7 @@ def nerv_point(path=".", training=True, size=200, multi_point=False, with_mask=F
     light_locs.append(ll)
     w = torch.tensor(frame.get('light_weights', [[1,1,1]]),dtype=torch.float,device=device)
     w = w[..., :3]
-    weights = 100 if w.shape[0] == 1 else 54
+    weights = light_intensity if w.shape[0] == 1 else 54
       #torch.tensor([100] + [50] * 7, device=device)[:, None]
     light_weights.append(w * weights)
 
