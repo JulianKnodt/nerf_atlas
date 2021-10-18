@@ -391,6 +391,7 @@ def leaky_softplus(v, alpha=0.01):
 sigmoid_kinds = {
   "normal": torch.sigmoid,
   "thin": thin_sigmoid,
+  "tanh": torch.tanh,
   "fat": fat_sigmoid,
   "cyclic": cyclic_sigmoid,
   "upshifted": upshifted_sigmoid,

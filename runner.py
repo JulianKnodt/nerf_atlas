@@ -684,6 +684,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
+  if args.epochs == 0: return
   if isinstance(model, nerf.CommonNeRF): model.steps = args.steps
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
@@ -715,7 +716,9 @@ def set_per_run(model, args):
       args.smooth_occ = 0
   if args.convert_analytic_to_alt:
     assert(hasattr(model, "refl")), "Model does not have a reflectance in the right place"
-    if not isinstance(model.refl, refl.AlternatingOptimization):
+    if not isinstance(model.refl, refl.AlternatingOptimization) \
+      and not (isinstance(model.refl, refl.LightAndRefl) and \
+        isinstance(model.refl.refl, refl.AlternatingOptimization)):
       new_alt_opt = lambda old: refl.AlternatingOptimization(
         old_analytic=model.refl.refl,
         latent_size=ls,
@@ -728,6 +731,7 @@ def set_per_run(model, args):
       else: model.refl = new_alt_opt(model.refl)
       model.refl = model.refl.to(device)
     else: print("[note]: redundant alternating optimization, ignoring")
+
   if hasattr(model, "refl"):
     if isinstance(model.refl, refl.AlternatingOptimization):
       model.refl.toggle(args.alt_train == "analytic")

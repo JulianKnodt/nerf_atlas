@@ -1,4 +1,4 @@
-PHONv:
+PHONY:
 
 clean:
 	-@rm outputs/*.png
@@ -135,11 +135,11 @@ nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 32 --crop --crop-size 14 --epochs 80_000  --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind rusin \
+	--size 64 --crop --crop-size 14 --epochs 80_000  --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
-	--loss-fns l2 --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
-  --color-spaces rgb --depth-images --depth-query-normal \
+	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
+  --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
   --notraintest --draw-colormap \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
@@ -150,15 +150,14 @@ nerv_point_diffuse: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_diffuse_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 14 --epochs 30_000  --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind diffuse \
+	--size 200 --crop --crop-size 14 --epochs 10_000  --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind diffuse \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
-  --color-spaces rgb hsv xyz --depth-images --depth-query-normal \
+  --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
   --sigmoid-kind upshifted_softplus --skip-loss 100 \
-  --smooth-normals 1e-5 --smooth-eps 1e-3 --notraintest \
+  --notraintest --smooth-surface 1e-3 \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --smooth-surface 1e-5 \
   --load models/nerv_diffuse_${nerv_dataset}.pt
 
 nerv_point_diffuse_to_learned: clean
@@ -166,16 +165,17 @@ nerv_point_diffuse_to_learned: clean
   --name learned_from_diffuse${nerv_dataset} \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_from_diffuse_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 14 --epochs 30_000  --loss-window 1500 \
+	--size 200 --crop --crop-size 14 --epochs 50_000  --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 8e-4 \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb hsv xyz --depth-images --depth-query-normal \
-  --sigmoid-kind upshifted_softplus --skip-loss 100 \
+  --sigmoid-kind tanh --skip-loss 100 \
   --notraintest \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --smooth-surface 1e-5 --train-parts refl occ --convert-analytic-to-alt \
-  --load models/nerv_diffuse_${nerv_dataset}.pt
+  --train-parts refl occ --convert-analytic-to-alt \
+  --load models/nerv_from_diffuse_${nerv_dataset}.pt \
+  #--load models/nerv_diffuse_${nerv_dataset}.pt \
 
 nerv_point_sdf: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
@@ -212,10 +212,10 @@ nerv_point_path: clean
 	--loss-fns l2 --valid-freq 500 --occ-kind all-learned \
   --color-spaces rgb --save-freq 1000 \
   --integrator-kind path --depth-images --notraintest --skip-loss 500 \
-  --smooth-eps 2e-3 --smooth-occ 1e-1 --sigmoid-kind upshifted_softplus \
+  --smooth-eps 2e-3 --smooth-occ 1e-3 --sigmoid-kind upshifted_softplus \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --smooth-normals 1e-1 --normals-from-depth \
-  --load models/nerv_path_${nerv_dataset}.pt #--path-learn-missing
+  --smooth-normals 1e-3 --normals-from-depth \
+  #--load models/nerv_path_${nerv_dataset}.pt #--path-learn-missing
 
 nerv_point_subrefl: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
