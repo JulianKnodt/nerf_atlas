@@ -725,6 +725,7 @@ def set_per_run(model, args):
         act = args.sigmoid_kind,
         out_features=args.feature_space,
         normal = args.normal_kind,
+        space = args.space_kind,
       )
       # need to change the nested feature
       if isinstance(model.refl, refl.LightAndRefl): model.refl.refl = new_alt_opt(model.refl.refl)

@@ -247,8 +247,8 @@ class Diffuse(Reflectance):
   def can_use_light(self): return True
 
   def forward(self, x, view, normal, light, latent=None):
-    rgb = F.leaky_relu(self.diffuse_color(self.space(x), latent))
-    # XXX this attentuation could be clamped to 0,
+    rgb = self.act(self.diffuse_color(self.space(x), latent))
+    # NOTE this attentuation could be clamped to 0,
     # but, if the normals are incorrect have to be able to propagate gradient
     # to be correct for the normals.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
@@ -426,16 +426,15 @@ class Rusin(Reflectance):
   ):
     super().__init__(**kwargs)
     if space is None: space = IdentitySpace()
-    pos_size = space.dims
     rusin_size = 3
     self.space = space
-    in_size = rusin_size#+ pos_size
+    in_size = rusin_size + space.dims
     self.rusin = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
       xavier_init=True,
 
-      num_layers=3, hidden_size=256,
+      num_layers=5, hidden_size=256,
     )
 
   @property
@@ -454,7 +453,8 @@ class Rusin(Reflectance):
     wo = to_local(frame, F.normalize(view, dim=-1))
     wi = to_local(frame, light)
     rusin = rusin_params(wo, wi)
-    return self.act(self.rusin(rusin, latent))
+    params = torch.cat([rusin, self.space(x)], dim=-1)
+    return self.act(self.rusin(params, latent))
 
 # The sum of an analytic and learned BRDF, intended to be the case that only one of them will
 # have their parameters with gradients at a time so that optimizing them will guarantee the

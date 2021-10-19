@@ -169,7 +169,11 @@ class CommonNeRF(nn.Module):
     else:
       raise NotImplementedError(f"Unexpected bg: {bg}")
 
-  def set_sigmoid(self, kind="thin"): self.feat_act = load_sigmoid(kind)
+  def set_sigmoid(self, kind="thin"):
+    act = load_sigmoid(kind)
+    self.feat_act = act
+    if isinstance(self.refl, refl.LightAndRefl): self.refl.refl.act = act
+    else: self.refl.act = act
   def sky_from_mlp(self, elaz_r_d, weights):
     return (1-weights.sum(dim=0)).unsqueeze(-1) * fat_sigmoid(self.sky_mlp(elaz_r_d))
   def total_latent_size(self) -> int:
@@ -568,7 +572,9 @@ class VolSDF(CommonNeRF):
     return volumetric_integrate(self.weights, rgb)
   def set_sigmoid(self, kind="thin"):
     if not hasattr(self, "sdf"): return
-    self.sdf.refl.act = load_sigmoid(kind)
+    act = load_sigmoid(kind)
+    if isinstance(self.refl, refl.LightAndRefl): self.refl.refl.act = act
+    else: self.refl.act = act
 
 class RecurrentNeRF(CommonNeRF):
   def __init__(
