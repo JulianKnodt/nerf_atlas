@@ -91,7 +91,7 @@ class SkipConnMLP(nn.Module):
     self,
 
     num_layers = 5,
-    hidden_size = 128,
+    hidden_size = 256,
     in_size=3, out=3,
 
     skip=3,

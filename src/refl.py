@@ -235,10 +235,9 @@ class Diffuse(Reflectance):
 
     in_size = space.dims
     self.diffuse_color = SkipConnMLP(
-      in_size=in_size, out=self.out_features,
-      latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size),
-      num_layers=3, hidden_size=128, xavier_init=True,
+      in_size=in_size, out=self.out_features, latent_size=self.latent_size,
+      num_layers=3,hidden_size=512,
+      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
     )
 
   @property
@@ -252,6 +251,8 @@ class Diffuse(Reflectance):
     # but, if the normals are incorrect have to be able to propagate gradient
     # to be correct for the normals.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
+    assert(((attenuation <= 1.001) & (attenuation >= -1.001)).all()), \
+      f"{attenuation.min().item()}, {attenuation.max().item()}"
     return rgb * attenuation
 
 # https://pbr-book.org/3ed-2018/Reflection_Models/Fourier_Basis_BSDFs

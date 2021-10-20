@@ -150,15 +150,15 @@ nerv_point_diffuse: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_diffuse_${nerv_dataset}.pt \
-	--size 200 --crop --crop-size 14 --epochs 50_000  --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind diffuse \
-	--sdf-eikonal 1 --light-kind dataset --seed -1 \
+	--size 32 --crop --crop-size 11 --epochs 50_000  --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 1e-4 --refl-kind diffuse \
+	--sdf-eikonal 1e-5 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
-  --sigmoid-kind normal --skip-loss 100 \
+  --sigmoid-kind leaky_relu --skip-loss 100 \
   --notraintest \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --load models/nerv_diffuse_${nerv_dataset}.pt
+  #--load models/nerv_diffuse_${nerv_dataset}.pt
 
 nerv_point_diffuse_to_learned: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \

@@ -398,6 +398,7 @@ sigmoid_kinds = {
   "softmax": nn.Softmax(dim=-1),
   # oops this isn't a sigmoid
   "leaky_relu": F.leaky_relu,
+  "sin": torch.sin,
   "upshifted_softplus": upshifted_softplus,
 }
 def load_sigmoid(kind="thin"):

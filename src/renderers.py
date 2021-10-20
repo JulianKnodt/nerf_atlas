@@ -102,7 +102,7 @@ class AllLearnedOcc(nn.Module):
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=6, hidden_size=180, xavier_init=True,
+      num_layers=6, hidden_size=512, xavier_init=True,
     )
     self.encode_dir = elaz_and_3d if with_dir else dir_to_elev_azim
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
