@@ -151,7 +151,7 @@ nerv_point_diffuse: clean
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_diffuse_${nerv_dataset}.pt \
 	--size 200 --crop --crop-size 14 --epochs 50_000  --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 8e-4 --refl-kind diffuse \
+	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind diffuse \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
 	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
@@ -174,6 +174,22 @@ nerv_point_diffuse_to_learned: clean
   --notraintest \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
   --train-parts refl occ --convert-analytic-to-alt \
+  --load models/nerv_diffuse_${nerv_dataset}.pt \
+  #--load models/nerv_from_diffuse_${nerv_dataset}.pt
+
+# converts a model to a pathtraced model
+nerv_point_alt_to_pathtrace: clean
+	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
+  --name pathtrace_${nerv_dataset} \
+	--data-kind nerv_point \
+	--save models/nerv_path_final_${nerv_dataset}.pt \
+	--size 200 --crop --crop-size 6 --epochs 50_000  --loss-window 1500 \
+	--near 2 --far 6 --batch-size 3 -lr 8e-4 \
+	--sdf-eikonal 1 --light-kind dataset --seed -1 \
+	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
+  --color-spaces rgb hsv xyz --depth-images --depth-query-normal --skip-loss 100 \
+  --notraintest --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
+  --train-parts refl occ --volsdf-direct-to-path \
   --load models/nerv_diffuse_${nerv_dataset}.pt \
   #--load models/nerv_from_diffuse_${nerv_dataset}.pt
 

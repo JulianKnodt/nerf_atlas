@@ -446,7 +446,7 @@ class VolSDF(CommonNeRF):
       elif integrator_kind == "path": self.convert_to_path(w_missing)
       else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
   def convert_to_path(self, w_missing: bool):
-    if self.secondary == self.path: return
+    if self.secondary == self.path: return False
     self.secondary = self.path
     self.path_n = N = 3
     missing_cmpts = 3 * (N + 1) + 6
@@ -467,6 +467,7 @@ class VolSDF(CommonNeRF):
       latent_size = self.sdf.latent_size * 2,
       hidden_size=512,
     )
+    return True
   def direct(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
     for light in self.sdf.refl.light.iter():

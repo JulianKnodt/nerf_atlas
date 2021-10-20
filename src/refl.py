@@ -431,8 +431,7 @@ class Rusin(Reflectance):
     in_size = rusin_size + space.dims
     self.rusin = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size),
-      xavier_init=True,
+      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
 
       num_layers=5, hidden_size=256,
     )

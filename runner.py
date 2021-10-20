@@ -707,8 +707,11 @@ def set_per_run(model, args):
 
   # converts from a volsdf with direct integration to one with indirect lighting
   if args.volsdf_direct_to_path:
+    print("[note]: Converting VolSDF direct integration to path")
     assert(isinstance(model, nerf.VolSDF)), "--volsdf-direct-to-path only applies to VolSDF"
-    model.convert_to_path(args.path_learn_missing)
+    converted = model.convert_to_path(args.path_learn_missing)
+    if converted: model = model.to(device)
+    else: print("[note]: Model already uses pathtracing, nothing changed.")
 
   if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
     if args.smooth_occ != 0:
