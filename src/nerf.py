@@ -455,12 +455,13 @@ class VolSDF(CommonNeRF):
     self.missing = None
     if w_missing:
       self.missing = SkipConnMLP(
-        in_size=missing_cmpts, out=self.out_features, enc=FourierEncoder(input_dims=missing_cmpts),
+        in_size=missing_cmpts, out=self.out_features,
+        enc=FourierEncoder(input_dims=missing_cmpts),
         # here we care about the aggregate set of all point, so bundle them all up.
-        latent_size = self.sdf.latent_size * (N + 1),
-        hidden_size=512,
+        latent_size = self.sdf.latent_size * (N + 1), hidden_size=512,
       )
 
+    # transfer_fn := G(x1, x2) -> [0,1]
     self.transfer_fn = SkipConnMLP(
       in_size=6, out=1, enc=FourierEncoder(input_dims=6),
       # multiply by two here ince it's the pair of latent values at sets of point
@@ -484,13 +485,16 @@ class VolSDF(CommonNeRF):
     dirs = sample_random_hemisphere(n, num_samples=N)
     # compute intersection of random directions with surface
     ext_pts, ext_hits, dists, _ = march.bisect(
-      self.sdf.underlying, pts[None,...].expand_as(dirs), dirs, iters=64, near=5e-3, far=10,
+      self.sdf.underlying, pts[None,...].expand_as(dirs), dirs, iters=64, near=5e-3, far=6,
     )
-    decays = 1/dists.square().clamp(min=1e-8)
+    # TODO does not decay with the square of distance, need to add in a flag for this
+    # if the model assumes that it does.
+    # decays = 1/dists.square().clamp(min=1e-8)
 
     ext_sdf_vals, ext_latent = self.sdf.from_pts(ext_pts)
 
-    ext_view = F.normalize(ext_pts - r_o[None,None,...], eps=1e-6, dim=-1)
+    ext_view = F.normalize(ext_pts - r_o[None,None,...], dim=-1)
+    # detach secondary normals
     ext_n = F.normalize(self.sdf.normals(ext_pts), dim=-1).detach()
 
     fit = lambda x: x.unsqueeze(0).expand(N,-1,-1,-1,-1,-1)
@@ -498,13 +502,12 @@ class VolSDF(CommonNeRF):
     first_step_bsdf = self.sdf.refl(
       x=fit(pts), view=ext_view, normal=fit(n), light=-dirs, latent=fit(latent),
     )
-    # compute transfer function (G) between ext_pts and pts
+    # compute transfer function (G) between ext_pts and pts (which is a proxy for the density).
     tf = self.transfer_fn(
       torch.cat([ext_pts, pts.unsqueeze(0).expand_as(ext_pts)],dim=-1),
       torch.cat([ext_latent, latent.unsqueeze(0).expand_as(ext_latent)], dim=-1),
     ).sigmoid()
-    # bsdf = light decay * transfer function * transfer fn
-    first_step_bsdf = first_step_bsdf * decays * tf
+    first_step_bsdf = first_step_bsdf * tf # * decays
 
     for light in self.sdf.refl.light.iter():
       # compute direct lighting at each point (identical to direct)
