@@ -544,7 +544,8 @@ class VolSDF(CommonNeRF):
     return out
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+      rays, self.t_near, self.t_far, self.steps,
+      perturb = 1 if self.training else 0,
     )
     self.ts = ts
     return self.from_pts(pts, ts, r_o, r_d)

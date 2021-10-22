@@ -297,8 +297,11 @@ def arguments():
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
   meta.add_argument("--train-imgs", help="# training examples", type=int, default=-1)
   meta.add_argument("--draw-colormap", help="Draw a colormap for each view", action="store_true")
-  meta.add_argument("--convert-analytic-to-alt", action="store_true",
-    help="Combine a model with an analytic BRDF with a learned BRDF for alternating optimization")
+  meta.add_argument(
+    "--convert-analytic-to-alt", action="store_true",
+    help="Combine a model with an analytic BRDF with a learned BRDF for alternating optimization",
+  )
+  meta.add_argument("--clip-gradients", type=float, default=0, help="If > 0, clip gradients")
 
   ae = a.add_argument_group("auto encoder parameters")
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
@@ -564,6 +567,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
 
     assert(loss.isfinite().item()), "Got NaN loss"
     loss.backward()
+    if args.clip_gradients > 0: nn.utils.clip_grad_norm_(model.parameters(), args.clip_gradients)
     opt.step()
     if sched is not None: sched.step()
     if args.inc_fourier_freqs:
