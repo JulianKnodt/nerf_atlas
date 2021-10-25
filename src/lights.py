@@ -21,23 +21,32 @@ class Light(nn.Module):
   def forward(self, x): raise NotImplementedError()
 
 class Field(Light):
-  def __init__(self, mlp=None):
+  def __init__(self, num_embeddings:int=100, embedding_size:int=32):
     super().__init__()
     self.mlp = mlp or SkipConnMLP(
-      in_size=3, out=5,
+      in_size=3, out=5, hidden_size=226, xavier_init=True,
       enc=FourierEncoder(input_dims=5),
-      hidden_size=226, xavier_init=True,
+      latent_size=0 if num_embeddings == 1 else embedding_size,
     )
+    self.far_dist = 20
+
+    assert(embedding_size >= 1), "Must have embedding size of at least 1"
+    self.num_embeddings = num_embeddings
+    if num_embeddings == 1:
+      self.embedding = None
+      return
+    self.embedding = nn.Embedding(num_embeddings, embedding_size)
+    self.curr_idx = 0
     # since this is a field it doesn't have a specific distance and thus is treated like ambient
     # light by having a far distance.
-    self.far_dist = 20
   def __getitem__(self, v):
-    # TODO encode the indexing somehow
+    self.curr_idx = v
     return self
   def iter(self): yield self
   def forward(self, x, mask=None):
     if mask is not None: raise NotImplementedError()
-    intensity, elaz = self.mlp(x).split([3,2], dim=-1)
+    own_latent = None if self.embedding is None else self.embedding(self.curr_idx)
+    intensity, elaz = self.mlp(x, own_latent).split([3,2], dim=-1)
     r_d = elev_azim_to_dir(elaz)
     return r_d, self.far_dist, F.relu(intensity)
 

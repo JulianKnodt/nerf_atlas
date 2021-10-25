@@ -116,7 +116,7 @@ def arguments():
   # TODO really fix MPIs
   a.add_argument("--mpi", help="[WIP] Use multi-plain imaging", action="store_true")
   a.add_argument(
-    "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid"], default=[], type=str,
+    "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light"], default=[], type=str,
     help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
   )
 
@@ -706,6 +706,10 @@ def set_per_run(model, args):
     elif hasattr(model, "nerf"): model.nerf.set_bg(args.bg)
   if "sigmoid" in args.replace and hasattr(model, "nerf"):
     model.nerf.set_sigmoid(args.sigmoid_kind)
+  if "light" in args.replace:
+    if isinstance(model.refl, refl.LightAndRefl):
+      model.refl.light = light.load(args)
+    else: raise NotImplementedError("TODO convert to light and reflectance")
 
   if args.model == "sdf": return
 
