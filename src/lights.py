@@ -21,27 +21,25 @@ class Light(nn.Module):
   def forward(self, x): raise NotImplementedError()
 
 class Field(Light):
-  def __init__(self, act=F.leaky_relu):
+  def __init__(self, mlp=None):
     super().__init__()
-    self.mlp = SkipConnMLP(
+    self.mlp = mlp or SkipConnMLP(
       in_size=3, out=5,
-      # Do not use encoder, as we want a smooth approximation rather than overfitting to
-      # specific views.
-      #enc=FourierEncoder(input_dims=3),
-      hidden_size=128,
-      xavier_init=True,
+      enc=FourierEncoder(input_dims=5),
+      hidden_size=226, xavier_init=True,
     )
     # since this is a field it doesn't have a specific distance and thus is treated like ambient
-    # light
+    # light by having a far distance.
     self.far_dist = 20
-    self.act = act
-  def __getitem__(self, v): return self
+  def __getitem__(self, v):
+    # TODO encode the indexing somehow
+    return self
   def iter(self): yield self
   def forward(self, x, mask=None):
     if mask is not None: raise NotImplementedError()
     intensity, elaz = self.mlp(x).split([3,2], dim=-1)
     r_d = elev_azim_to_dir(elaz)
-    return r_d, self.far_dist, self.act(intensity)
+    return r_d, self.far_dist, F.relu(intensity)
 
 class Point(Light):
   def __init__(

@@ -73,7 +73,7 @@ class LightAndRefl(nn.Module):
   def latent_size(self): return self.refl.latent_size
 
   def forward(self, x, view=None, normal=None, light=None, latent=None, mask=None):
-    if light is None: light, _spectrum = self.light(x, mask)
+    if light is None: light, _dist, _spectrum = self.light(x, mask)
     return self.refl(x, view, normal, light, latent)
 
 class SurfaceSpace(nn.Module):
