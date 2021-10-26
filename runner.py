@@ -170,6 +170,10 @@ def arguments():
     "--alt-train", choices=["analytic", "learned"], default="learned",
     help="Whether to train the analytic or the learned model in this session",
   )
+  refla.add_argument(
+    "--refl-bidirectional", action="store_true",
+    help="Allow normals to be flipped for the reflectance (just Diffuse for now)",
+  )
 
   rdra = a.add_argument_group("integrator")
   rdra.add_argument(
@@ -474,6 +478,9 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
 
     if light is not None: model.refl.light = light[idxs]
+    # TODO this feels wrong somehow? How to more elegantly handle case of indexing refl.light
+    elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
+      model.refl.light.set_idx(torch.tensor(idxs, device=device))
 
     # omit items which are all darker with some likelihood. This is mainly used when
     # attempting to focus on learning the refl and not the shape.
@@ -620,6 +627,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
 
       if light is not None: model.refl.light = light[i:i+1]
+      # TODO this feels wrong somehow? How to more elegantly handle case of indexing refl.light
+      elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
+        model.refl.light.set_idx(torch.tensor([i], device=device))
 
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
@@ -861,6 +871,7 @@ def main():
   seed(args.seed)
 
   labels, cam, light = loaders.load(args, training=True, device=device)
+  setattr(args, "num_labels", len(labels))
   if args.train_imgs > 0:
     if type(labels) == tuple: labels = tuple(l[:args.train_imgs, ...] for l in labels)
     else: labels = labels[:args.train_imgs, ...]

@@ -31,6 +31,7 @@ def load(args, refl_kind:str, space_kind:str, latent_size:int):
     "act": args.sigmoid_kind,
     "out_features": args.feature_space,
     "normal": args.normal_kind,
+    "bidirectional": args.refl_bidirectional,
     "space": space(),
   }
   if refl_kind == "basic":
@@ -111,6 +112,7 @@ class Reflectance(nn.Module):
     latent_size:int = 0,
     out_features:int = 3,
     spherical_harmonic_order:int = 0,
+    bidirectional: bool = False,
 
     # delete unused
     normal=None,
@@ -120,6 +122,7 @@ class Reflectance(nn.Module):
     self.sho = sho = spherical_harmonic_order
     self.latent_size = latent_size
     self.out_features = out_features * (sho + 1) * (sho + 1)
+    self.bidirectional = bidirectional
 
     self.act = load_sigmoid(act)
 
@@ -247,12 +250,13 @@ class Diffuse(Reflectance):
 
   def forward(self, x, view, normal, light, latent=None):
     rgb = self.act(self.diffuse_color(self.space(x), latent))
-    # NOTE this attentuation could be clamped to 0,
-    # but, if the normals are incorrect have to be able to propagate gradient
-    # to be correct for the normals.
     attenuation = (normal * light).sum(dim=-1, keepdim=True)
     assert(((attenuation <= 1.001) & (attenuation >= -1.001)).all()), \
       f"{attenuation.min().item()}, {attenuation.max().item()}"
+    if getattr(self, "bidirectional", False): attenuation = attenuation.abs()
+    # NOTE: clamp attenuation to 0, otherwise if the light is coming from the wrong direction
+    # it may falsely assume the normals are wrong.
+    else: attenuation = attenuation.clamp(min=1e-5)
     return rgb * attenuation
 
 # https://pbr-book.org/3ed-2018/Reflection_Models/Fourier_Basis_BSDFs

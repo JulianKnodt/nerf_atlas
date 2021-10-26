@@ -131,8 +131,9 @@ dtu_diffuse: clean
 	--near 0.3 --far 2 --batch-size 3 --crop-size 12 --model volsdf -lr 3e-4 --light-kind field \
 	--loss-fns l2 rmse --color-spaces rgb hsv xyz --valid-freq 500 --sdf-kind mlp --refl-kind diffuse --occ-kind all-learned \
   --depth-images --depth-query-normal --normals-from-depth --msssim-loss \
-  --smooth-surface 1e-4 --save-freq 2500 --notraintest \
-	--loss-window 1000 --sdf-eikonal 1e-2 --sigmoid-kind upshifted --replace sigmoid --load models/dtu_diffuse_$(scan_number).pt
+  --smooth-surface 1e-3 --save-freq 2500 --notraintest \
+	--loss-window 1000 --sdf-eikonal 1 --sigmoid-kind upshifted --replace sigmoid \
+  --load models/dtu_diffuse_$(scan_number).pt
 
 # -- Begin NeRV tests
 
