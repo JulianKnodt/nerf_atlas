@@ -133,8 +133,8 @@ def arguments():
     help="Latent-size to use in shape models. If not supported by the shape model, it will be ignored.",
   )
   a.add_argument(
-    "--spherical-harmonic-order", default=2, type=int,
-    help="Learn spherical harmonic coefficients up to given order. Used w/ --refl-kind=sph-har",
+    "--refl-order", default=2, type=int,
+    help="Order for classical Spherical Harmonics & Fourier Basis BSDFs/Reflectance models",
   )
   a.add_argument(
     "--path-learn-missing", action="store_true",
@@ -148,7 +148,7 @@ def arguments():
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
     "--refl-kind", help="What kind of reflectance model to use",
-    choices=refl.refl_kinds, default=["view"],
+    choices=list(refl.refl_kinds.keys()), default=["view"],
   )
   refla.add_argument(
     "--weighted-subrefl-kinds",

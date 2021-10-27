@@ -129,10 +129,11 @@ dtu_diffuse: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
 	--size 256 --crop --epochs 25_000 --save models/dtu_diffuse_$(scan_number).pt \
 	--near 0.3 --far 2 --batch-size 3 --crop-size 12 --model volsdf -lr 3e-4 --light-kind field \
-	--loss-fns l2 rmse --color-spaces rgb hsv xyz --valid-freq 500 --sdf-kind mlp --refl-kind diffuse --occ-kind all-learned \
+	--loss-fns l2 rmse --color-spaces rgb hsv xyz --valid-freq 500 --sdf-kind mlp \
+  --refl-kind fourier --refl-order 32 --occ-kind all-learned \
   --depth-images --depth-query-normal --normals-from-depth --msssim-loss \
-  --smooth-surface 1e-3 --save-freq 2500 --notraintest \
-	--loss-window 1000 --sdf-eikonal 1 --sigmoid-kind upshifted --replace sigmoid \
+  --smooth-surface 1e-2 --save-freq 2500 --notraintest \
+	--loss-window 1000 --sdf-eikonal 1 --sigmoid-kind upshifted --replace refl \
   --load models/dtu_diffuse_$(scan_number).pt
 
 # -- Begin NeRV tests

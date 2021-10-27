@@ -8,7 +8,8 @@ from .neural_blocks import (
   EncodedGRU,
 )
 from .utils import (
-  dir_to_elev_azim, autograd, sample_random_hemisphere, laplace_cdf, load_sigmoid,
+  dir_to_elev_azim, autograd, laplace_cdf, load_sigmoid,
+  sample_random_hemisphere, sample_random_sphere,
 )
 import src.refl as refl
 from .renderers import ( load_occlusion_kind, direct )
@@ -479,10 +480,12 @@ class VolSDF(CommonNeRF):
   def path(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
 
-    N = self.path_n # number of samples for 1st order bounces
+    # number of samples for 1st order bounces
+    N = self.path_n if self.training else 10
 
     # for each point sample some number of directions
-    dirs = sample_random_hemisphere(n, num_samples=N)
+    # dirs = sample_random_hemisphere(n, num_samples=N)
+    dirs = sample_random_sphere(n, num_samples=N)
     # compute intersection of random directions with surface
     ext_pts, ext_hits, dists, _ = march.bisect(
       self.sdf.underlying, pts[None,...].expand_as(dirs), dirs, iters=64, near=5e-3, far=6,

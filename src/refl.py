@@ -10,15 +10,6 @@ from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, lo
 import src.lights as lights
 from .spherical_harmonics import eval_sh
 
-refl_kinds = [
-  "pos", "view", "basic", "diffuse", "rusin", "multi_rusin",
-  # classical models with some order mechanism
-  "sph-har", "fourier",
-  # meta refl models
-  "weighted",
-  # alternating optimiziation between diffuse and learned model
-  "alt-opt",
-]
 
 def load(args, refl_kind:str, space_kind:str, latent_size:int):
   if space_kind == "identity": space = IdentitySpace
@@ -34,23 +25,17 @@ def load(args, refl_kind:str, space_kind:str, latent_size:int):
     "bidirectional": args.refl_bidirectional,
     "space": space(),
   }
+  cons = refl_kinds.get(refl_kind, None)
+  if cons is None: raise NotImplementedError(f"refl kind: {args.refl_kind}")
   if refl_kind == "basic":
-    cons = Basic
     if args.light_kind is not None: kwargs["light"] = "elaz"
-  elif refl_kind == "rusin": cons = Rusin
-  elif refl_kind == "pos": cons = Positional
-  elif refl_kind == "view" or args.refl_kind == "curr": cons = View
-  elif refl_kind == "diffuse": cons = Diffuse
-  elif refl_kind == "fourier": cons = FourierBasis
-  elif refl_kind == "sph-har":
-    cons = SphericalHarmonic
-    kwargs["order"] = args.spherical_harmonic_order
+  elif refl_kind == "fourier": kwargs["order"] = args.refl_order
+  elif refl_kind == "sph-har": kwargs["order"] = args.refl_order
   elif refl_kind == "weighted":
-    cons = WeightedChoice
     subs = args.weighted_subrefl_kinds
     assert(len(subs) > 1), "Specifying one subrefl is pointless."
     kwargs["choices"] = [load(args, c, "none", latent_size) for c in subs]
-  else: raise NotImplementedError(f"refl kind: {args.refl_kind}")
+
   # TODO assign view, normal, lighting here?
   refl = cons(**kwargs)
 
@@ -60,7 +45,9 @@ def load(args, refl_kind:str, space_kind:str, latent_size:int):
 
   return refl
 
-# a combination of light and reflectance models
+# A combo of an existing reflectance model and some light.
+# It is easier than having them separate because the light is only necessary
+# for the reflectance model.
 class LightAndRefl(nn.Module):
   def __init__(self, refl, light):
     super().__init__()
@@ -74,31 +61,34 @@ class LightAndRefl(nn.Module):
   def latent_size(self): return self.refl.latent_size
 
   def forward(self, x, view=None, normal=None, light=None, latent=None, mask=None):
+    # if no light is explicitly passed then recompute the direction.
     if light is None: light, _dist, _spectrum = self.light(x, mask)
     return self.refl(x, view, normal, light, latent)
 
+# Convert from arbitrary 3d space to a 2d encoding.
 class SurfaceSpace(nn.Module):
   def __init__(
     self,
-    act=nn.LeakyReLU(),
     final_act=nn.Identity(),
   ):
     super().__init__()
     self.encode = SkipConnMLP(
-      in_size=3, out=2, activation=act,
-      num_layers=5, hidden_size=64,
+      in_size=3, out=2, activation=act, enc=FourierEncoder(input_dims=3), num_layers=5, hidden_size=128,
     )
     self.act = activation
   def forward(self, x): return self.act(self.encode(x))
+
   @property
   def dims(self): return 2
 
+# Use raw 3d point as value for encoding
 class IdentitySpace(nn.Module):
   def __init__(self): super().__init__()
   def forward(self, x): return x
   @property
   def dims(self): return 3
 
+# Do not encode the space whatsoever, only relying on other view-dependent features.
 class NoSpace(nn.Module):
   def __init__(self): super().__init__()
   def forward(self, x): torch.empty((*x.shape[:-1], 0), device=x.device, dtype=torch.float)
@@ -111,17 +101,16 @@ class Reflectance(nn.Module):
     act="thin",
     latent_size:int = 0,
     out_features:int = 3,
-    spherical_harmonic_order:int = 0,
     bidirectional: bool = False,
 
-    # delete unused
+    # These exist to delete unused parameters, but don't use kwargs so if anything falls through
+    # it will be easy to spot.
     normal=None,
     light=None,
   ):
     super().__init__()
-    self.sho = sho = spherical_harmonic_order
     self.latent_size = latent_size
-    self.out_features = out_features * (sho + 1) * (sho + 1)
+    self.out_features = out_features
     self.bidirectional = bidirectional
 
     self.act = load_sigmoid(act)
@@ -132,17 +121,20 @@ class Reflectance(nn.Module):
   @property
   def can_use_light(self): return False
 
+  # TODO allow any arbitrary reflectance model to predict spherical harmonic parameters then use
+  # this.
   def sph_ham(sh_coeffs, view):
     # not spherical harmonic coefficients
-    if self.sho == 0: return sh_coeffs
+    if self.order == 0: return sh_coeffs
     return eval_sh(
-      self.sho,
+      self.order,
       sh_coeffs.reshape(sh_coeffs.shape[:-1] + (self.out_features, -1)),
       F.normalize(view, dim=-1),
     )
 
 def ident(x): return x
 def empty(_): return None
+# encode a direction either directly as a vector, as a theta & phi, or as nothing.
 def enc_norm_dir(kind=None):
   if kind is None: return 0, empty
   elif kind == "raw": return 3, ident
@@ -264,7 +256,7 @@ class FourierBasis(Reflectance):
   def __init__(
     self,
     space=None,
-    order:int = 16,
+    order:int =16,
     **kwargs,
   ):
     super().__init__(**kwargs)
@@ -274,7 +266,7 @@ class FourierBasis(Reflectance):
 
     in_size = space.dims
     self.fourier_coeffs = SkipConnMLP(
-      in_size=in_size, out=order * self.out_features,
+      in_size=in_size, out=self.order * self.out_features,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
       num_layers=6, hidden_size=128, xavier_init=True,
@@ -603,3 +595,18 @@ class SphericalHarmonic(Reflectance):
       F.normalize(view, dim=-1),
     )
     return self.act(rgb)
+
+refl_kinds = {
+  "pos": Positional,
+  "view":  View,
+  "basic": Basic,
+  "diffuse": Diffuse,
+  "rusin": Rusin,
+  # classical models with some order mechanism
+  "sph-har": SphericalHarmonic,
+  "fourier": FourierBasis,
+  # meta refl models
+  "weighted": WeightedChoice,
+  # alternating optimiziation between diffuse and learned model
+  # "alt-opt",
+}

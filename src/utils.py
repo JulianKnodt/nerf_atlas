@@ -285,7 +285,7 @@ def rgb2xyz(v):
 
 def sample_random_hemisphere(around, num_samples:int=32):
   n = num_samples
-  u,v = torch.rand(num_samples, 2, device=around.device).split([1,1], dim=-1)
+  u,v = torch.rand(n, 2, device=around.device).split([1,1], dim=-1)
   sin_theta = (-u * (u-2)).clamp(min=1e-8).sqrt()
   phi = 2 * math.pi * v
 
@@ -300,10 +300,14 @@ def sample_random_hemisphere(around, num_samples:int=32):
   ar_flat = around.reshape(-1, 3)
   R = rot_from(ar_flat, basis.unsqueeze(0).expand_as(ar_flat), dim=-1)
   R0 = R.shape[0]
-  R = R.repeat(num_samples,1,1)
+  R = R.repeat(n,1,1)
   dirs = dirs.repeat(R0, 1)
   return torch.bmm(R, dirs.unsqueeze(-1))\
     .reshape((n, *around.shape))
+
+def sample_random_sphere(_around, num_samples:int=32):
+  uv = (torch.rand(num_samples, 2, device=around.device) - 0.5) * math.tau
+  return elev_azim_to_dir(uv)
 
 def rot_from(a, b, dim=-1):
   v = torch.cross(a,b, dim=dim)
