@@ -133,7 +133,7 @@ dtu_diffuse: clean
   --refl-kind fourier --refl-order 32 --occ-kind all-learned \
   --depth-images --depth-query-normal --normals-from-depth --msssim-loss \
   --smooth-surface 1e-2 --save-freq 2500 --notraintest \
-	--loss-window 1000 --sdf-eikonal 1 --sigmoid-kind upshifted --replace refl \
+	--loss-window 1000 --sdf-eikonal 1 --sigmoid-kind leaky_relu --replace refl sigmoid \
   --load models/dtu_diffuse_$(scan_number).pt
 
 # -- Begin NeRV tests

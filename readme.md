@@ -167,53 +167,10 @@ Please maintain the same style:
 
 #### Full options
 
-The full set of options for training as of #8d51c290a976040aa0937c1e7bdac95b399deaed are below:
+The full set of options for training as of #416d073ed91573f36450ada1439d681227d8045e are below:
 
 ```
 usage: runner.py [-h] -d DATA
-                 [--data-kind {original,single_video,dnerf,dtu,pixel-single,nerv_point,shiny}]
-                 [--derive-kind] [--outdir OUTDIR] [--timed-outdir]
-                 [--size SIZE] [--render-size RENDER_SIZE] [--epochs EPOCHS]
-                 [--batch-size BATCH_SIZE] [--neural-upsample] [--crop]
-                 [--crop-size CROP_SIZE] [--steps STEPS]
-                 [--mip {cone,cylinder}]
-                 [--sigmoid-kind {normal,fat,thin,cyclic,softmax,curr}]
-                 [--sparsify-alpha SPARSIFY_ALPHA] [--backing-sdf]
-                 [--feature-space FEATURE_SPACE]
-                 [--model {tiny,plain,ae,volsdf,sdf}]
-                 [--bg {black,white,mlp,noise}] [-lr LEARNING_RATE]
-                 [--seed SEED] [--decay DECAY] [--notest] [--data-parallel]
-                 [--omit-bg] [--train-parts {all,refl,[TODO]Camera}]
-                 [--loss-fns {l1,l2,rmse} [{l1,l2,rmse} ...]]
-                 [--color-spaces {rgb,hsv,luminance,xyz} [{rgb,hsv,luminance,xyz} ...]]
-                 [--tone-map] [--style-img STYLE_IMG] [--no-sched]
-                 [--serial-idxs] [--mpi]
-                 [--replace [{refl,occ,bg} [{refl,occ,bg} ...]]]
-                 [--volsdf-alternate] [--latent-size LATENT_SIZE]
-                 [--spherical-harmonic-order SPHERICAL_HARMONIC_ORDER]
-                 [--refl-kind {curr,view_only,basic,diffuse,rusin,multi_rusin,sph-har}]
-                 [--normal-kind {None,elaz,raw}]
-                 [--space-kind {identity,surface}]
-                 [--integrator-kind {None,direct,path}]
-                 [--occ-kind {None,hard,learned,all-learned}]
-                 [--light-kind {None,point,field,dataset}]
-                 [--sdf-eikonal SDF_EIKONAL] [--smooth-normals SMOOTH_NORMALS]
-                 [--sdf-kind {spheres,siren,local,mlp,triangles}]
-                 [--sphere-init] [--bound-sphere-rad BOUND_SPHERE_RAD]
-                 [--sdf-isect-kind {sphere,secant,bisect}] [--dnerfae]
-                 [--dnerf-tf-smooth-weight DNERF_TF_SMOOTH_WEIGHT]
-                 [--time-gamma] [--gru-flow] [--nicepath]
-                 [--with-canon WITH_CANON] [--fix-canon] [--near NEAR]
-                 [--far FAR] [-q] [--save SAVE] [--log LOG]
-                 [--save-freq SAVE_FREQ] [--valid-freq VALID_FREQ] [--nosave]
-                 [--load LOAD] [--loss-window LOSS_WINDOW] [--notraintest]
-                 [--sphere_visualize SPHERE_VISUALIZE]
-                 [--duration-sec DURATION_SEC] [--param-file PARAM_FILE]
-                 [--skip-loss SKIP_LOSS] [--torchjit]
-                 [--train-imgs TRAIN_IMGS]
-                 [--latent-l2-weight LATENT_L2_WEIGHT] [--normalize-latent]
-                 [--encoding-size ENCODING_SIZE]
-
 optional arguments:
   -h, --help            show this help message and exit
   -d DATA, --data DATA  path to data (default: None)
@@ -237,10 +194,8 @@ optional arguments:
   --steps STEPS         Number of depth steps (default: 64)
   --mip {cone,cylinder}
                         Use MipNeRF with different sampling (default: None)
-  --sigmoid-kind {normal,fat,thin,cyclic,softmax,curr}
+  --sigmoid-kind {normal,thin,tanh,fat,cyclic,upshifted,softmax,leaky_relu,sin,upshifted_softplus}
                         What sigmoid to use, curr keeps old (default: thin)
-  --sparsify-alpha SPARSIFY_ALPHA
-                        Weight for sparsifying alpha (default: 0)
   --backing-sdf         Use a backing SDF (default: False)
   --feature-space FEATURE_SPACE
                         when using neural upsampling, what is the feature
@@ -257,41 +212,60 @@ optional arguments:
   --notest              Do not run test set (default: False)
   --data-parallel       Use data parallel for the model (default: False)
   --omit-bg             Omit black bg with some probability (default: False)
-  --train-parts {all,refl,[TODO]Camera}
+  --train-parts {all,refl,occ,[TODO]Camera} [{all,refl,occ,[TODO]Camera} ...]
                         Which parts of the model should be trained (default:
-                        all)
+                        ['all'])
   --loss-fns {l1,l2,rmse} [{l1,l2,rmse} ...]
                         Loss functions to use (default: ['l2'])
   --color-spaces {rgb,hsv,luminance,xyz} [{rgb,hsv,luminance,xyz} ...]
                         Color spaces to compare on (default: ['rgb'])
   --tone-map            Add tone mapping (1/(1+x)) before loss function
                         (default: False)
+  --nerv-multi-point    Use NeRV multi point light dataset for testing
+                        (default: False)
   --style-img STYLE_IMG
                         Image to use for style transfer (default: None)
   --no-sched            Do not use a scheduler (default: False)
   --serial-idxs         Train on images in serial (default: False)
-  --mpi                 Use multi-plain imaging (default: False)
-  --replace [{refl,occ,bg} [{refl,occ,bg} ...]]
+  --mpi                 [WIP] Use multi-plain imaging (default: False)
+  --replace [{refl,occ,bg,sigmoid,light} [{refl,occ,bg,sigmoid,light} ...]]
                         Modules to replace on this run, if any. Take caution
                         for overwriting existing parts. (default: [])
+  --volsdf-direct-to-path
+                        Convert an existing direct volsdf model to a path
+                        tracing model (default: False)
   --volsdf-alternate    Use alternating volume rendering/SDF training volsdf
                         (default: False)
   --latent-size LATENT_SIZE
                         Latent-size to use in shape models. If not supported
                         by the shape model, it will be ignored. (default: 32)
-  --spherical-harmonic-order SPHERICAL_HARMONIC_ORDER
-                        Learn spherical harmonic coefficients up to given
-                        order. Used w/ --refl-kind=sph-har (default: 2)
+  --refl-order REFL_ORDER
+                        Order for classical Spherical Harmonics & Fourier
+                        Basis BSDFs/Reflectance models (default: 2)
+  --inc-fourier-freqs   Multiplicatively increase the fourier frequency
+                        standard deviation on each run (default: False)
 
 reflectance:
-  --refl-kind {curr,view_only,basic,diffuse,rusin,multi_rusin,sph-har}
-                        What kind of reflectance model to use (default: curr)
+  --refl-kind {pos,view,basic,diffuse,rusin,sph-har,fourier,weighted}
+                        What kind of reflectance model to use (default:
+                        ['view'])
+  --weighted-subrefl-kinds {pos,view,basic,diffuse,rusin,sph-har,fourier} [{pos,view,basic,diffuse,rusin,sph-har,fourier} ...]
+                        What subreflectances should be used with --refl-kind
+                        weighted. They will not take a spacial component, and
+                        only rely on view direction, normal, and light
+                        direction. (default: ['rusin', 'rusin', 'rusin',
+                        'rusin'])
   --normal-kind {None,elaz,raw}
                         How to include normals in reflectance model. Not all
                         surface models support normals (default: None)
-  --space-kind {identity,surface}
+  --space-kind {identity,surface,none}
                         Space to encode texture: surface builds a map from 3D
                         (identity) to 2D (default: identity)
+  --alt-train {analytic,learned}
+                        Whether to train the analytic or the learned model in
+                        this session (default: learned)
+  --refl-bidirectional  Allow normals to be flipped for the reflectance (just
+                        Diffuse for now) (default: False)
 
 integrator:
   --integrator-kind {None,direct,path}
@@ -300,17 +274,33 @@ integrator:
   --occ-kind {None,hard,learned,all-learned}
                         Occlusion method for shadows to use in integration
                         (default: None)
+  --smooth-occ SMOOTH_OCC
+                        Weight to smooth occlusion/shadows by. (default: 0)
 
 light:
-  --light-kind {None,point,field,dataset}
+  --light-kind {field,point,dataset,None}
                         Kind of light to use while rendering. Dataset
                         indicates light is in dataset (default: None)
+  --light-intensity LIGHT_INTENSITY
+                        Intensity of light to use with loaded dataset
+                        (default: 100)
 
 sdf:
   --sdf-eikonal SDF_EIKONAL
                         Weight of SDF eikonal loss (default: 0)
   --smooth-normals SMOOTH_NORMALS
                         Amount to attempt to smooth normals (default: 0)
+  --smooth-surface SMOOTH_SURFACE
+                        Amount to attempt to smooth surface normals (default:
+                        0)
+  --smooth-eps SMOOTH_EPS
+                        size of random uniform perturbation for smooth normals
+                        regularization (default: 0.001)
+  --smooth-eps-rng      smooth by a random amount instead of smoothing by a
+                        fixed distance (default: False)
+  --smooth-n-ord {1,2} [{1,2} ...]
+                        Order of vector to use when smoothing normals
+                        (default: [2])
   --sdf-kind {spheres,siren,local,mlp,triangles}
                         Which SDF model to use (default: mlp)
   --sphere-init         Initialize SDF to a sphere (default: False)
@@ -319,7 +309,9 @@ sdf:
                         the origin, < 0 is no sphere (default: -1)
   --sdf-isect-kind {sphere,secant,bisect}
                         Marching kind to use when computing SDF intersection.
-                        (default: sphere)
+                        (default: bisect)
+  --volsdf-scale-decay VOLSDF_SCALE_DECAY
+                        Decay weight for volsdf scale (default: 0)
 
 dnerf:
   --dnerfae             Use DNeRFAE on top of DNeRF (default: False)
@@ -327,7 +319,6 @@ dnerf:
                         L2 smooth dnerf tf (default: 0)
   --time-gamma          Apply a gamma based on time (default: False)
   --gru-flow            Use GRU for Δx (default: False)
-  --nicepath            Render a nice path for DNeRF (default: False)
   --with-canon WITH_CANON
                         Preload a canonical NeRF (default: None)
   --fix-canon           Do not train canonical NeRF (default: False)
@@ -337,6 +328,7 @@ camera parameters:
   --far FAR             far plane for camera (default: 6)
 
 reporting parameters:
+  --name NAME           Display name for convenience in log file (default: )
   -q, --quiet           Silence tqdm (default: False)
   --save SAVE           Where to save the model (default: models/model.pt)
   --log LOG             Where to save log of arguments (default: log.json)
@@ -345,14 +337,12 @@ reporting parameters:
   --valid-freq VALID_FREQ
                         how often validation images are generated (default:
                         500)
+  --display-smoothness  Display smoothness regularization (default: False)
   --nosave              do not save (default: False)
   --load LOAD           model to load from (default: None)
   --loss-window LOSS_WINDOW
                         # epochs to smooth loss over (default: 250)
   --notraintest         Do not test on training set (default: False)
-  --sphere_visualize SPHERE_VISUALIZE
-                        Radius to use for spherical visualization (default:
-                        None)
   --duration-sec DURATION_SEC
                         Max number of seconds to run this for, s <= 0 implies
                         None (default: 0)
@@ -360,12 +350,25 @@ reporting parameters:
                         Path to JSON file to use for hyper-parameters
                         (default: None)
   --skip-loss SKIP_LOSS
-                        Number of epochs to skip loss for (default: 0)
+                        Number of epochs to skip reporting loss for (default:
+                        0)
+  --msssim-loss         Report ms-ssim loss during testing (default: False)
+  --depth-images        Whether to render depth images (default: False)
+  --normals-from-depth  Render extra normal images from depth (default: False)
+  --depth-query-normal  Render extra normal images from depth (default: False)
+  --not-magma           Do not use magma for depth maps (instead use default)
+                        (default: False)
 
 meta runner parameters:
   --torchjit            Use torch jit for model (default: False)
   --train-imgs TRAIN_IMGS
                         # training examples (default: -1)
+  --draw-colormap       Draw a colormap for each view (default: False)
+  --convert-analytic-to-alt
+                        Combine a model with an analytic BRDF with a learned
+                        BRDF for alternating optimization (default: False)
+  --clip-gradients CLIP_GRADIENTS
+                        If > 0, clip gradients (default: 0)
 
 auto encoder parameters:
   --latent-l2-weight LATENT_L2_WEIGHT
@@ -374,4 +377,3 @@ auto encoder parameters:
   --encoding-size ENCODING_SIZE
                         Intermediate encoding size for AE (default: 32)
 ```
-
