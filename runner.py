@@ -195,8 +195,9 @@ def arguments():
   )
 
   sdfa = a.add_argument_group("sdf")
+  sdfa.add_argument("--sdf-eikonal", help="Weight of SDF eikonal loss", type=float, default=0)
   sdfa.add_argument(
-    "--sdf-eikonal", help="Weight of SDF eikonal loss", type=float, default=0,
+    "--surface-eikonal", help="Weight of SDF eikonal loss on surface", type=float, default=0,
   )
   # normal smoothing arguments
   sdfa.add_argument(
@@ -211,7 +212,7 @@ def arguments():
   )
   sdfa.add_argument(
     "--smooth-eps-rng", action="store_true",
-    help="smooth by a random amount instead of smoothing by a fixed distance",
+    help="Smooth by random amount instead of smoothing by a fixed distance",
   )
   sdfa.add_argument(
     "--smooth-n-ord", nargs="+", default=[2], choices=[1,2], type=int,
@@ -233,10 +234,7 @@ def arguments():
     help="Marching kind to use when computing SDF intersection.",
   )
 
-  sdfa.add_argument(
-    "--volsdf-scale-decay", type=float, default=0, help="Decay weight for volsdf scale",
-  )
-
+  sdfa.add_argument("--volsdf-scale-decay", type=float, default=0, help="Decay weight for volsdf scale")
   dnerfa = a.add_argument_group("dnerf")
   dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
   dnerfa.add_argument(
@@ -536,12 +534,14 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       r_o, r_d = rays.split([3,3], dim=-1)
       isect = r_o + r_d * depth_region
       perturb = F.normalize(torch.randn_like(isect), dim=-1) * 1e-3
-      delta_n = model.sdf.normals(isect) - model.sdf.normals(isect + perturb)
+      surface_normals = model.sdf.normals(isect)
+      delta_n = surface_normals - model.sdf.normals(isect + perturb)
       smoothness = 0
       for o in args.smooth_n_ord:
         smoothness = smoothness + torch.linalg.norm(delta_n, ord=o, dim=-1).sum()
       if args.display_smoothness: display["n-s"] = smoothness.item()
       loss = loss + args.smooth_surface * smoothness
+      if args.surface_eikonal > 0: loss = loss + args.surface_eikonal * utils.eikonal_loss(surface_normals)
 
       # smooth occ on the surface
     if args.smooth_occ > 0 and args.smooth_surface > 0:
