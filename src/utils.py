@@ -305,9 +305,13 @@ def sample_random_hemisphere(around, num_samples:int=32):
   return torch.bmm(R, dirs.unsqueeze(-1))\
     .reshape((n, *around.shape))
 
-def sample_random_sphere(_around, num_samples:int=32):
-  uv = (torch.rand(num_samples, 2, device=around.device) - 0.5) * math.tau
-  return elev_azim_to_dir(uv)
+def sample_random_sphere(around, num_samples:int=32):
+  n = num_samples
+  uv = (torch.rand(n, 2, device=around.device) - 0.5) * math.tau
+  return elev_azim_to_dir(uv)\
+    .unsqueeze(1)\
+    .expand(n, np.prod(around.shape[:-1]), 3)\
+    .reshape(n, *around.shape)
 
 def rot_from(a, b, dim=-1):
   v = torch.cross(a,b, dim=dim)

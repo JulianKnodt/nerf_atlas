@@ -427,7 +427,6 @@ class VolSDF(CommonNeRF):
     device: torch.device = "cuda",
 
     occ_kind=None,
-    w_missing:bool = False,
     integrator_kind="direct",
     scale_softplus=False,
     **kwargs,
@@ -444,23 +443,13 @@ class VolSDF(CommonNeRF):
         f"Must have light w/ volsdf integration {type(self.sdf.refl)}"
       self.occ = load_occlusion_kind(occ_kind, self.sdf.latent_size)
       if integrator_kind == "direct": self.secondary = self.direct
-      elif integrator_kind == "path": self.convert_to_path(w_missing)
+      elif integrator_kind == "path": self.convert_to_path()
       else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
-  def convert_to_path(self, w_missing: bool):
+  def convert_to_path(self):
     if self.secondary == self.path: return False
     self.secondary = self.path
     self.path_n = N = 3
     missing_cmpts = 3 * (N + 1) + 6
-
-    # this is a function of the seen pts and the sampled lighting dir
-    self.missing = None
-    if w_missing:
-      self.missing = SkipConnMLP(
-        in_size=missing_cmpts, out=self.out_features,
-        enc=FourierEncoder(input_dims=missing_cmpts),
-        # here we care about the aggregate set of all point, so bundle them all up.
-        latent_size = self.sdf.latent_size * (N + 1), hidden_size=512,
-      )
 
     # transfer_fn := G(x1, x2) -> [0,1]
     self.transfer_fn = SkipConnMLP(
@@ -527,23 +516,7 @@ class VolSDF(CommonNeRF):
       # sum over the contributions at each point adding with each secondary contribution
       secondary = (first_step_bsdf * second_step).sum(dim=0)
       out = out + secondary
-      # because we have high sampling variance, add in a secondary component which accounts for
-      # unsampled values by taking the points sampled and the current set of points.
-      # This makes it possible to learn outside of the scope of what is possible, but should
-      #  converge faster?
-      # we explicitly allow it to be negative in case the points we pick are all sampled with
-      # super high value.
-      if self.missing is None: continue
-      missing = self.missing(
-        torch.cat([
-          ext_pts.reshape((*ext_pts.shape[1:-1], 3 * N)), pts, light_dir, view,
-        ], dim=-1),
-        torch.cat([
-          ext_latent.reshape((*ext_latent.shape[1:-1], self.sdf.latent_size * N)), latent,
-        ], dim=-1),
-      )
-      missing = self.feat_act(missing)
-      out = out + missing
+
     return out
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(

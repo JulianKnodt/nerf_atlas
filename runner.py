@@ -137,10 +137,6 @@ def arguments():
     help="Order for classical Spherical Harmonics & Fourier Basis BSDFs/Reflectance models",
   )
   a.add_argument(
-    "--path-learn-missing", action="store_true",
-    help="Learn missing sampled components during path tracing",
-  )
-  a.add_argument(
     "--inc-fourier-freqs", action="store_true",
     help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
@@ -727,8 +723,8 @@ def set_per_run(model, args):
   if args.volsdf_direct_to_path:
     print("[note]: Converting VolSDF direct integration to path")
     assert(isinstance(model, nerf.VolSDF)), "--volsdf-direct-to-path only applies to VolSDF"
-    converted = model.convert_to_path(args.path_learn_missing)
-    if converted: model = model.to(device)
+    did_convert = model.convert_to_path()
+    if did_convert: model = model.to(device)
     else: print("[note]: Model already uses pathtracing, nothing changed.")
 
   if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
@@ -793,7 +789,6 @@ def load_model(args):
     constructor = nerf.VolSDF
     kwargs["sdf"] = sdf.load(args, with_integrator=False)
     kwargs["occ_kind"] = args.occ_kind
-    kwargs["w_missing"] = args.path_learn_missing
     kwargs["integrator_kind"] = args.integrator_kind or "direct"
   else: raise NotImplementedError(args.model)
   model = constructor(**kwargs).to(device)
