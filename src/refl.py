@@ -246,9 +246,7 @@ class Diffuse(Reflectance):
     assert(((attenuation <= 1.001) & (attenuation >= -1.001)).all()), \
       f"{attenuation.min().item()}, {attenuation.max().item()}"
     if getattr(self, "bidirectional", False): attenuation = attenuation.abs()
-    # NOTE: clamp attenuation to 0, otherwise if the light is coming from the wrong direction
-    # it may falsely assume the normals are wrong.
-    else: attenuation = attenuation.clamp(min=1e-5)
+    # NOTE do not clamp attenuation to 0, cannot learn from that.
     return rgb * attenuation
 
 # https://pbr-book.org/3ed-2018/Reflection_Models/Fourier_Basis_BSDFs

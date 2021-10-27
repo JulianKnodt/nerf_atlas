@@ -73,15 +73,15 @@ class LearnedConstantSoftLighting(nn.Module):
   ):
     super().__init__()
     in_size=5
-    self.alpha = nn.Parameter(torch.tensor(0, requires_grad=True), requires_grad=True)
+    self.alpha = nn.Parameter(torch.tensor(0., requires_grad=True), requires_grad=True)
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, dist, spectrum = lights(pts, mask=mask)
-    far = dist.max().item() if mask.any() else 6
+    far = dist.max().item() if mask and mask.any() else 6
     # TODO why doesn't this isect fn seem to work?
-    visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=2e-3, far=far, eps=1e-3)
+    visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-1, far=far, eps=1e-3)
     spectrum = torch.where(
-      visible.reshape_as(att),
+      visible.unsqueeze(-1),
       spectrum,
       spectrum * self.alpha.sigmoid(),
     )
@@ -141,6 +141,7 @@ occ_kinds = {
   None: lambda **kwargs: lighting_wo_isect,
   "hard": LightingWIsect,
   "learned": LearnedLighting,
+  "learned-const": LearnedConstantSoftLighting,
   "all-learned": AllLearnedOcc,
   #"approx-soft": ApproximateSmoothShadow,
 }
