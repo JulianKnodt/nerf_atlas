@@ -627,6 +627,15 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
         model.refl.light.set_idx(torch.tensor([i], device=device))
 
+      if not args.crop:
+          out, rays = render(
+            model, cam[i:i+1, ...], (c0,c1,args.render_size,args.render_size), size=args.render_size,
+            with_noise=False, times=ts, args=args,
+          )
+          out = out.squeeze(0)
+          got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+        continue
+
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
         for y in range(N):
