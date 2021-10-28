@@ -107,6 +107,9 @@ class CommonNeRF(nn.Module):
   def __init__(
     self,
 
+    # constructor for the reflectan
+    r = None,
+
     steps: int = 64,
 
     #out_features: int = 3, # 3 is for RGB
@@ -121,8 +124,6 @@ class CommonNeRF(nn.Module):
 
     sigmoid_kind: str = "thin",
     bg: str = "black",
-
-    record_depth: bool = False,
 
     device="cuda",
   ):
@@ -148,10 +149,8 @@ class CommonNeRF(nn.Module):
     # TODO add activation for using sigmoid or fat sigmoid
 
     self.set_bg(bg)
+    if r is not None: self.refl = r(self.total_latent_size())
     self.set_sigmoid(sigmoid_kind)
-
-    self.record_depth = record_depth
-    self.depth = None
 
   def forward(self, _x): raise NotImplementedError()
   def set_bg(self, bg="black"):
@@ -281,7 +280,14 @@ class PlainNeRF(CommonNeRF):
 
     **kwargs,
   ):
-    super().__init__(**kwargs, device=device)
+    super().__init__(
+      r = lambda ls: refl.View(
+        out_features=out_features,
+        latent_size=ls+intermediate_size,
+      ),
+      **kwargs,
+      device=device,
+    )
     self.latent_size = self.total_latent_size()
 
     self.first = SkipConnMLP(
@@ -291,10 +297,6 @@ class PlainNeRF(CommonNeRF):
       num_layers = 6, hidden_size = 128, xavier_init=True,
     )
 
-    self.refl = refl.View(
-      out_features=out_features,
-      latent_size=self.latent_size+intermediate_size,
-    )
 
   def forward(self, rays):
     pts, ts, r_o, r_d = compute_pts_ts(
@@ -344,7 +346,14 @@ class NeRFAE(CommonNeRF):
     device="cuda",
     **kwargs,
   ):
-    super().__init__(**kwargs, device=device)
+    super().__init__(
+      r = lambda _: refl.View(
+        out_features=out_features,
+        latent_size=encoding_size+intermediate_size,
+      ),
+      **kwargs,
+      device=device,
+    )
 
     self.latent_size = self.total_latent_size()
 
@@ -361,10 +370,6 @@ class NeRFAE(CommonNeRF):
       num_layers=5, hidden_size=64, xavier_init=True,
     )
 
-    self.refl = refl.View(
-      out_features=out_features,
-      latent_size=encoding_size+intermediate_size,
-    )
     self.encoding_size = encoding_size
     self.regularize_latent = False
     self.normalize_latent = normalize_latent
@@ -567,7 +572,14 @@ class RecurrentNeRF(CommonNeRF):
 
     **kwargs,
   ):
-    super().__init__(**kwargs, device=device)
+    super().__init__(
+      r = lambda latent_size: refl.View(
+        out_features=out_features,
+        latent_size=latent_size+intermediate_size,
+      ),
+      **kwargs,
+      device=device,
+    )
     self.latent_size = self.total_latent_size()
 
     self.first = EncodedGRU(
@@ -583,11 +595,6 @@ class RecurrentNeRF(CommonNeRF):
       state_size=256,
       in_size=3, out=1,
       latent_out=intermediate_size,
-    )
-
-    self.refl = refl.View(
-      out_features=out_features,
-      latent_size=self.latent_size+intermediate_size,
     )
 
   def forward(self, rays):
