@@ -39,6 +39,7 @@ def arguments():
     "--data-kind", help="Kind of data to load", default="original",
     choices=[
       "original", "single_video", "dnerf", "dtu", "pixel-single", "nerv_point",
+      # shiny is WIP
       "shiny"
     ],
   )
@@ -59,17 +60,15 @@ def arguments():
   a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
   a.add_argument("--batch-size", help="# views for each training batch", type=int, default=8)
   a.add_argument("--neural-upsample", help="add neural upsampling", action="store_true")
-  a.add_argument("--crop", help="train with cropping", action="store_true")
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
   a.add_argument("--steps", help="Number of depth steps", type=int, default=64)
   a.add_argument(
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
   a.add_argument(
-    "--sigmoid-kind", help="What sigmoid to use, curr keeps old", default="thin",
+    "--sigmoid-kind", help="What activation to use with the reflectance model.", default="thin",
     choices=list(utils.sigmoid_kinds.keys()),
   )
-  a.add_argument("--backing-sdf", help="Use a backing SDF", action="store_true")
 
   a. add_argument(
     "--feature-space", help="when using neural upsampling, what is the feature space size",
@@ -152,7 +151,7 @@ def arguments():
     They will not take a spacial component, and only rely on view direction, normal, \
     and light direction.",
     choices=[r for r in refl.refl_kinds if r != "weighted"],
-    nargs="+", default=["rusin", "rusin", "rusin", "rusin"],
+    nargs="+", default=[],
   )
   refla.add_argument(
     "--normal-kind", choices=[None, "elaz", "raw"], default=None,
@@ -164,7 +163,7 @@ def arguments():
   )
   refla.add_argument(
     "--alt-train", choices=["analytic", "learned"], default="learned",
-    help="Whether to train the analytic or the learned model in this session",
+    help="Whether to train the analytic or the learned model, set per run.",
   )
   refla.add_argument(
     "--refl-bidirectional", action="store_true",
@@ -178,12 +177,10 @@ def arguments():
   )
   rdra.add_argument(
     "--occ-kind", choices=list(renderers.occ_kinds.keys()), default=None,
-    help="Occlusion method for shadows to use in integration",
+    help="Occlusion method for shadows to use in integration.",
   )
 
-  rdra.add_argument(
-    "--smooth-occ", default=0, type=float, help="Weight to smooth occlusion/shadows by."
-  )
+  rdra.add_argument("--smooth-occ", default=0, type=float, help="Weight to smooth occlusion by.")
   rdra.add_argument(
     "--all-learned-to-joint", action="store_true",
     help="Convert a fully learned occlusion model into one with an additional raycasting check"
@@ -276,24 +273,12 @@ def arguments():
   rprt.add_argument(
     "--param-file", type=str, default=None, help="Path to JSON file to use for hyper-parameters",
   )
-  rprt.add_argument(
-    "--skip-loss", type=int, default=0, help="Number of epochs to skip reporting loss for",
-  )
-  rprt.add_argument(
-    "--msssim-loss", action="store_true", help="Report ms-ssim loss during testing",
-  )
-  rprt.add_argument(
-    "--depth-images", action="store_true", help="Whether to render depth images",
-  )
-  rprt.add_argument(
-    "--normals-from-depth", action="store_true", help="Render extra normal images from depth",
-  )
-  rprt.add_argument(
-    "--depth-query-normal", action="store_true", help="Render extra normal images from depth",
-  )
-  rprt.add_argument(
-    "--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)",
-  )
+  rprt.add_argument("--skip-loss", type=int, default=0, help="Number of epochs to skip reporting loss for")
+  rprt.add_argument("--msssim-loss", action="store_true", help="Report ms-ssim loss during testing")
+  rprt.add_argument("--depth-images", action="store_true", help="Whether to render depth images")
+  rprt.add_argument("--normals-from-depth", action="store_true", help="Render extra normal images from depth")
+  rprt.add_argument("--depth-query-normal", action="store_true", help="Render extra normal images from depth")
+  rprt.add_argument("--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)")
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -448,7 +433,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
 
   get_crop = lambda: (0,0, args.size, args.size)
   cs = args.crop_size
-  if args.crop:
+  if cs != 0:
     get_crop = lambda: (
       random.randint(0, args.render_size-cs), random.randint(0, args.render_size-cs), cs, cs,
     )
@@ -631,13 +616,12 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
         model.refl.light.set_idx(torch.tensor([i], device=device))
 
-      if not args.crop:
+      if args.crop_size == 0:
         out, rays = render(
           model, cam[i:i+1, ...], (c0,c1,args.render_size,args.render_size), size=args.render_size,
           with_noise=False, times=ts, args=args,
         )
-        out = out.squeeze(0)
-        got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+        got = out.squeeze(0)
         continue
 
       N = math.ceil(args.render_size/args.crop_size)
@@ -672,7 +656,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
             ...
 
       gots.append(got)
-      loss = F.mse_loss(got, exp)
+      loss = F.mse_loss(got.clamp(min=0, max=1), exp.clamp(min=0, max=1))
       psnr = utils.mse2psnr(loss).item()
       ts = "" if ts is None else f",t={ts.item():.02f}"
       print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
@@ -743,6 +727,7 @@ def set_per_run(model, args):
   if args.all_learned_to_joint:
     assert(hasattr(model, "occ")), "Model must have occlusion parameter for converstion to join"
     assert(isinstance(model.occ, renderers.AllLearnedOcc)), "Model occ type must be AllLearnedOcc"
+    print("[note]: converting occlusion to Joint Learned Const")
     model.occ = renderers.JointLearnedConstOcc(latent_size=ls,alo=model.occ).to(device)
 
   if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
