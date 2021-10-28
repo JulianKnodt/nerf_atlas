@@ -184,6 +184,10 @@ def arguments():
   rdra.add_argument(
     "--smooth-occ", default=0, type=float, help="Weight to smooth occlusion/shadows by."
   )
+  rdra.add_argument(
+    "--all-learned-to-joint", action="store_true",
+    help="Convert a fully learned occlusion model into one with an additional raycasting check"
+  )
 
   lighta = a.add_argument_group("light")
   lighta.add_argument(
@@ -628,12 +632,12 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         model.refl.light.set_idx(torch.tensor([i], device=device))
 
       if not args.crop:
-          out, rays = render(
-            model, cam[i:i+1, ...], (c0,c1,args.render_size,args.render_size), size=args.render_size,
-            with_noise=False, times=ts, args=args,
-          )
-          out = out.squeeze(0)
-          got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+        out, rays = render(
+          model, cam[i:i+1, ...], (c0,c1,args.render_size,args.render_size), size=args.render_size,
+          with_noise=False, times=ts, args=args,
+        )
+        out = out.squeeze(0)
+        got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
         continue
 
       N = math.ceil(args.render_size/args.crop_size)
@@ -735,6 +739,11 @@ def set_per_run(model, args):
     did_convert = model.convert_to_path()
     if did_convert: model = model.to(device)
     else: print("[note]: Model already uses pathtracing, nothing changed.")
+
+  if args.all_learned_to_joint:
+    assert(hasattr(model, "occ")), "Model must have occlusion parameter for converstion to join"
+    assert(isinstance(model.occ, renderers.AllLearnedOcc)), "Model occ type must be AllLearnedOcc"
+    model.occ = renderers.JointLearnedConstOcc(latent_size=ls,alo=model.occ).to(device)
 
   if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
     if args.smooth_occ != 0:

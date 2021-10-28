@@ -144,16 +144,16 @@ nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 64 --crop --crop-size 12 --epochs 80_000  --loss-window 1500 \
+	--size 64 --crop --crop-size 11 --epochs 80_000  --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 5e-4 --refl-kind rusin \
 	--sdf-eikonal 1 --light-kind dataset --seed -1 \
-	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
+	--loss-fns l2 rmse --valid-freq 500 --save-freq 2500 --occ-kind joint-all-const \
   --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
-  --sigmoid-kind upshifted_softplus --skip-loss 100 \
+  --sigmoid-kind leaky_relu --skip-loss 100 \
   --notraintest --draw-colormap \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  #--load models/nerv_${nerv_dataset}.pt \
-  # --smooth-normals 1e-5 --smooth-eps 1e-3 --smooth-surface 1e-5 \
+  #--smooth-normals 1e-5 --smooth-eps 1e-3 --smooth-surface 1e-5 \
+  #--load models/nerv_${nerv_dataset}.pt
 
 nerv_point_diffuse: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \

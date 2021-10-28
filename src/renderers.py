@@ -80,12 +80,8 @@ class LearnedConstantSoftLighting(nn.Module):
     far = dist.max().item() if mask and mask.any() else 6
     # TODO why doesn't this isect fn seem to work?
     visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-1, far=far, eps=1e-3)
-    spectrum = torch.where(
-      visible.unsqueeze(-1),
-      spectrum,
-      spectrum * self.alpha.sigmoid(),
-    )
-    return dir, spectrum
+    hit_att = visible + (~visible) * self.alpha.sigmoid()
+    return dir, spectrum * hit_att.unsqueeze(-1)
 
 def elaz_and_3d(dir): return torch.cat([dir_to_elev_azim(dir), dir], dim=-1)
 
@@ -93,6 +89,7 @@ class AllLearnedOcc(nn.Module):
   def __init__(
     self,
     latent_size:int=0,
+    # pass both elaz and direction
     with_dir=False,
   ):
     super().__init__()
@@ -109,8 +106,33 @@ class AllLearnedOcc(nn.Module):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)
     att = self.attenuation(torch.cat([pts, self.encode_dir(dir)], dim=-1), latent).sigmoid()
-
     return dir, spectrum * att
+
+class JointLearnedConstOcc(nn.Module):
+  def __init__(
+    self,
+    latent_size:int=0,
+    alo: AllLearnedOcc = None,
+    lcsl: LearnedConstantSoftLighting=None,
+  ):
+    if alo is None: alo = AllLearnedOcc(latent_size=latent_size)
+    assert(isinstance(alo, AllLearnedOcc)), "Must pass an instance of AllLearnedOcc"
+    if lcsl is None: lcsl = LearnedConstantSoftLighting(latent_size=latent_size)
+    assert(isinstance(lcsl, LearnedConstantSoftLighting)), "Must pass an instance of AllLearnedOcc"
+    super().__init__()
+    self.alo = alo
+    self.lcsl = lcsl
+  def forward(self, pts, lights, isect_fn, latent=None, mask=None):
+    if mask is not None: raise NotImplementedError("TODO did not implement handling mask")
+    dir, dist, spectrum = lights(pts, mask=mask)
+    far = dist.max().item()
+    alo = self.alo
+    lcsl = self.lcsl
+    all_att = alo.attenuation(torch.cat([pts, alo.encode_dir(dir)], dim=-1), latent).sigmoid()
+    visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-1, far=far, eps=1e-3)
+    hit_att = visible + (~visible) * lcsl.alpha.sigmoid()
+    spectrum = spectrum * all_att * hit_att.unsqueeze(-1)
+    return dir, spectrum
 
 # Learned approximate penumbra based on the SDF values based on how close nearby points
 # are.
@@ -143,6 +165,7 @@ occ_kinds = {
   "learned": LearnedLighting,
   "learned-const": LearnedConstantSoftLighting,
   "all-learned": AllLearnedOcc,
+  "joint-all-const": JointLearnedConstOcc,
   #"approx-soft": ApproximateSmoothShadow,
 }
 
