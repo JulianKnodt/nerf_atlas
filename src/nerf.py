@@ -102,7 +102,7 @@ def random_color(_elaz_r_d, weights):
 sky_kinds = {
   "black": black,
   "white": white,
-  "mlp": sky_from_mlp,
+  "mlp": "MLP_MARKER",
   "random": random_color,
 }
 
@@ -159,11 +159,13 @@ class CommonNeRF(nn.Module):
     sky_color_fn = sky_kinds.get(bg, None)
     if sky_color_fn is None: raise NotImplementedError(bg)
     self.sky_color = sky_color_fn
+
     if bg == "mlp":
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3, enc=FourierEncoder(input_dims=2),
         num_layers=3, hidden_size=64, device=device, xavier_init=True,
       )
+      self.sky_color_fn = self.sky_from_mlp
 
   def set_sigmoid(self, kind="thin"):
     act = load_sigmoid(kind)

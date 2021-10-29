@@ -102,11 +102,15 @@ class AllLearnedOcc(nn.Module):
       num_layers=6, hidden_size=512, xavier_init=True,
     )
     self.encode_dir = elaz_and_3d if with_dir else dir_to_elev_azim
+  @property
+  def all_learned_occ(self): return self
+  def encode(self, pts, dir, latent):
+    self.raw_att = self.attenuation(torch.cat([pts, self.encode_dir(dir)], dim=-1), latent)
+    return self.raw_att.sigmoid()
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)
-    att = self.attenuation(torch.cat([pts, self.encode_dir(dir)], dim=-1), latent).sigmoid()
-    return dir, spectrum * att
+    return dir, spectrum * self.encode(pts, dir, latent)
 
 class JointLearnedConstOcc(nn.Module):
   def __init__(
@@ -122,15 +126,15 @@ class JointLearnedConstOcc(nn.Module):
     super().__init__()
     self.alo = alo
     self.lcsl = lcsl
+  @property
+  def all_learned_occ(self): return self.alo
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     if mask is not None: raise NotImplementedError("TODO did not implement handling mask")
     dir, dist, spectrum = lights(pts, mask=mask)
     far = dist.max().item()
-    alo = self.alo
-    lcsl = self.lcsl
-    all_att = alo.attenuation(torch.cat([pts, alo.encode_dir(dir)], dim=-1), latent).sigmoid()
+    all_att = self.alo.encode(pts, dir, latent)
     visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-1, far=far, eps=1e-3)
-    hit_att = visible + (~visible) * lcsl.alpha.sigmoid()
+    hit_att = visible + (~visible) * self.lcsl.alpha.sigmoid()
     spectrum = spectrum * all_att * hit_att.unsqueeze(-1)
     return dir, spectrum
 

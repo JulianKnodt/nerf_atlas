@@ -185,6 +185,10 @@ def arguments():
 
   rdra.add_argument("--smooth-occ", default=0, type=float, help="Weight to smooth occlusion by.")
   rdra.add_argument(
+    "--decay-all-learned-occ", type=float, default=0,
+    help="Weight to decay all learned occ by, attempting to minimize it",
+  )
+  rdra.add_argument(
     "--all-learned-to-joint", action="store_true",
     help="Convert a fully learned occlusion model into one with an additional raycasting check"
   )
@@ -557,6 +561,9 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
       att_shifted = model.occ.attenuation(pts_elaz + perturb, noise)
       loss = loss + args.smooth_occ * (att - att_shifted).abs().mean()
 
+    if args.decay_all_learned_occ > 0:
+      loss = loss + args.decay_all_learned_occ * model.occ.all_learned_occ.raw_att.neg().mean()
+
     update(display)
     losses.append(l2_loss)
 
@@ -620,12 +627,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         model.refl.light.set_idx(torch.tensor([i], device=device))
 
       if args.crop_size == 0:
-        out, rays = render(
-          model, cam[i:i+1, ...], (c0,c1,args.render_size,args.render_size), size=args.render_size,
-          with_noise=False, times=ts, args=args,
-        )
-        got = out.squeeze(0)
-        continue
+        raise NotImplementedError("TODO implement no crop testing")
 
       N = math.ceil(args.render_size/args.crop_size)
       for x in range(N):
@@ -658,7 +660,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
           elif hasattr(model, "n") and hasattr(model, "sdf"):
             ...
 
-      gots.append(got)
+      if args.msssim_loss: gots.append(got)
       loss = F.mse_loss(got.clamp(min=0, max=1), exp.clamp(min=0, max=1))
       psnr = utils.mse2psnr(loss).item()
       ts = "" if ts is None else f",t={ts.item():.02f}"
@@ -740,6 +742,14 @@ def set_per_run(model, args):
     if args.smooth_occ != 0:
       print("[warn]: Zeroing smooth occ since it does not apply")
       args.smooth_occ = 0
+  if args.decay_all_learned_occ > 0:
+    if not hasattr(model, "occ"):
+      print("[warn]: model does not have occlusion, cannot decay all learned occ")
+      args.decay_all_learned_occ = 0
+    elif not (isinstance(model.occ, renderers.AllLearnedOcc) or \
+      isinstance(model.occ, renderers.JointLearnedConstOcc)):
+      print("[warn]: model occlusion is not all-learned, cannot decay all learned occ")
+      args.decay_all_learned_occ = 0
   if args.convert_analytic_to_alt:
     assert(hasattr(model, "refl")), "Model does not have a reflectance in the right place"
     if not isinstance(model.refl, refl.AlternatingOptimization) \
