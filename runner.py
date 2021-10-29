@@ -71,7 +71,7 @@ def arguments():
   )
 
   a. add_argument(
-    "--feature-space", help="when using neural upsampling, what is the feature space size",
+    "--feature-space", help="The feature space size when neural upsampling.",
     type=int, default=32,
   )
   a.add_argument(
@@ -79,8 +79,8 @@ def arguments():
     choices=["tiny", "plain", "ae", "volsdf", "sdf"], default="plain",
   )
   a.add_argument(
-    "--bg", help="What kind of background to use for NeRF", type=str,
-    choices=["black", "white", "mlp", "noise"], default="black",
+    "--bg", help="What background to use for NeRF.", type=str,
+    choices=list(nerf.sky_kinds.keys()), default="black",
   )
   # this default for LR seems to work pretty well?
   a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
@@ -88,7 +88,10 @@ def arguments():
   a.add_argument("--decay", help="Weight decay value", type=float, default=0)
   a.add_argument("--notest", help="Do not run test set", action="store_true")
   a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
-  a.add_argument("--omit-bg", help="Omit black bg with some probability", action="store_true")
+  a.add_argument(
+    "--omit-bg", action="store_true",
+    help="Omit black bg with some probability. Only used for faster training",
+  )
   a.add_argument(
     "--train-parts", help="Which parts of the model should be trained",
     choices=["all", "refl", "occ", "[TODO]Camera"], default=["all"], nargs="+",
@@ -726,9 +729,12 @@ def set_per_run(model, args):
 
   if args.all_learned_to_joint:
     assert(hasattr(model, "occ")), "Model must have occlusion parameter for converstion to join"
-    assert(isinstance(model.occ, renderers.AllLearnedOcc)), "Model occ type must be AllLearnedOcc"
-    print("[note]: converting occlusion to Joint Learned Const")
-    model.occ = renderers.JointLearnedConstOcc(latent_size=ls,alo=model.occ).to(device)
+    if isinstance(model.occ, renderers.JointLearnedConstOcc):
+      print("[note]: model already joint learned const, nothing changed.")
+    else:
+      assert(isinstance(model.occ, renderers.AllLearnedOcc)), "Model occ type must be AllLearnedOcc"
+      print("[note]: converting occlusion to Joint Learned Const")
+      model.occ = renderers.JointLearnedConstOcc(latent_size=ls,alo=model.occ).to(device)
 
   if not hasattr(model, "occ") or not isinstance(model.occ, renderers.AllLearnedOcc):
     if args.smooth_occ != 0:

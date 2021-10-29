@@ -64,8 +64,6 @@ def alpha_from_density(
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
 
-# TODO delete these for utils
-
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,
 # or prevent it from representing full density items.
 # fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
@@ -77,8 +75,7 @@ def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
 @torch.jit.script
-def volumetric_integrate(weights, other):
-  return torch.sum(weights[..., None] * other, dim=0)
+def volumetric_integrate(weights, other): return torch.sum(weights[..., None] * other, dim=0)
 
 # perform volumetric integration but only using some of other's values where the weights
 # are big enough.
@@ -102,6 +99,12 @@ def random_color(_elaz_r_d, weights):
   # This will make it so that there never is a background.
   summed = (1-weights.sum(dim=0).unsqueeze(-1))
   return torch.rand_like(summed) * summed
+sky_kinds = {
+  "black": black,
+  "white": white,
+  "mlp": sky_from_mlp,
+  "random": random_color,
+}
 
 class CommonNeRF(nn.Module):
   def __init__(
@@ -146,7 +149,6 @@ class CommonNeRF(nn.Module):
 
     self.alpha = None
     self.noise_std = 0.2
-    # TODO add activation for using sigmoid or fat sigmoid
 
     self.set_bg(bg)
     if r is not None: self.refl = r(self.total_latent_size())
@@ -154,20 +156,14 @@ class CommonNeRF(nn.Module):
 
   def forward(self, _x): raise NotImplementedError()
   def set_bg(self, bg="black"):
-    if bg == "black":
-      self.sky_color = black
-    elif bg == "white":
-      self.sky_color = white
-    elif bg == "mlp":
+    sky_color_fn = sky_kinds.get(bg, None)
+    if sky_color_fn is None: raise NotImplementedError(bg)
+    self.sky_color = sky_color_fn
+    if bg == "mlp":
       self.sky_mlp = SkipConnMLP(
-        in_size=2, out=3, enc=NNEncoder(in_size=2,out=3),
-        num_layers=3, hidden_size=32, device=device, xavier_init=True,
+        in_size=2, out=3, enc=FourierEncoder(input_dims=2),
+        num_layers=3, hidden_size=64, device=device, xavier_init=True,
       )
-      self.sky_color = self.sky_from_mlp
-    elif bg == "random":
-      self.sky_color = random_color
-    else:
-      raise NotImplementedError(f"Unexpected bg: {bg}")
 
   def set_sigmoid(self, kind="thin"):
     act = load_sigmoid(kind)
@@ -833,8 +829,15 @@ class MPI(nn.Module):
     alpha, weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(weights, self.feat_act(feats))
 
+model_kinds = {
+  "tiny": TinyNeRF,
+  "plain": PlainNeRF,
+  "ae": NeRFAE,
+  "volsdf": VolSDF,
+}
+# TODO move load model here
 
-# TODO test this as well
+# TODO test this and actually make it correct.
 def metropolis_sampling(
   density_estimator,
   ts_init, r_o, r_d,
