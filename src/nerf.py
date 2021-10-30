@@ -469,27 +469,23 @@ class VolSDF(CommonNeRF):
       bsdf_val = self.sdf.refl(x=pts, view=view, normal=n, light=light_dir, latent=latent)
       out = out + bsdf_val * light_val
     return out
+  # Single bounce path tracing. In theory could be extended to an arbitrary # of bounces.
   def path(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
 
     # number of samples for 1st order bounces
-    N = self.path_n if self.training else 10
+    N = self.path_n if self.training else max(10, self.path_n*2)
 
     # for each point sample some number of directions
-    # dirs = sample_random_hemisphere(n, num_samples=N)
     dirs = sample_random_sphere(n, num_samples=N)
     # compute intersection of random directions with surface
     ext_pts, ext_hits, dists, _ = march.bisect(
       self.sdf.underlying, pts[None,...].expand_as(dirs), dirs, iters=64, near=5e-3, far=6,
     )
-    # TODO does not decay with the square of distance, need to add in a flag for this
-    # if the model assumes that it does.
-    # decays = 1/dists.square().clamp(min=1e-8)
 
     ext_sdf_vals, ext_latent = self.sdf.from_pts(ext_pts)
 
     ext_view = F.normalize(ext_pts - r_o[None,None,...], dim=-1)
-    # detach secondary normals
     ext_n = F.normalize(self.sdf.normals(ext_pts), dim=-1).detach()
 
     fit = lambda x: x.unsqueeze(0).expand(N,-1,-1,-1,-1,-1)
@@ -502,7 +498,7 @@ class VolSDF(CommonNeRF):
       torch.cat([ext_pts, pts.unsqueeze(0).expand_as(ext_pts)],dim=-1),
       torch.cat([ext_latent, latent.unsqueeze(0).expand_as(ext_latent)], dim=-1),
     ).sigmoid()
-    first_step_bsdf = first_step_bsdf * tf # * decays
+    first_step_bsdf = first_step_bsdf * tf
 
     for light in self.sdf.refl.light.iter():
       # compute direct lighting at each point (identical to direct)
@@ -517,7 +513,9 @@ class VolSDF(CommonNeRF):
       )
       second_step = ext_light_val * path_bsdf
       # sum over the contributions at each point adding with each secondary contribution
-      secondary = (first_step_bsdf * second_step).sum(dim=0)
+      # Take the mean, so that adding in more samples does not cause an infinite increase in
+      # light.
+      secondary = (first_step_bsdf * second_step).mean(dim=0)
       out = out + secondary
 
     return out

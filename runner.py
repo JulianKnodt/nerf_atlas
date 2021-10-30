@@ -286,6 +286,7 @@ def arguments():
   rprt.add_argument("--normals-from-depth", action="store_true", help="Render extra normal images from depth")
   rprt.add_argument("--depth-query-normal", action="store_true", help="Render extra normal images from depth")
   rprt.add_argument("--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)")
+  # TODO write PSNR, SSIM, to file.
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")

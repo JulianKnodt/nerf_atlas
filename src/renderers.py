@@ -132,6 +132,7 @@ class JointLearnedConstOcc(nn.Module):
     if mask is not None: raise NotImplementedError("TODO did not implement handling mask")
     dir, dist, spectrum = lights(pts, mask=mask)
     far = dist.max().item()
+    # only include the all learned occ if training.
     all_att = self.alo.encode(pts, dir, latent)
     visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-1, far=far, eps=1e-3)
     hit_att = visible + (~visible) * self.lcsl.alpha.sigmoid()
