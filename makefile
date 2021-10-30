@@ -152,7 +152,7 @@ nerv_point: clean
   --sigmoid-kind leaky_relu --skip-loss 100 \
   --notraintest \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --load models/nerv_${nerv_dataset}.pt --all-learned-to-joint --decay-all-learned-occ 1e-4 \
+  --load models/nerv_${nerv_dataset}.pt --all-learned-to-joint --decay-all-learned-occ 1e-5 \
   #--smooth-normals 1e-5 --smooth-eps 1e-3 --smooth-surface 1e-5 \
 
 nerv_point_diffuse: clean

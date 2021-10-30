@@ -685,15 +685,18 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       #save_image(os.path.join(args.outdir, f"got_{i:03}.png"), got)
       ls.append(psnr)
 
-  print(f"""[Summary ({"training" if training else "test"})]:
+  summary_string = f"""[Summary ({"training" if training else "test"})]:
 \tmean {np.mean(ls):.03f}
 \tmin {min(ls):.03f}
 \tmax {max(ls):.03f}
-\tvar {np.var(ls):.03f}""")
+\tvar {np.var(ls):.03f}"""
   if args.msssim_loss:
     with torch.no_grad():
       msssim = utils.msssim_loss(gots, labels)
-      print(f"\tms-ssim {msssim:.03f}")
+      summary_string += f"\nms-ssim {msssim:.03f}"
+  print(summary_string)
+  with open(os.path.join(args.outdir, "results.txt"), 'w') as f:
+    f.write(summary_string)
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
