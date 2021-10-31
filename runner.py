@@ -109,16 +109,22 @@ def arguments():
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action="store_true",
   )
   a.add_argument(
-    "--nerv-multi-point", help="Use NeRV multi point light dataset for testing",
+    "--has-multi-light", help="For NeRV point if there is a multi point light dataset",
     action="store_true",
   )
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
+  a.add_argument(
+    "--sched-min", default=5e-5, type=float,
+    help="Minimum value for the scheduled learning rate.",
+  )
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
   # TODO really fix MPIs
   a.add_argument("--mpi", help="[WIP] Use multi-plain imaging", action="store_true")
   a.add_argument(
-    "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light"], default=[], type=str,
+    "--replace",
+    nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "time_delta"],
+    default=[], type=str,
     help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
   )
 
@@ -146,7 +152,7 @@ def arguments():
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
     "--refl-kind", help="What kind of reflectance model to use",
-    choices=list(refl.refl_kinds.keys()), default=["view"],
+    choices=list(refl.refl_kinds.keys()), default="view",
   )
   refla.add_argument(
     "--weighted-subrefl-kinds",
@@ -248,8 +254,11 @@ def arguments():
   dnerfa.add_argument(
     "--dnerf-tf-smooth-weight", help="L2 smooth dnerf tf", type=float, default=0,
   )
+  dnerfa.add_argument(
+    "--spline", type=int,
+    help="Use spline estimator for dynamic nerf delta prediction", default=0,
+  )
   dnerfa.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
-  dnerfa.add_argument("--gru-flow", help="Use GRU for Δx", action="store_true")
   dnerfa.add_argument("--with-canon", help="Preload a canonical NeRF", type=str, default=None)
   dnerfa.add_argument("--fix-canon", help="Do not train canonical NeRF", action="store_true")
 
@@ -538,8 +547,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         smoothness = smoothness + torch.linalg.norm(delta_n, ord=o, dim=-1).sum()
       if args.display_smoothness: display["n-s"] = smoothness.item()
       loss = loss + args.smooth_surface * smoothness
-      if args.surface_eikonal > 0: loss = loss + args.surface_eikonal * utils.eikonal_loss(surface_normals)
-
+      if args.surface_eikonal > 0: loss = loss + args.surface_eikonal * utils.eikonal_loss(surface_normals) 
       # smooth occ on the surface
     if args.smooth_occ > 0 and args.smooth_surface > 0:
       noise = torch.randn([*isect.shape[:-1], model.total_latent_size()], device=device)
@@ -614,76 +622,85 @@ def test(model, cam, labels, args, training: bool = True, light=None):
   ls = []
   gots = []
 
-  with torch.no_grad():
-    for i in range(labels.shape[0]):
-      ts = None if times is None else times[i:i+1, ...]
-      exp = labels[i,...,:3]
-      got = torch.zeros_like(exp)
-      normals = torch.zeros_like(got)
-      depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
+  def render_test_set(model, cam, labels, light=None, offset=0):
+    with torch.no_grad():
+      for i in range(labels.shape[0]):
+        ts = None if times is None else times[i:i+1, ...]
+        exp = labels[i,...,:3]
+        got = torch.zeros_like(exp)
+        normals = torch.zeros_like(got)
+        depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
 
-      if light is not None: model.refl.light = light[i:i+1]
-      # TODO this feels wrong somehow? How to more elegantly handle case of indexing refl.light
-      elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
-        model.refl.light.set_idx(torch.tensor([i], device=device))
+        if light is not None: model.refl.light = light[i:i+1]
+        # TODO this feels wrong somehow? How to more elegantly handle case of indexing refl.light
+        elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
+          model.refl.light.set_idx(torch.tensor([i], device=device))
 
-      if args.crop_size == 0:
-        raise NotImplementedError("TODO implement no crop testing")
+        if args.crop_size == 0: raise NotImplementedError("TODO implement no crop testing")
 
-      N = math.ceil(args.render_size/args.crop_size)
-      for x in range(N):
-        for y in range(N):
-          c0 = x * args.crop_size
-          c1 = y * args.crop_size
-          out, rays = render(
-            model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
-            with_noise=False, times=ts, args=args,
-          )
-          out = out.squeeze(0)
-          got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+        N = math.ceil(args.render_size/args.crop_size)
+        for x in range(N):
+          for y in range(N):
+            c0 = x * args.crop_size
+            c1 = y * args.crop_size
+            out, rays = render(
+              model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
+              with_noise=False, times=ts, args=args,
+            )
+            out = out.squeeze(0)
+            got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
 
-          if hasattr(model, "nerf") and args.depth_images:
-            model_ts = model.nerf.ts[:, None, None, None, None]
-            depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
-              nerf.volumetric_integrate(model.nerf.weights, model_ts)[0,...]
-          if hasattr(model, "n") and hasattr(model, "nerf") :
-            if args.depth_query_normal and args.depth_images:
-              r_o, r_d = rays.squeeze(0).split([3,3], dim=-1)
-              depth_region = depth[c0:c0+args.crop_size, c1:c1+args.crop_size]
-              isect = r_o + r_d * depth_region
-              normals[c0:c0+args.crop_size, c1:c1+args.crop_size] = \
-                (F.normalize(model.sdf.normals(isect), dim=-1)+1)/2
-              too_far_mask = depth_region > (args.far - 1e-1)
-              normals[c0:c0+args.crop_size, c1:c1+args.crop_size][too_far_mask[...,0]] = 0
-            else:
-              render_n = nerf.volumetric_integrate(model.nerf.weights, model.n)
-              normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = (render_n[0]+1)/2
-          elif hasattr(model, "n") and hasattr(model, "sdf"):
-            ...
+            if hasattr(model, "nerf") and args.depth_images:
+              model_ts = model.nerf.ts[:, None, None, None, None]
+              depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+                nerf.volumetric_integrate(model.nerf.weights, model_ts)[0,...]
+            if hasattr(model, "n") and hasattr(model, "nerf") :
+              if args.depth_query_normal and args.depth_images:
+                r_o, r_d = rays.squeeze(0).split([3,3], dim=-1)
+                depth_region = depth[c0:c0+args.crop_size, c1:c1+args.crop_size]
+                isect = r_o + r_d * depth_region
+                normals[c0:c0+args.crop_size, c1:c1+args.crop_size] = \
+                  (F.normalize(model.sdf.normals(isect), dim=-1)+1)/2
+                too_far_mask = depth_region > (args.far - 1e-1)
+                normals[c0:c0+args.crop_size, c1:c1+args.crop_size][too_far_mask[...,0]] = 0
+              else:
+                render_n = nerf.volumetric_integrate(model.nerf.weights, model.n)
+                normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = (render_n[0]+1)/2
+            elif hasattr(model, "n") and hasattr(model, "sdf"):
+              ...
 
-      if args.msssim_loss: gots.append(got)
-      loss = F.mse_loss(got.clamp(min=0, max=1), exp.clamp(min=0, max=1))
-      psnr = utils.mse2psnr(loss).item()
-      ts = "" if ts is None else f",t={ts.item():.02f}"
-      print(f"[{i:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
-      name = f"train_{i:03}.png" if training else f"test_{i:03}.png"
-      items = [exp, got.clamp(min=0, max=1)]
-      if hasattr(model, "n") and hasattr(model, "nerf"):
-        normals = normals.clamp(min=0, max=1)
-        items.append(normals)
-        #save_image(os.path.join(args.outdir, f"normals_{i:03}.png"), normals)
-      if (depth != 0).any() and args.normals_from_depth:
-        depth_normals = (utils.depth_to_normals(depth * 100)+1)/2
-        items.append(depth_normals)
-      if hasattr(model, "nerf") and args.depth_images:
-        depth = (depth-args.near)/(args.far - args.near)
-        items.append(depth.clamp(min=0, max=1))
-      if args.draw_colormap:
-        colormap = utils.color_map(cam[i:i+1])
-        items.append(colormap)
-      save_plot(os.path.join(args.outdir, name), *items)
-      #save_image(os.path.join(args.outdir, f"got_{i:03}.png"), got)
-      ls.append(psnr)
+        gots.append(got)
+        loss = F.mse_loss(got, exp)
+        psnr = utils.mse2psnr(loss).item()
+        ts = "" if ts is None else f",t={ts.item():.02f}"
+        o = i + offset
+        print(f"[{o:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
+        name = f"train_{o:03}.png" if training else f"test_{o:03}.png"
+        items = [exp, got.clamp(min=0, max=1)]
+        if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0, max=1))
+        if (depth != 0).any() and args.normals_from_depth:
+          depth_normals = (utils.depth_to_normals(depth * 100)+1)/2
+          items.append(depth_normals)
+        if hasattr(model, "nerf") and args.depth_images:
+          depth = (depth-args.near)/(args.far - args.near)
+          items.append(depth.clamp(min=0, max=1))
+        if args.draw_colormap:
+          colormap = utils.color_map(cam[i:i+1])
+          items.append(colormap)
+        save_plot(os.path.join(args.outdir, name), *items)
+        ls.append(psnr)
+
+  render_test_set(model, cam, labels, light)
+  # also render the multi point light dataset, have to load it separately because it's a
+  # slightly different light formulation.
+  if args.data_kind == "nerv_point" and args.has_multi_light:
+    multi_labels, multi_cams, multi_lights = loaders.nerv_point(
+      args.data, training=False, size=args.size,
+      light_intensity=args.light_intensity,
+      with_mask=False, multi_point=True, device=device,
+    )
+    render_test_set(model, multi_cams, multi_labels, multi_lights, offset=100)
+    labels =  torch.cat([labels, multi_labels], dim=0)
 
   summary_string = f"""[Summary ({"training" if training else "test"})]:
 \tmean {np.mean(ls):.03f}
@@ -723,6 +740,13 @@ def set_per_run(model, args):
       model.refl.light = light.load(args)
     else: raise NotImplementedError("TODO convert to light and reflectance")
 
+  if "time_delta" in args.replace:
+    if isinstance(model, nerf.DynamicNeRF):
+      if args.spline > 0: model.set_spline_estim()
+      else: model.set_delta_estim()
+      model = model.to(device)
+    else:
+      print("[warn]: Model is not an instance of dynamic nerf, ignoring replace time_delta.")
   if args.model == "sdf": return
 
   # converts from a volsdf with direct integration to one with indirect lighting
@@ -836,8 +860,7 @@ def load_model(args):
     constructor = nerf.DynamicNeRFAE if args.dnerfae else nerf.DynamicNeRF
     model = constructor(
       canonical=model,
-      gru_flow=args.gru_flow,
-      device=device
+      spline=args.spline,
     ).to(device)
     if args.dnerf_tf_smooth_weight > 0: model.set_smooth_delta()
 
@@ -915,8 +938,7 @@ def main():
   # eps = 1e-7 was in the original paper.
   opt = optim.Adam(parameters, lr=args.learning_rate, weight_decay=args.decay, eps=1e-7)
 
-  # TODO should T_max = -1 or args.epochs
-  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=5e-5)
+  sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.sched_min)
   if args.no_sched: sched = None
   train(model, cam, labels, opt, args, light=light, sched=sched)
 

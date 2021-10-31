@@ -75,20 +75,22 @@ food: clean
 	--epochs 50_000  --save models/food.pt --model ae --batch-size 4 \
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
-# note: l1 loss completely breaks dnerf
-dnerf: clean
-	python3 runner.py -d data/dynamic/jumpingjacks/ --data-kind dnerf --size 32 \
-	--epochs 30_000  --save models/djj_ae.pt --model ae --batch-size 3 \
-	--crop-size 20 --near 2 --far 6 -lr 1e-3 --no-sched --valid-freq 499 \
-	#--load models/djj_ae.pt
 
-vsd_dataset := bouncingballs
-volsdf_dnerf: clean
-	python3 runner.py -d data/dynamic/$(vsd_dataset)/ --data-kind dnerf --size 32 \
-	--epochs 80_000  --save models/dvs_$(vsd_dataset).pt --model volsdf \
-  --batch-size 3 --crop-size 22 --near 2 --far 6 -lr 3e-4 --valid-freq 499 \
-  --loss-fns l2 --sdf-kind mlp --loss-window 1000 --sdf-eikonal 0.1 \
-  #--load models/dvs_$(vsd_dataset).pt
+dnerf_dataset = bouncingballs
+dnerf: clean
+	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
+	--epochs 50_000  --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 26 --near 2 --far 6 -lr 8e-5 --valid-freq 500 --spline 1 \
+  --color-spaces rgb \
+	--load models/dyn_${dnerf_dataset}.pt
+
+dnerf_volsdf: clean
+	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 128 \
+	--epochs 80_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind mlp \
+  --batch-size 3 --crop-size 20 --near 2 --far 6 -lr 3e-4 --valid-freq 500 \
+  --loss-fns l2 --color-spaces rgb hsv xyz --refl-kind view --loss-window 1000 --sdf-eikonal 1 \
+  --notraintest --spline 1 \
+  --load models/dvs_$(dnerf_dataset).pt
 
 dnerf_gru: clean
 	python3 runner.py -d data/dynamic/bouncingballs/ --data-kind dnerf --size 64 \
@@ -144,15 +146,15 @@ nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 200 --crop-size 11 --epochs 25_000  --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 8e-5 --refl-kind rusin \
+	--size 64 --crop-size 11 --epochs 0  --loss-window 1500 \
+	--near 2 --far 6 --batch-size 4 -lr 8e-5 --refl-kind diffuse --refl-bidirectional \
 	--sdf-eikonal 1e-1 --light-kind dataset --seed -1 \
 	--loss-fns l2 --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
   --sigmoid-kind leaky_relu --skip-loss 100 \
-  --notraintest \
-  --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness \
-  --load models/nerv_${nerv_dataset}.pt --all-learned-to-joint --decay-all-learned-occ 1e-5 \
+  --notraintest --replace refl --has-multi-light \
+  --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness --decay-all-learned-occ 1e-5 \
+  --load models/nerv_${nerv_dataset}.pt # --all-learned-to-joint \
   #--smooth-normals 1e-5 --smooth-eps 1e-3 --smooth-surface 1e-5 \
 
 nerv_point_diffuse: clean

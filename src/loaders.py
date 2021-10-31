@@ -39,7 +39,7 @@ def load(args, training=True, device="cuda"):
       args.data, training=training, size=size,
       light_intensity=args.light_intensity,
       with_mask = with_mask,
-      multi_point = args.nerv_multi_point,
+      multi_point = False,
       device=device,
     )
   elif kind == "dtu":
@@ -218,8 +218,7 @@ def nerv_point(
     light_locs.append(ll)
     w = torch.tensor(frame.get('light_weights', [[1,1,1]]),dtype=torch.float,device=device)
     w = w[..., :3]
-    weights = light_intensity if w.shape[0] == 1 else 54
-      #torch.tensor([100] + [50] * 7, device=device)[:, None]
+    weights = light_intensity if w.shape[0] == 1 else torch.tensor([100] + [100/2] * 7, device=device)[:, None]
     light_weights.append(w * weights)
 
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device).clamp(min=0, max=1)

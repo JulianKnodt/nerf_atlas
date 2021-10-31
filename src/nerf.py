@@ -664,22 +664,18 @@ class AlternatingVolSDF(nn.Module):
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
-  def __init__(self, canonical: CommonNeRF, gru_flow:bool=False, device="cuda"):
+  def __init__(
+    self,
+    canonical: CommonNeRF,
+    spline:int=0,
+  ):
     super().__init__()
     self.canonical = canonical
+    self.spline = spline
 
-    if gru_flow:
-      self.delta_estim = UpdateOperator(in_size=4, out_size=3, hidden_size=32)
-    else:
-      self.delta_estim = SkipConnMLP(
-        # x,y,z,t -> dx, dy, dz
-        in_size=4, out=3,
+    if spline > 0: self.set_spline_estim()
+    else: self.set_delta_estim()
 
-        num_layers = 5, hidden_size = 128,
-        enc=NNEncoder(input_dims=4),
-        activation=nn.Softplus(),
-        zero_init=True,
-      )
     self.time_noise_std = 3e-3
     self.smooth_delta = False
     self.delta_smoothness = 0
@@ -687,74 +683,85 @@ class DynamicNeRF(nn.Module):
   @property
   def nerf(self): return self.canonical
 
+  def set_delta_estim(self):
+    self.delta_estim = SkipConnMLP(
+      # x,y,z,t -> dx, dy, dz
+      in_size=4, out=3,
+
+      num_layers = 5, hidden_size = 256,
+      zero_init=True, activation=torch.sin,
+    )
+    self.time_estim = self.direct_predict
+  def set_spline_estim(self):
+    self.delta_estim = SkipConnMLP(
+      # x,y,z -> p1, p2, p3
+      in_size=3, out=9,
+
+      num_layers = 5, hidden_size = 256,
+      zero_init=True, activation=torch.sin,
+    )
+    self.time_estim = self.spline_interpolate
+
+  def direct_predict(self, x, t):
+    dp = self.delta_estim(torch.cat([x, t], dim=-1))
+    dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
+    return dp
+  # Cubic Bezier Spline interpolation
+  def spline_interpolate(self, x, t):
+    #assert((t <= 1).all()), t[t > 1]
+    #assert((t >= 0).all()), t[t < 0]
+    p0 = torch.zeros_like(x)
+    p1, p2, p3 = self.delta_estim(x).split([3,3,3], dim=-1)
+    m1t = 1 - t
+    m1t_sq = m1t * m1t
+    t_sq = t * t
+    return m1t * m1t_sq * p0 + \
+      3 * m1t_sq * t * p1 + \
+      3 * m1t * t_sq * p2 + \
+      t_sq * t * p3
+
+  @property
+  def refl(self): return self.canonical.refl
+
   @property
   def sdf(self): return getattr(self.canonical, "sdf", None)
+
+  def total_latent_size(self): return self.canonical.total_latent_size()
 
   def set_smooth_delta(self): setattr(self, "smooth_delta", True)
   def forward(self, rays_t):
     rays, t = rays_t
-    device=rays.device
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
     self.ts = ts
-    # small deviation for regularization
     if self.training and self.time_noise_std > 0:
       t = t + self.time_noise_std * torch.randn_like(t)
 
-    t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
+    t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
 
-    pts_t = torch.cat([pts, t], dim=-1)
-    dp = self.delta_estim(pts_t)
-    dp = torch.where(t.abs() < 1e-6, torch.zeros_like(pts), dp)
+    dp = self.time_estim(pts, t)
     #if self.training and self.smooth_delta:
     #  self.delta_smoothness = self.delta_estim.l2_smoothness(pts_t, dp)
-    pts = pts + dp
-    return self.canonical.from_pts(pts, ts, r_o, r_d)
+    return self.canonical.from_pts(pts + dp, ts, r_o, r_d)
 
-# Dynamic NeRFAE for multiple framss with changing materials
-class DynamicNeRFAE(nn.Module):
-  def __init__(self, canonical: NeRFAE, gru_flow: bool=False, device="cuda"):
-    super().__init__()
+# Dynamic NeRFAE for multiple frames with changing materials
+class DynamicNeRFAE(DynamicNeRF):
+  def __init__(self, canonical: NeRFAE, spline:int=0):
     assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
-    self.canon = canonical.to(device)
-
-    self.delta_estim = SkipConnMLP(
-      # x,y,z,t -> dx, dy, dz
-      in_size=4, out=3 + canonical.encoding_size,
-      num_layers = 6, hidden_size = 128,
-      enc=NNEncoder(input_dims=4, device=device),
-
-      activation=nn.Softplus(), zero_init=True,
-    )
-
-    self.smooth_delta = False
-    self.tf_smoothness = 0
-    self.time_noise_std = 1e-3
-
-  @property
-  def nerf(self): return self.canon
-  def set_smooth_delta(self): setattr(self, "smooth_delta", True)
+    super().__init__(self, canonical, spline)
+    # TODO how to make the spline return more values
   def forward(self, rays_t):
     rays, t = rays_t
-    device=rays.device
-
     pts, ts, r_o, r_d = compute_pts_ts(
       rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
     )
     self.ts = ts
-    # small deviation for regularization
     if self.training and self.time_noise_std > 0: t = t + self.time_noise_std * torch.randn_like(t)
-    t = t[None, :, None, None, None].expand(pts.shape[:-1] + (1,))
-    # compute encoding using delta positions at a given time
-    pts_t = torch.cat([pts, t], dim=-1)
-    delta = self.delta_estim(pts_t)
-    #delta = torch.where(t.abs() < 1e-6, torch.zeros_like(delta), delta)
-    dp, d_enc = delta.split([3, self.canon.encoding_size], dim=-1)
+    t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
+    dp, d_enc = self.time_estim(pts, t).split([3, self.canon.encoding_size], dim=-1)
     encoded = self.canon.compute_encoded(pts + dp, ts, r_o, r_d)
-
-    # TODO is this best as a sum, or is some other kind of tform better?
     return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
 
 class SinglePixelNeRF(nn.Module):
