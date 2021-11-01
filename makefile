@@ -76,21 +76,21 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = bouncingballs
+dnerf_dataset = jumpingjacks
 dnerf: clean
-	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
+	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
 	--epochs 50_000  --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
 	--crop-size 26 --near 2 --far 6 -lr 8e-5 --valid-freq 500 --spline 1 \
   --color-spaces rgb \
 	--load models/dyn_${dnerf_dataset}.pt
 
 dnerf_volsdf: clean
-	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 128 \
-	--epochs 80_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind mlp \
-  --batch-size 3 --crop-size 20 --near 2 --far 6 -lr 3e-4 --valid-freq 500 \
-  --loss-fns l2 --color-spaces rgb hsv xyz --refl-kind view --loss-window 1000 --sdf-eikonal 1 \
-  --notraintest --spline 1 \
-  --load models/dvs_$(dnerf_dataset).pt
+	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 64 \
+	--epochs 80_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind siren \
+  --batch-size 1 --crop-size 30 --near 2 --far 6 -lr 1e-4 --valid-freq 500 \
+  --loss-fns l2 --color-spaces rgb --refl-kind pos --loss-window 1000 \
+  --sdf-eikonal 1e-5 --notraintest --spline 1 \
+  #--load models/dvs_$(dnerf_dataset).pt
 
 dnerf_gru: clean
 	python3 runner.py -d data/dynamic/bouncingballs/ --data-kind dnerf --size 64 \

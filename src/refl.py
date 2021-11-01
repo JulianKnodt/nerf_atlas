@@ -211,7 +211,6 @@ class Positional(Reflectance):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
       in_size=self.latent_size, out=self.out_features, latent_size=0,
-      #enc=FourierEncoder(input_dims=3),
       num_layers=5, hidden_size=256, xavier_init=True,
     )
   def forward(self, x, view, normal=None, light=None, latent=None):

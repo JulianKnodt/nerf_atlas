@@ -696,9 +696,7 @@ class DynamicNeRF(nn.Module):
     self.delta_estim = SkipConnMLP(
       # x,y,z -> p1, p2, p3
       in_size=3, out=9,
-
-      num_layers = 5, hidden_size = 256,
-      zero_init=True, activation=torch.sin,
+      num_layers = 5, hidden_size = 256, zero_init=True,
     )
     self.time_estim = self.spline_interpolate
 

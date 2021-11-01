@@ -306,6 +306,7 @@ def arguments():
     help="Combine a model with an analytic BRDF with a learned BRDF for alternating optimization",
   )
   meta.add_argument("--clip-gradients", type=float, default=0, help="If > 0, clip gradients")
+  meta.add_argument("--versioned-save", action="store_true", help="Save with versions")
 
   ae = a.add_argument_group("auto encoder parameters")
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
@@ -511,6 +512,13 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     # E[d sdf(x)/dx] = 1, enforces that the SDF is valid.
     if args.sdf_eikonal > 0: loss = loss + args.sdf_eikonal * utils.eikonal_loss(n)
 
+    # automatically apply eikonal loss for DynamicNeRF
+    if args.sdf_eikonal > 0 and isinstance(model, nerf.DynamicNeRF):
+      t = torch.rand(*pts.shape[:-1], 1, device=device)
+      dp = model.time_estim(pts, t)
+      n_dyn = model.sdf.normals(pts + dp)
+      loss = loss + args.sdf_eikonal * utils.eikonal_loss(n_dyn)
+
     if args.volsdf_scale_decay > 0: loss = loss + args.volsdf_scale_decay * model.scale_post_act
 
 
@@ -607,8 +615,10 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
 
     if i % args.save_freq == 0 and i != 0:
-      save(model, args)
+      version = (i // args.save_freq) if args.versioned_save else None
+      save(model, args, version)
       save_losses(args, losses)
+  # final save does not have a version and will write to original file
   save(model, args)
   save_losses(args, losses)
 
@@ -891,11 +901,13 @@ def load_model(args):
   if args.volsdf_alternate: model = nerf.AlternatingVolSDF(model)
   return model
 
-def save(model, args):
+def save(model, args, version=None):
   if args.nosave: return
-  print(f"Saved to {args.save}")
+  save = args.save if version is None else f"{args.save}_{version}.pt"
+  print(f"Saved to {save}")
   if args.torchjit: raise NotImplementedError()
-  else: torch.save(model, args.save)
+  else: torch.save(model, save)
+
   if args.log is not None:
     setattr(args, "curr_time", datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
     with open(os.path.join(args.outdir, args.log), 'w') as f:
