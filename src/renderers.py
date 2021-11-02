@@ -18,6 +18,8 @@ def load(args, shape, light_and_refl: LightAndRefl):
   ls = 0
   if hasattr(shape, "latent_size"): ls = shape.latent_size
   elif hasattr(shape, "total_latent_size"): ls = shape.total_latent_size()
+
+
   occ = load_occlusion_kind(args.occ_kind, ls)
 
   integ = cons(shape=shape, refl=light_and_refl.refl, occlusion=occ)
@@ -83,29 +85,32 @@ class LearnedConstantSoftLighting(nn.Module):
     hit_att = visible + (~visible) * self.alpha.sigmoid()
     return dir, spectrum * hit_att.unsqueeze(-1)
 
-def elaz_and_3d(dir): return torch.cat([dir_to_elev_azim(dir), dir], dim=-1)
+def just_pos(pos, dir): return pos
+def pos_elaz(pos, dir): return torch.cat([pos, dir_to_elev_azim(dir)], dim=-1)
+all_learned_occ_kinds = {
+  "pos": (just_pos, 3),
+  "pos_elaz": (pos_elaz, 5)
+}
 
+# Can we consider this as a kind of learned ambient occlusion?
 class AllLearnedOcc(nn.Module):
   def __init__(
     self,
     latent_size:int=0,
     # pass both elaz and direction
-    with_dir=False,
+    kind="pos",
   ):
     super().__init__()
-    in_size=5 + (3 if with_dir else 0)
-    # it seems that passing in the fourier encoder with just the elaz is good enough,
-    # can also pass in the direction to handle the edge case.
+    self.component_fn, in_size = all_learned_occ_kinds[kind]
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=6, hidden_size=512, xavier_init=True,
+      num_layers=6, hidden_size=256, xavier_init=True,
     )
-    self.encode_dir = elaz_and_3d if with_dir else dir_to_elev_azim
   @property
   def all_learned_occ(self): return self
   def encode(self, pts, dir, latent):
-    self.raw_att = self.attenuation(torch.cat([pts, self.encode_dir(dir)], dim=-1), latent)
+    self.raw_att = self.attenuation(self.component_fn(pts, dir), latent)
     return self.raw_att.sigmoid()
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]

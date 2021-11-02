@@ -180,6 +180,7 @@ def dtu(path=".", training=True, size=256, with_mask=False, device="cuda"):
   return exp_imgs, cameras.DTUCamera(pose=poses, intrinsic=intrinsics), None
 
 # https://docs.google.com/document/d/1KI7YtWl3nAuS6xH2WFWug87o-1G6PP4GHrnNzZ0LeUk/edit
+multi_nerv_weights = torch.tensor([55] + [55] * 7).unsqueeze(-1)
 def nerv_point(
   path=".",
   training=True,
@@ -218,7 +219,7 @@ def nerv_point(
     light_locs.append(ll)
     w = torch.tensor(frame.get('light_weights', [[1,1,1]]),dtype=torch.float,device=device)
     w = w[..., :3]
-    weights = light_intensity if w.shape[0] == 1 else torch.tensor([100] + [100/2] * 7, device=device)[:, None]
+    weights = light_intensity if w.shape[0] == 1 else multi_nerv_weights.to(device)
     light_weights.append(w * weights)
 
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device).clamp(min=0, max=1)

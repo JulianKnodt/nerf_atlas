@@ -2,6 +2,7 @@ PHONY:
 
 clean:
 	-@rm outputs/*.png
+	-@rm outputs/results.txt
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -76,20 +77,20 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = jumpingjacks
+dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
-	--epochs 50_000  --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 26 --near 2 --far 6 -lr 8e-5 --valid-freq 500 --spline 1 \
-  --color-spaces rgb \
+	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 40 \
+	--epochs 5_000  --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 26 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 1 \
+  --refl-kind pos --sigmoid-kind upshifted --loss-fns l2 rmse \
 	--load models/dyn_${dnerf_dataset}.pt
 
 dnerf_volsdf: clean
-	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 64 \
-	--epochs 80_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind siren \
-  --batch-size 1 --crop-size 30 --near 2 --far 6 -lr 1e-4 --valid-freq 500 \
-  --loss-fns l2 --color-spaces rgb --refl-kind pos --loss-window 1000 \
-  --sdf-eikonal 1e-5 --notraintest --spline 1 \
+	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 32 \
+	--epochs 80_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind mlp \
+  --batch-size 1 --crop-size 28 --near 2 --far 6 -lr 1e-4 --valid-freq 500 \
+  --refl-kind pos --loss-window 1000 \
+  --sdf-eikonal 1e-5 --spline 1 \
   #--load models/dvs_$(dnerf_dataset).pt
 
 dnerf_gru: clean
@@ -146,7 +147,7 @@ nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 64 --crop-size 11 --epochs 0  --loss-window 1500 \
+	--size 64 --crop-size 11 --epochs 50_000 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 8e-5 --refl-kind diffuse --refl-bidirectional \
 	--sdf-eikonal 1e-1 --light-kind dataset --seed -1 \
 	--loss-fns l2 --valid-freq 500 --save-freq 2500 --occ-kind all-learned \

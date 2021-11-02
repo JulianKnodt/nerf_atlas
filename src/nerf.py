@@ -662,12 +662,14 @@ class AlternatingVolSDF(nn.Module):
     else:
       return direct(self.volsdf.sdf, self.volsdf.refl, self.volsdf.occ, rays, self.training)
 
+def one(*args, **kwargs): return 1
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
   def __init__(
     self,
     canonical: CommonNeRF,
     spline:int=0,
+    rigid_net:bool=True,
   ):
     super().__init__()
     self.canonical = canonical
@@ -679,9 +681,18 @@ class DynamicNeRF(nn.Module):
     self.time_noise_std = 3e-3
     self.smooth_delta = False
     self.delta_smoothness = 0
+    self.rigidity = one if not rigid_net else nn.Sequential(
+      SkipConnMLP(
+        in_size=3, out=1, enc=FourierEncoder(input_dims=3),
+        hidden_size=128, num_layers=4, latent_size=0, xavier_init=True,
+      ),
+      nn.Sigmoid()
+    )
 
   @property
   def nerf(self): return self.canonical
+
+  def set_refl(self, refl): self.canonical.set_refl(refl)
 
   def set_delta_estim(self):
     self.delta_estim = SkipConnMLP(
@@ -693,30 +704,33 @@ class DynamicNeRF(nn.Module):
     )
     self.time_estim = self.direct_predict
   def set_spline_estim(self):
+    self.identity = SkipConnMLP(in_size=3, out=1, num_layers=3, hidden_size=128)
     self.delta_estim = SkipConnMLP(
       # x,y,z -> p1, p2, p3
-      in_size=3, out=9,
+      in_size=1, out=9,
       num_layers = 5, hidden_size = 256, zero_init=True,
+      activation=nn.ReLU(inplace=True),
     )
     self.time_estim = self.spline_interpolate
 
   def direct_predict(self, x, t):
     dp = self.delta_estim(torch.cat([x, t], dim=-1))
     dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
-    return dp
+    return dp * self.rigidity(x)
   # Cubic Bezier Spline interpolation
   def spline_interpolate(self, x, t):
     #assert((t <= 1).all()), t[t > 1]
     #assert((t >= 0).all()), t[t < 0]
     p0 = torch.zeros_like(x)
-    p1, p2, p3 = self.delta_estim(x).split([3,3,3], dim=-1)
+    p1, p2, p3 = self.delta_estim(self.identity(x)).split([3,3,3], dim=-1)
     m1t = 1 - t
     m1t_sq = m1t * m1t
     t_sq = t * t
-    return m1t * m1t_sq * p0 + \
+    dp = m1t * m1t_sq * p0 + \
       3 * m1t_sq * t * p1 + \
       3 * m1t * t_sq * p2 + \
       t_sq * t * p3
+    return dp * self.rigidity(x)
 
   @property
   def refl(self): return self.canonical.refl
@@ -734,8 +748,8 @@ class DynamicNeRF(nn.Module):
       perturb = 1 if self.training else 0,
     )
     self.ts = ts
-    if self.training and self.time_noise_std > 0:
-      t = t + self.time_noise_std * torch.randn_like(t)
+    #if self.training and self.time_noise_std > 0:
+    #  t = t + self.time_noise_std * torch.randn_like(t)
 
     t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
 

@@ -123,9 +123,13 @@ def arguments():
   a.add_argument("--mpi", help="[WIP] Use multi-plain imaging", action="store_true")
   a.add_argument(
     "--replace",
-    nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "time_delta"],
+    nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "time_delta", "al_occ"],
     default=[], type=str,
     help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
+  )
+  a.add_argument(
+    "--all-learned-occ-kind", help="What parameters the Learned Ambient Occlusion should take",
+    default="pos", type=str, choices=list(renderers.all_learned_occ_kinds.keys()),
   )
 
   a.add_argument(
@@ -735,6 +739,12 @@ def set_per_run(model, args):
   if "occ" in args.replace:
     if args.occ_kind != None and hasattr(model, "occ"):
       model.occ = renderers.load_occlusion_kind(args.occ_kind, ls).to(device)
+  if "al_occ" in args.replace:
+    assert(hasattr(model, "occ"))
+    replacement = renderers.AllLearnedOcc(ls, kind=args.all_learned_occ_kind).to(device)
+    if isinstance(model.occ, renderers.AllLearnedOcc): model.occ = replacement
+    elif isinstance(model.occ, renderers.JointLearnedConstOcc): model.occ.alo = replacement
+    else: raise NotImplementedError("Does not have AllLearnedOcc to replace")
 
   if "refl" in args.replace:
     if args.refl_kind != "curr" and hasattr(model, "refl"):
