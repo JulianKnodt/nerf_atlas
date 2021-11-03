@@ -395,6 +395,23 @@ def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 def leaky_softplus(v, alpha=0.01):
   return torch.where(v >= 0, F.softplus(v-3), alpha * v + 0.0485873515737)
 
+# Computes curl and divergence of a field given inputs x
+def curl_divergence(self, x, field):
+  assert(field.shape[-1] == 3), "Can only take divergence of vector field",
+  dFdx = autograd(x, field)
+  # TODO is this order correct?
+  dFxdx, dFydx, dFzdx, \
+  dFxdy, dFydy, dFzdy, \
+  dFxdz, dFydz, dFzdz = dFdx.split([1]*9, dim=-1)
+  div = torch.cat([dFxdx, dFydy, dFzdz], dim=-1).sum(dim=-1)
+  curl = torch.cat([
+    dFzdy - dFydz,
+    dFxdz - dFzdx,
+    dFydx - dFxdy,
+  ], dim=-1)
+  return curl, div
+
+
 # list of available sigmoids
 sigmoid_kinds = {
   "normal": torch.sigmoid,

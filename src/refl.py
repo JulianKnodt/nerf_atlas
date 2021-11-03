@@ -449,6 +449,56 @@ class Rusin(Reflectance):
     params = torch.cat([rusin, self.space(x)], dim=-1)
     return self.act(self.rusin(params, latent))
 
+# Helmholtz decomposition of the Rusin function.
+# I believe this allows for separately learning the diffuse component
+class RusinHelmholtz(Reflectance):
+  def __init__(
+    self,
+    space=None,
+    **kwargs,
+  ):
+    super().__init__(**kwargs)
+    assert(out_features==3), "RusinHelmholtz can only output RGB"
+    if space is None: space = IdentitySpace()
+    rusin_size = 3
+    self.space = space
+    in_size = rusin_size + space.dims
+    self.scalar_potential = SkipConnMLP(
+      in_size=in_size, out=1, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      num_layers=5, hidden_size=256,
+    )
+    self.solenoidal = SkipConnMLP(
+      in_size=in_size, out=3, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      num_layers=5, hidden_size=256,
+    )
+
+  @property
+  def can_use_normal(self): return True
+  @property
+  def can_use_light(self): return True
+
+  def forward(self, x, view, normal, light, latent=None):
+    # NOTE detach the normals since there is no grounding of them w/ Rusin reflectance
+    frame = coordinate_system(normal.detach())
+    # have to move view and light into basis of normal
+    wo = to_local(frame, F.normalize(view, dim=-1))
+    wi = to_local(frame, light)
+    rusin = rusin_params(wo, wi).requires_grad_()
+    pts = self.space(x)
+    params = torch.cat([rusin, pts], dim=-1)
+    scalar = self.scalar_potential(params, latent)
+    irrotational = autograd(rusin, scalar)
+    # TODO add in divergence-free component
+    vector = self.solenoidal(params, latent)
+    solenoidal = autograd(rusin, vector)
+    print(out.shape)
+    # TODO compute curl of solenoidal component.
+    exit()
+    return -irrotational
+
+
 # The sum of an analytic and learned BRDF, intended to be the case that only one of them will
 # have their parameters with gradients at a time so that optimizing them will guarantee the
 # correctness of the SDF.
@@ -599,6 +649,7 @@ refl_kinds = {
   "basic": Basic,
   "diffuse": Diffuse,
   "rusin": Rusin,
+  "rusin_helmholtz": RusinHelmholtz,
   # classical models with some order mechanism
   "sph-har": SphericalHarmonic,
   "fourier": FourierBasis,

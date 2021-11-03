@@ -666,8 +666,6 @@ class DynamicNeRF(nn.Module):
     else: self.set_delta_estim()
 
     self.time_noise_std = 3e-3
-    self.smooth_delta = False
-    self.delta_smoothness = 0
     self.rigidity = one if not rigid_net else nn.Sequential(
       SkipConnMLP(
         in_size=3, out=1, enc=FourierEncoder(input_dims=3),
@@ -693,10 +691,9 @@ class DynamicNeRF(nn.Module):
   def set_spline_estim(self, spline_points):
     spline_points -= 1
     assert(spline_points > 0), "Must pass N > 1 spline"
-    self.identity = SkipConnMLP(in_size=3, out=1, num_layers=3, hidden_size=128)
     self.delta_estim = SkipConnMLP(
       # x,y,z -> p1, p2, p3
-      in_size=1, out=spline_points*3,
+      in_size=3, out=spline_points*3,
       num_layers = 5, hidden_size = 256, zero_init=True,
       activation=nn.ReLU(inplace=True),
     )
@@ -713,7 +710,7 @@ class DynamicNeRF(nn.Module):
     #assert((t >= 0).all()), t[t < 0]
     setattr(self, "spline_n", 3)
     p0 = torch.zeros_like(x)
-    ps = self.delta_estim(self.identity(x)).split([3] * self.spline_n, dim=-1)
+    ps = self.delta_estim(x).split([3] * self.spline_n, dim=-1)
     ps = torch.stack(ps, dim=0)
     dp = de_casteljau(torch.cat([p0[None, ...], ps], dim=0), t, self.spline_n + 1)
     return dp * self.rigidity(x)
@@ -729,23 +726,17 @@ class DynamicNeRF(nn.Module):
   @property
   def intermediate_size(self): return self.canonical.intermediate_size
 
-  def set_smooth_delta(self): setattr(self, "smooth_delta", True)
   def forward(self, rays_t):
     rays, t = rays_t
-    pts, ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
-    self.ts = ts
-    #if self.training and self.time_noise_std > 0:
-    #  t = t + self.time_noise_std * torch.randn_like(t)
 
     t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
 
     dp = self.time_estim(pts, t)
-    #if self.training and self.smooth_delta:
-    #  self.delta_smoothness = self.delta_estim.l2_smoothness(pts_t, dp)
-    return self.canonical.from_pts(pts + dp, ts, r_o, r_d)
+    return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
 
 # Dynamic NeRFAE for multiple frames with changing materials
 class DynamicNeRFAE(DynamicNeRF):

@@ -266,6 +266,7 @@ class MLP(SDFModel):
     )
   def forward(self, x): return self.mlp(x)
 
+
 #def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):
   def __init__(
