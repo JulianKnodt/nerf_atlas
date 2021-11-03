@@ -151,7 +151,10 @@ class SkipConnMLP(nn.Module):
     init = p.reshape(-1, p.shape[-1])
 
     if self.enc is not None: init = torch.cat([init, self.enc(init)], dim=-1)
-    if latent is not None: init = torch.cat([init, latent.reshape(-1, self.latent_size)], dim=-1)
+    if self.latent_size != 0:
+      assert(latent is not None), "Did not pass latent vector when some was expected"
+      init = torch.cat([init, latent.reshape(-1, self.latent_size)], dim=-1)
+    else: assert((latent is None) or (latent.shape[-1] == 0)), "Passed latent vector when none was expected"
 
     x = self.init(init)
     for i, layer in enumerate(self.layers):

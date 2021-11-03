@@ -210,11 +210,11 @@ class Positional(Reflectance):
   ):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
-      in_size=3+self.latent_size, out=self.out_features, latent_size=0,
+      in_size=3, out=self.out_features, latent_size=self.latent_size,
       num_layers=5, hidden_size=256, xavier_init=True,
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
-    return self.act(self.mlp(x))
+    return self.act(self.mlp(x, latent))
 
 class Diffuse(Reflectance):
   def __init__(
