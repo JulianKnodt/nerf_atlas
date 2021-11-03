@@ -8,7 +8,7 @@ original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --epochs 80_000 --save models/lego.pt \
 	--near 2 --far 6 --batch-size 4 --crop-size 24 --model plain -lr 1e-3 \
-	--loss-fns l2 --valid-freq 499 --refl-kind view #--load models/lego.pt #--omit-bg
+	--loss-fns l2 --valid-freq 499 --refl-kind view --replace refl #--load models/lego.pt #--omit-bg
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -79,18 +79,19 @@ food: clean
 
 dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 40 \
-	--epochs 5_000  --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 26 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 1 \
-  --refl-kind pos --sigmoid-kind upshifted --loss-fns l2 rmse \
+	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
+	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
+	--crop-size 30 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 4 \
+  --refl-kind pos --sigmoid-kind upshifted --loss-fns l2 --loss-window 500 \
+  --omit-bg --render-over-time 0 --notraintest \
 	--load models/dyn_${dnerf_dataset}.pt
 
 dnerf_volsdf: clean
-	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 32 \
+	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 128 \
 	--epochs 80_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind mlp \
   --batch-size 1 --crop-size 28 --near 2 --far 6 -lr 1e-4 --valid-freq 500 \
-  --refl-kind pos --loss-window 1000 \
-  --sdf-eikonal 1e-5 --spline 1 \
+  --refl-kind pos --replace refl --sigmoid-kind upshifted --loss-window 1000 \
+  --sdf-eikonal 1e-5 --spline 4 \
   #--load models/dvs_$(dnerf_dataset).pt
 
 dnerf_gru: clean
@@ -153,7 +154,7 @@ nerv_point: clean
 	--loss-fns l2 --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
   --sigmoid-kind leaky_relu --skip-loss 100 \
-  --notraintest --replace refl --has-multi-light \
+  --notraintest --has-multi-light \
   --normals-from-depth --msssim-loss --depth-query-normal --display-smoothness --decay-all-learned-occ 1e-5 \
   --load models/nerv_${nerv_dataset}.pt # --all-learned-to-joint \
   #--smooth-normals 1e-5 --smooth-eps 1e-3 --smooth-surface 1e-5 \

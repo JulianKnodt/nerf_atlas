@@ -15,7 +15,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from datetime import datetime
-from tqdm import trange
+from tqdm import trange, tqdm
 from itertools import chain
 
 import src.loaders as loaders
@@ -265,6 +265,10 @@ def arguments():
   dnerfa.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
   dnerfa.add_argument("--with-canon", help="Preload a canonical NeRF", type=str, default=None)
   dnerfa.add_argument("--fix-canon", help="Do not train canonical NeRF", action="store_true")
+  dnerfa.add_argument(
+    "--render-over-time", default=-1, type=int,
+    help="Fix camera to i, and render over time frame. < 0 is no camera",
+  )
 
   cam = a.add_argument_group("camera parameters")
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -729,13 +733,32 @@ def test(model, cam, labels, args, training: bool = True, light=None):
   with open(os.path.join(args.outdir, "results.txt"), 'w') as f:
     f.write(summary_string)
 
+def render_over_time(args, model, cam):
+  cam = cam[args.render_over_time:args.render_over_time+1]
+  ts = torch.linspace(-0.5, 1.5, steps=200, device=device)
+  with torch.no_grad():
+    for i, t in enumerate(tqdm(ts)):
+      got = torch.zeros(args.render_size, args.render_size, 3, device=device)
+      N = math.ceil(args.render_size/args.crop_size)
+      for x in range(N):
+        for y in range(N):
+          c0 = x * args.crop_size
+          c1 = y * args.crop_size
+          out, _rays = render(
+            model, cam, (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
+            with_noise=False, times=t.unsqueeze(0), args=args,
+          )
+          got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out.squeeze(0)
+      save_image(os.path.join(args.outdir, f"time_{i:03}.png"), got)
+
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
   if args.epochs == 0: return
   if isinstance(model, nerf.CommonNeRF): model.steps = args.steps
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
-  ls = model.total_latent_size()
+  ls = model.intermediate_size # How many extra values the model outputs
+
   if "occ" in args.replace:
     if args.occ_kind != None and hasattr(model, "occ"):
       model.occ = renderers.load_occlusion_kind(args.occ_kind, ls).to(device)
@@ -831,8 +854,6 @@ def load_model(args):
   if args.model != "ae": args.latent_l2_weight = 0
   mip = utils.load_mip(args)
   per_pixel_latent_size = 64 if args.data_kind == "pixel-single" else 0
-  per_pt_latent_size = 0
-  instance_latent_size = 0
   kwargs = {
     "mip": mip,
     "out_features": args.feature_space,
@@ -841,8 +862,8 @@ def load_model(args):
     "t_near": args.near,
     "t_far": args.far,
     "per_pixel_latent_size": per_pixel_latent_size,
-    "per_point_latent_size": per_pt_latent_size,
-    "instance_latent_size": instance_latent_size,
+    "per_point_latent_size": 0,
+    "instance_latent_size": 0,
     "sigmoid_kind": args.sigmoid_kind if args.sigmoid_kind != "curr" else "thin",
     "bg": args.bg,
   }
@@ -929,6 +950,7 @@ def seed(s):
   random.seed(s)
   np.random.seed(s)
 
+# entry point into the system
 def main():
   args = arguments()
   seed(args.seed)
@@ -970,6 +992,8 @@ def main():
   if args.notest: return
   test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
   test(model, test_cam, test_labels, args, training=False, light=test_light)
+
+  if args.render_over_time >= 0: render_over_time(args, model, test_cam)
 
 if __name__ == "__main__": main()
 

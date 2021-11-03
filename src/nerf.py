@@ -24,8 +24,7 @@ def cumuprod_exclusive(t):
 
 #@torch.jit.script # cannot jit script cause of tensordot :)
 def compute_pts_ts(
-  rays, near, far, steps, lindisp=False,
-  perturb: float = 0,
+  rays, near, far, steps, lindisp=False, perturb: float = 0,
 ):
   r_o, r_d = rays.split([3,3], dim=-1)
   device = r_o.device
@@ -51,8 +50,6 @@ def alpha_from_density(
   density, ts, r_d,
   softplus: bool = True,
 ):
-  device=density.device
-
   if softplus: sigma_a = F.softplus(density-1)
   else: sigma_a = F.relu(density)
 
@@ -69,8 +66,7 @@ def alpha_from_density(
 # fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
 def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
 def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps)
-def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
-  return ((v/period).sin()+1)/2 * (1+2*eps) - eps
+def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5): return ((v/period).sin()+1)/2 * (1+2*eps) - eps
 
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
@@ -125,13 +121,15 @@ class CommonNeRF(nn.Module):
     per_pixel_latent_size: int = 0,
     per_point_latent_size: int = 0,
 
+    intermediate_size: int = 0,
+
     sigmoid_kind: str = "thin",
     bg: str = "black",
-
-    device="cuda",
   ):
     super().__init__()
-    self.empty_latent = torch.zeros(1,1,1,1,0, device=device, dtype=torch.float)
+    self.empty_latent = nn.Parameter(
+      torch.zeros(1,1,1,1,0, dtype=torch.float, requires_grad=False), requires_grad=False,
+    )
 
     self.t_near = t_near
     self.t_far = t_far
@@ -146,6 +144,8 @@ class CommonNeRF(nn.Module):
 
     self.per_pt_latent_size = per_point_latent_size
     self.per_pt_latent = None
+
+    self.intermediate_size = intermediate_size
 
     self.alpha = None
     self.noise_std = 0.2
@@ -163,7 +163,7 @@ class CommonNeRF(nn.Module):
     if bg == "mlp":
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3, enc=FourierEncoder(input_dims=2),
-        num_layers=3, hidden_size=64, device=device, xavier_init=True,
+        num_layers=3, hidden_size=64, xavier_init=True,
       )
       self.sky_color_fn = self.sky_from_mlp
 
@@ -196,11 +196,9 @@ class CommonNeRF(nn.Module):
     assert(len(latent.shape) == 2), "expected latent in [B, L]"
     self.instance_latent = latent
 
-  # produces a segmentation mask of sorts, using the alpha for occupancy.
-  def acc(self): return self.alpha.max(dim=0)[0]
-  def acc_smooth(self): return self.weights.sum(dim=0).unsqueeze(-1)
   def set_refl(self, refl):
     if hasattr(self, "refl"): self.refl = refl
+    # TODO probably want to warn here
 
   def depths(self, depths):
     with torch.no_grad():
@@ -239,22 +237,18 @@ class TinyNeRF(CommonNeRF):
     device="cuda",
     **kwargs,
   ):
-    super().__init__(**kwargs, device=device)
+    super().__init__(**kwargs)
     self.estim = SkipConnMLP(
       in_size=3, out=1 + out_features,
       latent_size = self.total_latent_size(),
-      num_layers=6, hidden_size=128,
-
-      xavier_init=True,
+      num_layers=6, hidden_size=256, xavier_init=True,
     )
 
   def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.t_near, self.t_far, self.steps,
-      perturb = 1 if self.training else 0,
+    pts, self.ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
-    self.ts = ts
-    return self.from_pts(pts, ts, r_o, r_d)
+    return self.from_pts(pts, self.ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
@@ -271,7 +265,6 @@ class TinyNeRF(CommonNeRF):
 class PlainNeRF(CommonNeRF):
   def __init__(
     self,
-    intermediate_size: int = 32,
     out_features: int = 3,
 
     device: torch.device = "cuda",
@@ -281,27 +274,22 @@ class PlainNeRF(CommonNeRF):
     super().__init__(
       r = lambda ls: refl.View(
         out_features=out_features,
-        latent_size=ls+intermediate_size,
+        latent_size=ls+self.intermediate_size,
       ),
       **kwargs,
-      device=device,
     )
-    self.latent_size = self.total_latent_size()
 
     self.first = SkipConnMLP(
-      in_size=3, out=1 + intermediate_size, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=3, device=device),
-
+      in_size=3, out=1 + self.intermediate_size, latent_size=self.total_latent_size(),
+      enc=FourierEncoder(input_dims=3),
       num_layers = 6, hidden_size = 128, xavier_init=True,
     )
 
-
   def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
-    self.ts = ts
-    return self.from_pts(pts, ts, r_o, r_d)
+    return self.from_pts(pts, self.ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
@@ -311,7 +299,7 @@ class PlainNeRF(CommonNeRF):
     # If there is a mip encoding, stack it with the latent encoding.
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
-    first_out = self.first(pts, latent if latent.shape[-1] != 0 else None)
+    first_out = self.first(pts, latent)
 
     density = first_out[..., 0]
     if self.training and self.noise_std > 0:
@@ -335,11 +323,10 @@ class PlainNeRF(CommonNeRF):
 class NeRFAE(CommonNeRF):
   def __init__(
     self,
-    intermediate_size: int = 32,
     out_features: int = 3,
 
     encoding_size: int = 32,
-    normalize_latent: bool = True,
+    normalize_latent: bool = False,
 
     device="cuda",
     **kwargs,
@@ -347,10 +334,9 @@ class NeRFAE(CommonNeRF):
     super().__init__(
       r = lambda _: refl.View(
         out_features=out_features,
-        latent_size=encoding_size+intermediate_size,
+        latent_size=encoding_size+self.intermediate_size,
       ),
       **kwargs,
-      device=device,
     )
 
     self.latent_size = self.total_latent_size()
@@ -359,12 +345,12 @@ class NeRFAE(CommonNeRF):
       in_size=3, out=encoding_size,
       latent_size=self.latent_size,
       num_layers=5, hidden_size=128,
-      enc=FourierEncoder(input_dims=3, device=device),
+      enc=FourierEncoder(input_dims=3),
       xavier_init=True,
     )
 
     self.density_tform = SkipConnMLP(
-      in_size=encoding_size, out=1+intermediate_size, latent_size=0,
+      in_size=encoding_size, out=1+self.intermediate_size, latent_size=0,
       num_layers=5, hidden_size=64, xavier_init=True,
     )
 
@@ -376,12 +362,10 @@ class NeRFAE(CommonNeRF):
     self.regularize_latent = True
     self.latent_l2_loss = 0
   def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.t_near, self.t_far, self.steps,
-      perturb = 1 if self.training else 0,
+    pts, self.ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
-    self.ts = ts
-    return self.from_pts(pts, ts, r_o, r_d)
+    return self.from_pts(pts, self.ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
     encoded = self.compute_encoded(pts, ts, r_o, r_d)
@@ -397,27 +381,24 @@ class NeRFAE(CommonNeRF):
     # If there is a mip encoding, stack it with the latent encoding.
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
-    return self.encode(pts, latent if latent.shape[-1] != 0 else None)
+    return self.encode(pts, latent)
   def from_encoded(self, encoded, ts, r_d, pts):
     if self.normalize_latent: encoded = F.normalize(encoded, dim=-1)
 
     first_out = self.density_tform(encoded)
-    density = first_out[..., 0]
-    intermediate = first_out[..., 1:]
+    density, intermediate = first_out[..., 0], first_out[..., 1:]
 
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
 
     rgb = self.refl(
       x=pts, view=r_d[None,...].expand_as(pts),
-      latent=torch.cat([encoded,intermediate],dim=-1),
+      latent=torch.cat([encoded, intermediate],dim=-1),
     )
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
 
-    color = volumetric_integrate(self.weights, rgb)
-    sky = self.sky_color(None, self.weights)
-    return color + sky
+    return volumetric_integrate(self.weights, rgb) + self.sky_color(None, self.weights)
 
 def identity(x): return x
 
@@ -426,7 +407,7 @@ class VolSDF(CommonNeRF):
   def __init__(
     self, sdf,
     # how many features to pass from density to RGB
-    intermediate_size: int = 32, out_features: int = 3,
+    out_features: int = 3,
     device: torch.device = "cuda",
 
     occ_kind=None,
@@ -434,10 +415,10 @@ class VolSDF(CommonNeRF):
     scale_softplus=False,
     **kwargs,
   ):
-    super().__init__(**kwargs, device=device)
+    super().__init__(**kwargs)
     self.sdf = sdf
     # the reflectance model is in the SDF, so don't encode it here.
-    self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True, device=device))
+    self.scale = nn.Parameter(torch.tensor(0.1, requires_grad=True))
     self.secondary = None
     self.out_features = out_features
     self.scale_act = identity if not scale_softplus else nn.Softplus()
@@ -520,13 +501,14 @@ class VolSDF(CommonNeRF):
 
     return out
   def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.t_near, self.t_far, self.steps,
-      perturb = 1 if self.training else 0,
+    pts, self.ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
-    self.ts = ts
-    return self.from_pts(pts, ts, r_o, r_d)
-  def total_latent_size(self): return self.sdf.latent_size
+    return self.from_pts(pts, self.ts, r_o, r_d)
+
+  @property
+  def intermediate_size(self): return self.sdf.latent_size
+
   def set_refl(self, refl): self.sdf.refl = refl
 
   @property
@@ -561,7 +543,6 @@ class VolSDF(CommonNeRF):
 class RecurrentNeRF(CommonNeRF):
   def __init__(
     self,
-    intermediate_size: int = 64,
     out_features: int = 3,
 
     device: torch.device = "cuda",
@@ -571,39 +552,36 @@ class RecurrentNeRF(CommonNeRF):
     super().__init__(
       r = lambda latent_size: refl.View(
         out_features=out_features,
-        latent_size=latent_size+intermediate_size,
+        latent_size=latent_size+self.intermediate_size,
       ),
       **kwargs,
-      device=device,
     )
-    self.latent_size = self.total_latent_size()
 
     self.first = EncodedGRU(
+      in_size=3, out=1,
       encs=[
-        FourierEncoder(input_dims=3, sigma=1<<1, device=device),
-        FourierEncoder(input_dims=3, sigma=1<<2, device=device),
-        FourierEncoder(input_dims=3, sigma=1<<3, device=device),
-        FourierEncoder(input_dims=3, sigma=1<<3, device=device),
-        FourierEncoder(input_dims=3, sigma=1<<4, device=device),
-        FourierEncoder(input_dims=3, sigma=1<<4, device=device),
-        FourierEncoder(input_dims=3, sigma=1<<5, device=device),
+        FourierEncoder(input_dims=3, sigma=1<<1),
+        FourierEncoder(input_dims=3, sigma=1<<2),
+        FourierEncoder(input_dims=3, sigma=1<<3),
+        FourierEncoder(input_dims=3, sigma=1<<3),
+        FourierEncoder(input_dims=3, sigma=1<<4),
+        FourierEncoder(input_dims=3, sigma=1<<4),
+        FourierEncoder(input_dims=3, sigma=1<<5),
       ],
       state_size=256,
-      in_size=3, out=1,
-      latent_out=intermediate_size,
+      latent_out=self.intermediate_size,
     )
 
   def forward(self, rays):
-    pts, ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
-    self.ts = ts
-    return self.from_pts(pts, ts, r_o, r_d)
+    return self.from_pts(pts, self.ts, r_o, r_d)
 
   def from_pts(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
 
-    densities, intermediate = self.first(pts, latent if latent.shape[-1] != 0 else None)
+    densities, intermediate = self.first(pts, latent)
     acc_density = (torch.cumsum(densities, dim=-1) - densities).detach() + densities
     if self.training and self.noise_std > 0:
       acc_density = acc_density + torch.randn_like(acc_density) * self.noise_std
@@ -616,6 +594,8 @@ class RecurrentNeRF(CommonNeRF):
       alpha, weights = alpha_from_density(density, ts, r_d)
       img = volumetric_integrate(weights, rgb)
       images.append(img)
+    # return many images and regularize on all of them. # TODO how to make this fit in current
+    # framework?
     return images
 
 def alternating_volsdf_loss(model, nerf_loss, sdf_loss):
@@ -663,6 +643,13 @@ class AlternatingVolSDF(nn.Module):
       return direct(self.volsdf.sdf, self.volsdf.refl, self.volsdf.occ, rays, self.training)
 
 def one(*args, **kwargs): return 1
+# de_casteljau's algorithm for evaluating bezier splines without numerical instability..
+def de_casteljau(coeffs, t, N):
+  betas = coeffs
+  m1t = 1 - t
+  for i in range(1, N): betas = betas[:-1] * m1t + betas[1:] * t
+  return betas.squeeze(0)
+
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
   def __init__(
@@ -675,7 +662,7 @@ class DynamicNeRF(nn.Module):
     self.canonical = canonical
     self.spline = spline
 
-    if spline > 0: self.set_spline_estim()
+    if spline > 0: self.set_spline_estim(spline)
     else: self.set_delta_estim()
 
     self.time_noise_std = 3e-3
@@ -703,33 +690,32 @@ class DynamicNeRF(nn.Module):
       zero_init=True, activation=torch.sin,
     )
     self.time_estim = self.direct_predict
-  def set_spline_estim(self):
+  def set_spline_estim(self, spline_points):
+    spline_points -= 1
+    assert(spline_points > 0), "Must pass N > 1 spline"
     self.identity = SkipConnMLP(in_size=3, out=1, num_layers=3, hidden_size=128)
     self.delta_estim = SkipConnMLP(
       # x,y,z -> p1, p2, p3
-      in_size=1, out=9,
+      in_size=1, out=spline_points*3,
       num_layers = 5, hidden_size = 256, zero_init=True,
       activation=nn.ReLU(inplace=True),
     )
+    self.spline_n = spline_points
     self.time_estim = self.spline_interpolate
 
   def direct_predict(self, x, t):
     dp = self.delta_estim(torch.cat([x, t], dim=-1))
     dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
     return dp * self.rigidity(x)
-  # Cubic Bezier Spline interpolation
+  # Cubic Bezier Spline "spline_n", 3)
   def spline_interpolate(self, x, t):
     #assert((t <= 1).all()), t[t > 1]
     #assert((t >= 0).all()), t[t < 0]
+    setattr(self, "spline_n", 3)
     p0 = torch.zeros_like(x)
-    p1, p2, p3 = self.delta_estim(self.identity(x)).split([3,3,3], dim=-1)
-    m1t = 1 - t
-    m1t_sq = m1t * m1t
-    t_sq = t * t
-    dp = m1t * m1t_sq * p0 + \
-      3 * m1t_sq * t * p1 + \
-      3 * m1t * t_sq * p2 + \
-      t_sq * t * p3
+    ps = self.delta_estim(self.identity(x)).split([3] * self.spline_n, dim=-1)
+    ps = torch.stack(ps, dim=0)
+    dp = de_casteljau(torch.cat([p0[None, ...], ps], dim=0), t, self.spline_n + 1)
     return dp * self.rigidity(x)
 
   @property
@@ -739,6 +725,9 @@ class DynamicNeRF(nn.Module):
   def sdf(self): return getattr(self.canonical, "sdf", None)
 
   def total_latent_size(self): return self.canonical.total_latent_size()
+
+  @property
+  def intermediate_size(self): return self.canonical.intermediate_size
 
   def set_smooth_delta(self): setattr(self, "smooth_delta", True)
   def forward(self, rays_t):
