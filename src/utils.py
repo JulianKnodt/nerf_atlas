@@ -381,20 +381,6 @@ def color_map(camera, size=256) -> ["size", "size", 3]:
   dir[z_sq < 0] = 0
   return dir
 
-
-# sigmoids which shrink or expand the total range to prevent gradient vanishing,
-# or prevent it from representing full density items.
-# fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
-def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
-def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps) + eps
-def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
-  return ((v/period).sin()+1)/2 * (1+2*eps) - eps
-def upshifted_sigmoid(v, eps=3e-2): return v.sigmoid() * (1-eps) + eps
-def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
-# a leaky softplus implementation
-def leaky_softplus(v, alpha=0.01):
-  return torch.where(v >= 0, F.softplus(v-3), alpha * v + 0.0485873515737)
-
 # Computes curl and divergence of a field given inputs x.
 def curl_divergence(x, field):
   assert(field.shape[-1] == 3), "Can only take divergence of vector field"
@@ -416,6 +402,18 @@ def curl_divergence(x, field):
   ], dim=-1)
   return curl, div
 
+# sigmoids which shrink or expand the total range to prevent gradient vanishing,
+# or prevent it from representing full density items.
+# fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
+def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
+def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps) + eps
+def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
+  return ((v/period).sin()+1)/2 * (1+2*eps) - eps
+def upshifted_sigmoid(v, eps=1e-1): return v.sigmoid() * (1-eps) + eps
+def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
+# a leaky softplus implementation
+def leaky_softplus(v, alpha=0.01):
+  return torch.where(v >= 0, F.softplus(v-3), alpha * v + 0.0485873515737)
 
 # list of available sigmoids
 sigmoid_kinds = {

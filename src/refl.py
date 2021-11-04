@@ -212,6 +212,9 @@ class ViewLight(Reflectance):
       enc=FourierEncoder(input_dims=in_size),
       num_layers=5, hidden_size=256, xavier_init=True,
     )
+  @property
+  def can_use_light(self): return True
+
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
     l = self.light_enc(light)

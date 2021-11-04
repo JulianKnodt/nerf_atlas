@@ -12,8 +12,8 @@ original: clean
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 128 --epochs 50_000 --crop-size 16 \
-	--near 2 --far 6 --batch-size 5 --model volsdf --sdf-kind curl-mlp \
+	--size 256 --epochs 25_000 --crop-size 24 \
+	--near 2 --far 6 --batch-size 2 --model volsdf --sdf-kind curl-mlp \
 	-lr 3e-4 --loss-window 750 --valid-freq 250 \
 	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500 --sigmoid-kind upshifted \
 	--depth-images --refl-kind pos \

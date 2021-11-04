@@ -80,8 +80,7 @@ class LearnedConstantSoftLighting(nn.Module):
     pts = pts if mask is None else pts[mask]
     dir, dist, spectrum = lights(pts, mask=mask)
     far = dist.max().item() if mask and mask.any() else 6
-    # TODO why doesn't this isect fn seem to work?
-    visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-1, far=far, eps=1e-3)
+    visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-2, far=far, eps=1e-3)
     hit_att = visible + (~visible) * self.alpha.sigmoid()
     return dir, spectrum * hit_att.unsqueeze(-1)
 

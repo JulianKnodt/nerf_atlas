@@ -71,7 +71,7 @@ class Point(Light):
     train_center=False,
     intensity=[1],
     train_intensity=False,
-    distance_decay=False,
+    distance_decay=True,
   ):
     super().__init__()
     if type(center) == torch.Tensor: self.center = center
@@ -132,7 +132,7 @@ class Point(Light):
     if mask is not None: intn = intn.expand((*mask.shape, 3,))[mask]
     if self.distance_decay:
       decay = dist.square()
-      spectrum = intn/decay.clamp(min=1e-5).unsqueeze(-1)
+      spectrum = intn/(4 * math.pi * decay.clamp(min=1e-5).unsqueeze(-1))
     else: spectrum=intn
 
     return d, dist, spectrum
