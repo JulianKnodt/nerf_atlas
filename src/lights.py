@@ -12,8 +12,10 @@ def load(args):
   if cons is None: raise NotImplementedError(f"light kind: {args.light_kind}")
 
   kwargs = {}
-  if cons == "field":
-    kwargs["num_embeddings"] = args.num_labels
+  if args.light_kind == "field": kwargs["num_embeddings"] = args.num_labels
+  if args.light_kind == "point":
+    kwargs["center"] = args.point_light_position[:3]
+    kwargs["intensity"] = [args.light_intensity]
   return cons(**kwargs)
 
 class Light(nn.Module):
@@ -22,8 +24,6 @@ class Light(nn.Module):
   ):
     super().__init__()
   def __getitem__(self, _v): return self
-  @property
-  def supports_idx(self): raise NotImplementedError()
   def forward(self, x): raise NotImplementedError()
 
 class Field(Light):
@@ -75,9 +75,8 @@ class Point(Light):
   ):
     super().__init__()
     if type(center) == torch.Tensor: self.center = center
-    else:
-      center = torch.tensor(center, requires_grad=train_center, dtype=torch.float)
-      self.center = nn.Parameter(center)
+    else: center = torch.tensor([[center]], requires_grad=train_center, dtype=torch.float)
+    self.center = nn.Parameter(center)
     self.train_center = train_center
 
     if type(intensity) == torch.Tensor: self.intensity = intensity
@@ -85,7 +84,7 @@ class Point(Light):
       if len(intensity) == 1: intensity = intensity * 3
       intensity = torch.tensor(intensity, requires_grad=train_intensity, dtype=torch.float)\
         .expand_as(self.center)
-      self.intensity = nn.Parameter(intensity)
+    self.intensity = nn.Parameter(intensity)
     self.train_intensity = train_intensity
     self.distance_decay = distance_decay
 
@@ -93,13 +92,20 @@ class Point(Light):
   def __getitem__(self, v):
     return Point(
       center=self.center[v],
-      train_center=self.train_center,
       intensity=self.intensity[v],
+      train_center=self.train_center,
       train_intensity=self.train_intensity,
       distance_decay=self.distance_decay,
     )
-  @property
-  def supports_idx(self): return True
+  def expand(self, n: int):
+    return Point(
+      center = self.center.repeat(n, 1, 1),
+      intensity = self.intensity.repeat(n, 1, 1),
+      train_center=self.train_center,
+      train_intensity=self.train_intensity,
+      distance_decay=self.distance_decay,
+    )
+
   # return a singular light from a batch, altho it may be more efficient to use batching
   # this is conceptually nicer, and allows for previous code to work.
   def iter(self):
@@ -111,6 +117,10 @@ class Point(Light):
         train_intensity=self.train_intensity,
         distance_decay=self.distance_decay,
       )
+  @property
+  def supports_idx(self):
+    return self.center.shape[0] > 1
+
   def forward(self, x, mask=None):
     loc = self.center[:, None, None, :]
     if mask is not None: loc = loc.expand((*mask.shape, 3))[mask]

@@ -23,6 +23,7 @@ import src.nerf as nerf
 import src.utils as utils
 import src.sdf as sdf
 import src.refl as refl
+import src.lights as lights
 import src.cameras as cameras
 import src.hyper_config as hyper_config
 import src.renderers as renderers
@@ -210,6 +211,9 @@ def arguments():
   )
   lighta.add_argument(
     "--light-intensity", type=int, default=100, help="Intensity of light to use with loaded dataset",
+  )
+  lighta.add_argument(
+    "--point-light-position", type=float, nargs="+", default=[0, 0, -3], help="Position of point light",
   )
 
   sdfa = a.add_argument_group("sdf")
@@ -777,8 +781,7 @@ def set_per_run(model, args):
   if "sigmoid" in args.replace and hasattr(model, "nerf"):
     model.nerf.set_sigmoid(args.sigmoid_kind)
   if "light" in args.replace:
-    if isinstance(model.refl, refl.LightAndRefl):
-      model.refl.light = light.load(args)
+    if isinstance(model.refl, refl.LightAndRefl): model.refl.light = lights.load(args)
     else: raise NotImplementedError("TODO convert to light and reflectance")
 
   if "time_delta" in args.replace:
@@ -954,6 +957,8 @@ def main():
   seed(args.seed)
 
   labels, cam, light = loaders.load(args, training=True, device=device)
+  if args.light_kind is not None and args.light_kind != "dataset":
+    light = lights.load(args).expand(labels.shape[0]).to(device)
   setattr(args, "num_labels", len(labels))
   if args.train_imgs > 0:
     if type(labels) == tuple: labels = tuple(l[:args.train_imgs, ...] for l in labels)

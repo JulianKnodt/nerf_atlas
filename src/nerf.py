@@ -669,8 +669,8 @@ class DynamicNeRF(nn.Module):
     self.time_noise_std = 3e-3
     self.rigidity = one if not rigid_net else nn.Sequential(
       SkipConnMLP(
-        in_size=3, out=1, enc=FourierEncoder(input_dims=3),
-        hidden_size=128, num_layers=4, latent_size=0, xavier_init=True,
+        in_size=3, out=1, activation=torch.sin,
+        hidden_size=256, num_layers=4, latent_size=0, xavier_init=True,
       ),
       nn.Sigmoid()
     )
