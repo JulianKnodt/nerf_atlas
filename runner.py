@@ -236,11 +236,9 @@ def arguments():
     "--smooth-n-ord", nargs="+", default=[2], choices=[1,2], type=int,
     help="Order of vector to use when smoothing normals",
   )
-
-
   sdfa.add_argument(
     "--sdf-kind", help="Which SDF model to use", type=str,
-    choices=["spheres", "siren", "local", "mlp", "triangles"], default="mlp",
+    choices=list(sdf.sdf_kinds.keys()), default="mlp",
   )
   sdfa.add_argument("--sphere-init", help="Initialize SDF to a sphere", action="store_true")
   sdfa.add_argument(

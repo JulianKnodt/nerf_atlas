@@ -194,11 +194,28 @@ class View(Reflectance):
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=4, hidden_size=256, xavier_init=True,
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
     return self.act(self.mlp(v, latent))
+
+# ViewLight reflectance takes a view direction, light and a latent vector.
+class ViewLight(Reflectance):
+  def __init__(self, space=None, view="elaz", light="elaz", **kwargs):
+    super().__init__(**kwargs)
+    view_dims, self.view_enc = enc_norm_dir(view)
+    light_dims, self.light_enc = enc_norm_dir(light)
+    in_size = view_dims + light_dims
+    self.mlp = SkipConnMLP(
+      in_size=in_size, out=self.out_features, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=256, xavier_init=True,
+    )
+  def forward(self, x, view, normal=None, light=None, latent=None):
+    v = self.view_enc(view)
+    l = self.light_enc(light)
+    return self.act(self.mlp(torch.cat([v, l], dim=-1), latent))
 
 # Positional only (no view dependence)
 class Positional(Reflectance):
@@ -646,6 +663,7 @@ class SphericalHarmonic(Reflectance):
 refl_kinds = {
   "pos": Positional,
   "view":  View,
+  "view-light": ViewLight,
   "basic": Basic,
   "diffuse": Diffuse,
   "rusin": Rusin,

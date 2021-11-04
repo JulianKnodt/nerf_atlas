@@ -89,7 +89,7 @@ def just_pos(pos, dir): return pos
 def pos_elaz(pos, dir): return torch.cat([pos, dir_to_elev_azim(dir)], dim=-1)
 all_learned_occ_kinds = {
   "pos": (just_pos, 3),
-  "pos_elaz": (pos_elaz, 5)
+  "pos-elaz": (pos_elaz, 5)
 }
 
 # Can we consider this as a kind of learned ambient occlusion?

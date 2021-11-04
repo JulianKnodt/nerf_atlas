@@ -6,19 +6,15 @@ import random
 
 from .nerf import ( CommonNeRF, compute_pts_ts )
 from .neural_blocks import ( SkipConnMLP, FourierEncoder, NNEncoder )
-from .utils import ( autograd, eikonal_loss, smooth_min, leaky_softplus )
+from .utils import ( autograd, smooth_min, curl_divergence )
 import src.refl as refl
 import src.march as march
 import src.renderers as renderers
 from tqdm import trange
 
 def load(args, with_integrator:bool):
-  if args.sdf_kind == "spheres": cons = SmoothedSpheres
-  elif args.sdf_kind == "siren": cons = SIREN
-  elif args.sdf_kind == "local": cons = Local
-  elif args.sdf_kind == "mlp": cons = MLP
-  elif args.sdf_kind == "triangles": cons = Triangles
-  else: raise NotImplementedError(f"Unknown SDF kind: {args.sdf_kind}")
+  cons = sdf_kinds.get(args.sdf_kind, None)
+  if cons is None: raise NotImplementedError(f"Unknown SDF kind: {args.sdf_kind}")
 
   model = cons(latent_size=args.latent_size)
 
@@ -253,10 +249,7 @@ class Triangles(SDFModel):
     return smooth_min(out,dim=-1).reshape(p.shape[:-1] + (1,))
 
 class MLP(SDFModel):
-  def __init__(
-    self,
-    **kwargs,
-  ):
+  def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
       in_size=3, out=1+self.latent_size,
@@ -266,13 +259,25 @@ class MLP(SDFModel):
     )
   def forward(self, x): return self.mlp(x)
 
+class CurlMLP(SDFModel):
+  def __init__(self, **kwargs):
+    super().__init__(**kwargs)
+    self.mlp = SkipConnMLP(
+      in_size=3, out=1+self.latent_size,
+      enc=FourierEncoder(input_dims=3, sigma=1<<5),
+      num_layers=6, hidden_size=256,
+      xavier_init=True,
+    )
+  def forward(self, x):
+    with torch.enable_grad():
+      x = x if x.requires_grad else x.requires_grad_()
+      field, latent = self.mlp(x).split([1, self.latent_size], dim=-1)
+      field = torch.linalg.norm(autograd(x, field), dim=-1, keepdim=True)
+      return torch.cat([field, latent], dim=-1)
 
 #def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):
-  def __init__(
-    self,
-    **kwargs,
-  ):
+  def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.siren = SkipConnMLP(
       in_size=3, out=1+self.latent_size, enc=None,
@@ -304,3 +309,13 @@ class Local(SDFModel):
     local = x % self.part_sz
     latent = self.latent(x/self.part_sz)
     return self.tform(local, latent)
+
+sdf_kinds = {
+  "mlp": MLP,
+  "siren": SIREN,
+  "local": Local,
+  "curl-mlp": CurlMLP,
+  # Classical models which don't work that well
+  "spheres": SmoothedSpheres,
+  "triangles": Triangles,
+}

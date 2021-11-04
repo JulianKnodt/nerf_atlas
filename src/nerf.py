@@ -145,7 +145,8 @@ class CommonNeRF(nn.Module):
     self.per_pt_latent_size = per_point_latent_size
     self.per_pt_latent = None
 
-    self.intermediate_size = intermediate_size
+    try: self.intermediate_size = intermediate_size
+    except: ...
 
     self.alpha = None
     self.noise_std = 0.2
