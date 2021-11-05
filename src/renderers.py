@@ -20,8 +20,7 @@ def load(args, shape, light_and_refl: LightAndRefl):
   elif hasattr(shape, "total_latent_size"): ls = shape.total_latent_size()
 
 
-  occ = load_occlusion_kind(args.occ_kind, ls)
-
+  occ = load_occlusion_kind(args, args.occ_kind, ls)
   integ = cons(shape=shape, refl=light_and_refl.refl, occlusion=occ)
 
   return integ
@@ -178,10 +177,13 @@ occ_kinds = {
   #"approx-soft": ApproximateSmoothShadow,
 }
 
-def load_occlusion_kind(kind=None, latent_size:int=0):
+def load_occlusion_kind(args, kind=None, latent_size:int=0):
   con = occ_kinds.get(kind, -1)
   if con == -1: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
-  return con(latent_size=latent_size)
+  kwargs = { "latent_size": latent_size, }
+  if kind == "all-learned": kwargs["kind"] = args.all_learned_occ_kind
+
+  return con(**kwargs)
 
 class Renderer(nn.Module):
   def __init__(

@@ -766,7 +766,8 @@ def set_per_run(model, args):
 
   if "occ" in args.replace:
     if args.occ_kind != None and hasattr(model, "occ"):
-      model.occ = renderers.load_occlusion_kind(args.occ_kind, ls).to(device)
+      model.occ = renderers.load_occlusion_kind(args, args.occ_kind, ls).to(device)
+
   if "al_occ" in args.replace:
     assert(hasattr(model, "occ"))
     replacement = renderers.AllLearnedOcc(ls, kind=args.all_learned_occ_kind).to(device)

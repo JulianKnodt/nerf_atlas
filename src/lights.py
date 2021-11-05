@@ -126,15 +126,11 @@ class Point(Light):
     if mask is not None: loc = loc.expand((*mask.shape, 3))[mask]
     # direction from pts to the light
     d = loc - x
-    dist = torch.linalg.norm(d, ord=2, dim=-1)
+    dist = torch.linalg.norm(d, ord=2, dim=-1, keepdim=True)
     d = F.normalize(d, eps=1e-6, dim=-1)
     intn = self.intensity[:, None, None, :]
     if mask is not None: intn = intn.expand((*mask.shape, 3,))[mask]
-    if self.distance_decay:
-      decay = dist.square()
-      spectrum = intn/(4 * math.pi * decay.clamp(min=1e-5).unsqueeze(-1))
-    else: spectrum=intn
-
+    spectrum = (intn/(4 * math.pi * dist.square())) if self.distance_decay else intn
     return d, dist, spectrum
 
 light_kinds = {
