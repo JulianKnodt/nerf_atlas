@@ -12,13 +12,13 @@ original: clean
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 256 --epochs 25_000 --crop-size 24 \
+	--size 32 --epochs 80_000 --crop-size 24 \
 	--near 2 --far 6 --batch-size 2 --model volsdf --sdf-kind curl-mlp \
 	-lr 3e-4 --loss-window 750 --valid-freq 250 \
-	--sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500 --sigmoid-kind upshifted \
+	--sdf-eikonal 1e-5 --save-freq 2500 --sigmoid-kind upshifted \
 	--depth-images --refl-kind pos \
-  --color-space rgb --depth-query-normal --normals-from-depth \
-	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
+  --depth-query-normal --normals-from-depth \
+	--save models/lego_volsdf.pt #--load models/lego_volsdf.pt
 
 volsdf_with_normal: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -148,7 +148,7 @@ nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
 	--data-kind nerv_point --model volsdf --sdf-kind mlp \
 	--save models/nerv_${nerv_dataset}.pt \
-	--size 64 --crop-size 11 --epochs 50_000 --loss-window 1500 \
+	--size 64 --crop-size 11 --epochs 0 --loss-window 1500 \
 	--near 2 --far 6 --batch-size 4 -lr 8e-5 --refl-kind diffuse --refl-bidirectional \
 	--sdf-eikonal 1e-1 --light-kind dataset --seed -1 \
 	--loss-fns l2 --valid-freq 500 --save-freq 2500 --occ-kind all-learned \

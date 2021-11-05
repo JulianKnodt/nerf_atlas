@@ -385,22 +385,22 @@ def color_map(camera, size=256) -> ["size", "size", 3]:
 def curl_divergence(x, field):
   assert(field.shape[-1] == 3), "Can only take divergence of vector field"
   assert(x.shape[-1] == 3)
-  dFdx, = torch.autograd.grad(
-    inputs=x, outputs=field,
-    grad_outputs=torch.ones(x.shape[-1], 1, device=x.device),
-    create_graph=True, retain_graph=True, only_inputs=True,
-  )
-  print(dFdx.shape)
-  exit()
-  # TODO is this order correct?
-  dFxdx, dFydx, dFzdx, \
-  dFxdy, dFydy, dFzdy, \
-  dFxdz, dFydz, dFzdz = dFdx.split([1]*9, dim=-1)
-  div = torch.cat([dFxdx, dFydy, dFzdz], dim=-1).sum(dim=-1)
+  # Doesn't seem to be any more convenient way to deconstruct this?
+  Fx, Fy, Fz = field.split([1,1,1], dim=-1)
+  dFx, dFy, dFz = autograd(x, Fx), autograd(x, Fy), autograd(x, Fz)
+  dFxdx, dFydx, dFzdx = dFx.split([1,1,1],dim=-1)
+  dFxdy, dFydy, dFzdy = dFy.split([1,1,1],dim=-1)
+  dFxdz, dFydz, dFzdz = dFz.split([1,1,1],dim=-1)
+  div = torch.cat([dFxdx, dFydy, dFzdz], dim=-1).sum(dim=-1, keepdim=True)
   curl = torch.cat([
     dFzdy - dFydz, dFxdz - dFzdx, dFydx - dFxdy,
   ], dim=-1)
   return curl, div
+
+def divergence(x, field):
+  assert(field.shape[-1] == 3), "Can only take divergence of vector field"
+  assert(x.shape[-1] == 3)
+  return autograd(x, field).sum(dim=-1, keepdim=True)
 
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,
 # or prevent it from representing full density items.
@@ -409,7 +409,7 @@ def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
 def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps) + eps
 def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
   return ((v/period).sin()+1)/2 * (1+2*eps) - eps
-def upshifted_sigmoid(v, eps=1e-1): return v.sigmoid() * (1-eps) + eps
+def upshifted_sigmoid(v, eps=1e-2): return v.sigmoid() * (1-eps) + eps
 def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 # a leaky softplus implementation
 def leaky_softplus(v, alpha=0.01):
