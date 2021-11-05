@@ -62,6 +62,7 @@ def arguments():
   a.add_argument("--batch-size", help="# views for each training batch", type=int, default=8)
   a.add_argument("--neural-upsample", help="add neural upsampling", action="store_true")
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
+  a.add_argument("--test-crop-size",help="what size to use while cropping at test time",type=int, default=0)
   a.add_argument("--steps", help="Number of depth steps", type=int, default=64)
   a.add_argument(
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
@@ -339,6 +340,7 @@ def arguments():
   if not args.not_magma: plt.magma()
 
   assert(args.valid_freq > 0), "Must pass a valid frequency > 0"
+  if (args.test_crop_size <= 0): args.test_crop_size = args.crop_size
   return args
 
 loss_map = {
@@ -656,36 +658,36 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
           model.refl.light.set_idx(torch.tensor([i], device=device))
 
-        if args.crop_size == 0: raise NotImplementedError("TODO implement no crop testing")
+        if args.test_crop_size == 0: raise NotImplementedError("TODO implement no crop testing")
 
-        N = math.ceil(args.render_size/args.crop_size)
+        cs = args.test_crop_size
+        N = math.ceil(args.render_size/cs)
         for x in range(N):
           for y in range(N):
-            c0 = x * args.crop_size
-            c1 = y * args.crop_size
+            c0 = x * cs
+            c1 = y * cs
             out, rays = render(
-              model, cam[i:i+1, ...], (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
+              model, cam[i:i+1, ...], (c0,c1,cs,cs), size=args.render_size,
               with_noise=False, times=ts, args=args,
             )
             out = out.squeeze(0)
-            got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out
+            got[c0:c0+cs, c1:c1+cs, :] = out
 
             if hasattr(model, "nerf") and args.depth_images:
               model_ts = model.nerf.ts[:, None, None, None, None]
-              depth[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = \
+              depth[c0:c0+cs, c1:c1+cs, :] = \
                 nerf.volumetric_integrate(model.nerf.weights, model_ts)[0,...]
             if hasattr(model, "n") and hasattr(model, "nerf") :
               if args.depth_query_normal and args.depth_images:
                 r_o, r_d = rays.squeeze(0).split([3,3], dim=-1)
-                depth_region = depth[c0:c0+args.crop_size, c1:c1+args.crop_size]
+                depth_region = depth[c0:c0+cs, c1:c1+cs]
                 isect = r_o + r_d * depth_region
-                normals[c0:c0+args.crop_size, c1:c1+args.crop_size] = \
-                  (F.normalize(model.sdf.normals(isect), dim=-1)+1)/2
+                normals[c0:c0+cs, c1:c1+cs] = (F.normalize(model.sdf.normals(isect), dim=-1)+1)/2
                 too_far_mask = depth_region > (args.far - 1e-1)
-                normals[c0:c0+args.crop_size, c1:c1+args.crop_size][too_far_mask[...,0]] = 0
+                normals[c0:c0+cs, c1:c1+cs][too_far_mask[...,0]] = 0
               else:
                 render_n = nerf.volumetric_integrate(model.nerf.weights, model.n)
-                normals[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = (render_n[0]+1)/2
+                normals[c0:c0+cs, c1:c1+cs, :] = (render_n[0]+1)/2
             elif hasattr(model, "n") and hasattr(model, "sdf"):
               ...
 
@@ -741,16 +743,17 @@ def render_over_time(args, model, cam):
   with torch.no_grad():
     for i, t in enumerate(tqdm(ts)):
       got = torch.zeros(args.render_size, args.render_size, 3, device=device)
-      N = math.ceil(args.render_size/args.crop_size)
+      cs = args.test_crop_size
+      N = math.ceil(args.render_size/cs)
       for x in range(N):
         for y in range(N):
-          c0 = x * args.crop_size
-          c1 = y * args.crop_size
+          c0 = x * cs
+          c1 = y * cs
           out, _rays = render(
-            model, cam, (c0,c1,args.crop_size,args.crop_size), size=args.render_size,
+            model, cam, (c0,c1,cs,cs), size=args.render_size,
             with_noise=False, times=t.unsqueeze(0), args=args,
           )
-          got[c0:c0+args.crop_size, c1:c1+args.crop_size, :] = out.squeeze(0)
+          got[c0:c0+cs, c1:c1+cs, :] = out.squeeze(0)
       save_image(os.path.join(args.outdir, f"time_{i:03}.png"), got)
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
