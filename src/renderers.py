@@ -5,7 +5,7 @@ import random
 import math
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim )
+from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, upshifted_sigmoid )
 from .refl import ( LightAndRefl )
 
 def load(args, shape, light_and_refl: LightAndRefl):
@@ -109,7 +109,7 @@ class AllLearnedOcc(nn.Module):
   def all_learned_occ(self): return self
   def encode(self, pts, dir, latent):
     self.raw_att = self.attenuation(self.component_fn(pts, dir), latent)
-    return self.raw_att.sigmoid()
+    return upshifted_sigmoid(self.raw_att)
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
     dir, _, spectrum = lights(pts, mask=mask)

@@ -12,13 +12,12 @@ original: clean
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 32 --epochs 80_000 --crop-size 24 \
+	--size 512 --epochs 50_000 --crop-size 24 --test-crop-size 32 \
 	--near 2 --far 6 --batch-size 2 --model volsdf --sdf-kind curl-mlp \
 	-lr 3e-4 --loss-window 750 --valid-freq 250 \
-	--sdf-eikonal 1e-5 --save-freq 2500 --sigmoid-kind upshifted \
-	--depth-images --refl-kind pos \
-  --depth-query-normal --normals-from-depth \
-	--save models/lego_volsdf.pt #--load models/lego_volsdf.pt
+	--save-freq 2500 --sigmoid-kind upshifted \
+	--depth-images --refl-kind pos --omit-bg --depth-query-normal \
+	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
 
 volsdf_with_normal: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \

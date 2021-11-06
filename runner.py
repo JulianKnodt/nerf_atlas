@@ -45,8 +45,7 @@ def arguments():
     ],
   )
   a.add_argument(
-    "--derive-kind", help="Attempt to derive the kind if a single file is given",
-    action="store_false",
+    "--derive-kind", help="Attempt to derive the kind if a single file is given", action="store_false",
   )
 
   a.add_argument("--outdir", help="path to output directory", type=str, default="outputs/")
@@ -68,8 +67,7 @@ def arguments():
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
   a.add_argument(
-    "--sigmoid-kind", help="What activation to use with the reflectance model.", default="thin",
-    choices=list(utils.sigmoid_kinds.keys()),
+    "--sigmoid-kind", help="What activation to use with the reflectance model.", default="thin", choices=list(utils.sigmoid_kinds.keys()),
   )
 
   a. add_argument(
@@ -96,12 +94,10 @@ def arguments():
   )
   a.add_argument(
     "--train-parts", help="Which parts of the model should be trained",
-    choices=["all", "refl", "occ", "[TODO]Camera"], default=["all"], nargs="+",
+    choices=["all", "refl", "occ", "path-tf", "[TODO]Camera"], default=["all"], nargs="+",
   )
   a.add_argument(
-    "--loss-fns", help="Loss functions to use", nargs="+", type=str,
-    # TODO add SSIM here? Or LPIPS?
-    choices=["l1", "l2", "rmse"], default=["l2"],
+    "--loss-fns", help="Loss functions to use", nargs="+", type=str, choices=list(loss_map.keys()), default=["l2"],
   )
   a.add_argument(
     "--color-spaces", help="Color spaces to compare on", nargs="+", type=str,
@@ -111,23 +107,18 @@ def arguments():
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action="store_true",
   )
   a.add_argument(
-    "--has-multi-light", help="For NeRV point if there is a multi point light dataset",
-    action="store_true",
+    "--has-multi-light", help="For NeRV point if there is a multi point light dataset", action="store_true",
   )
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
   a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
   a.add_argument(
-    "--sched-min", default=5e-5, type=float,
-    help="Minimum value for the scheduled learning rate.",
+    "--sched-min", default=5e-5, type=float, help="Minimum value for the scheduled learning rate.",
   )
   a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
   # TODO really fix MPIs
-  a.add_argument("--mpi", help="[WIP] Use multi-plain imaging", action="store_true")
   a.add_argument(
-    "--replace",
-    nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "time_delta", "al_occ"],
-    default=[], type=str,
-    help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
+    "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "time_delta", "al_occ"],
+    default=[], type=str, help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
   )
   a.add_argument(
     "--all-learned-occ-kind", help="What parameters the Learned Ambient Occlusion should take",
@@ -147,26 +138,22 @@ def arguments():
     help="Latent-size to use in shape models. If not supported by the shape model, it will be ignored.",
   )
   a.add_argument(
-    "--refl-order", default=2, type=int,
-    help="Order for classical Spherical Harmonics & Fourier Basis BSDFs/Reflectance models",
+    "--refl-order", default=2, type=int, help="Order for classical Spherical Harmonics & Fourier Basis BSDFs/Reflectance models",
   )
   a.add_argument(
-    "--inc-fourier-freqs", action="store_true",
-    help="Multiplicatively increase the fourier frequency standard deviation on each run",
+    "--inc-fourier-freqs", action="store_true", help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
-    "--refl-kind", help="What kind of reflectance model to use",
-    choices=list(refl.refl_kinds.keys()), default="view",
+    "--refl-kind", help="What kind of reflectance model to use", choices=list(refl.refl_kinds.keys()), default="view",
   )
   refla.add_argument(
     "--weighted-subrefl-kinds",
     help="What subreflectances should be used with --refl-kind weighted. \
     They will not take a spacial component, and only rely on view direction, normal, \
     and light direction.",
-    choices=[r for r in refl.refl_kinds if r != "weighted"],
-    nargs="+", default=[],
+    choices=[r for r in refl.refl_kinds if r != "weighted"], nargs="+", default=[],
   )
   refla.add_argument(
     "--normal-kind", choices=[None, "elaz", "raw"], default=None,
@@ -219,23 +206,16 @@ def arguments():
 
   sdfa = a.add_argument_group("sdf")
   sdfa.add_argument("--sdf-eikonal", help="Weight of SDF eikonal loss", type=float, default=0)
-  sdfa.add_argument(
-    "--surface-eikonal", help="Weight of SDF eikonal loss on surface", type=float, default=0,
-  )
+  sdfa.add_argument("--surface-eikonal", help="Weight of SDF eikonal loss on surface", type=float, default=0)
   # normal smoothing arguments
-  sdfa.add_argument(
-    "--smooth-normals", help="Amount to attempt to smooth normals", type=float, default=0,
-  )
-  sdfa.add_argument(
-    "--smooth-surface", help="Amount to attempt to smooth surface normals", type=float, default=0,
-  )
+  sdfa.add_argument("--smooth-normals", help="Amount to attempt to smooth normals", type=float, default=0)
+  sdfa.add_argument("--smooth-surface", help="Amount to attempt to smooth surface normals", type=float, default=0)
   sdfa.add_argument(
     "--smooth-eps", help="size of random uniform perturbation for smooth normals regularization",
     type=float, default=1e-3,
   )
   sdfa.add_argument(
-    "--smooth-eps-rng", action="store_true",
-    help="Smooth by random amount instead of smoothing by a fixed distance",
+    "--smooth-eps-rng", action="store_true", help="Smooth by random amount instead of smoothing by a fixed distance",
   )
   sdfa.add_argument(
     "--smooth-n-ord", nargs="+", default=[2], choices=[1,2], type=int,
@@ -259,18 +239,14 @@ def arguments():
   dnerfa = a.add_argument_group("dnerf")
   dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
   dnerfa.add_argument(
-    "--dnerf-tf-smooth-weight", help="L2 smooth dnerf tf", type=float, default=0,
-  )
-  dnerfa.add_argument(
-    "--spline", type=int,
-    help="Use spline estimator for dynamic nerf delta prediction", default=0,
+    "--spline", type=int, default=0, help="Use spline estimator w/ given number of poitns for dynamic nerf delta prediction",
   )
   dnerfa.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
   dnerfa.add_argument("--with-canon", help="Preload a canonical NeRF", type=str, default=None)
   dnerfa.add_argument("--fix-canon", help="Do not train canonical NeRF", action="store_true")
   dnerfa.add_argument(
     "--render-over-time", default=-1, type=int,
-    help="Fix camera to i, and render over time frame. < 0 is no camera",
+    help="Fix camera to i, and render over a time frame. < 0 is no camera",
   )
 
   cam = a.add_argument_group("camera parameters")
@@ -343,6 +319,7 @@ def arguments():
   if (args.test_crop_size <= 0): args.test_crop_size = args.crop_size
   return args
 
+# TODO add SSIM here? Or LPIPS?
 loss_map = {
   "l2": F.mse_loss,
   "l1": F.l1_loss,
@@ -367,10 +344,7 @@ if torch.cuda.is_available():
 def render(
   model, cam, crop,
   # how big should the image be
-  size,
-
-  args,
-  times=None, with_noise=0.1,
+  size, args, times=None, with_noise=0.1,
 ):
   ii, jj = torch.meshgrid(
     torch.arange(size, device=device, dtype=torch.float),
@@ -387,7 +361,6 @@ def render(
   elif args.data_kind == "pixel-single": return model((rays, positions)), rays
   return model(rays), rays
 
-def sqr(x): return x * x
 
 def save_losses(args, losses):
   outdir = args.outdir
@@ -444,6 +417,8 @@ def load_loss_fn(args, model):
     return nerf.alternating_volsdf_loss(model, loss_fn, sdf.masked_loss(loss_fn))
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
   return loss_fn
+
+def sqr(x): return x * x
 
 # train the model with a given camera and some labels (imgs or imgs+times)
 # light is a per instance light.
@@ -511,8 +486,6 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     if sched is not None: display["lr"] = f"{sched.get_last_lr()[0]:.1e}"
 
     if args.latent_l2_weight > 0: loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
-
-    if args.dnerf_tf_smooth_weight > 0: loss = loss + args.dnerf_tf_smooth_weight * model.delta_smoothness
 
     pts = None
     # prepare one set of points for either smoothing normals or eikonal.
@@ -762,11 +735,11 @@ def set_per_run(model, args):
   if isinstance(model, nerf.CommonNeRF): model.steps = args.steps
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
-  ls = model.intermediate_size # How many extra values the model outputs
+  ls = model.intermediate_size # How many extra values the density model outputs
 
   if "occ" in args.replace:
-    if args.occ_kind != None and hasattr(model, "occ"):
-      model.occ = renderers.load_occlusion_kind(args, args.occ_kind, ls).to(device)
+    assert((args.occ_kind is not None) and hasattr(model, "occ"))
+    model.occ = renderers.load_occlusion_kind(args, args.occ_kind, ls).to(device)
 
   if "al_occ" in args.replace:
     assert(hasattr(model, "occ"))
@@ -779,30 +752,24 @@ def set_per_run(model, args):
     if args.refl_kind != "curr" and hasattr(model, "refl"):
       refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
       model.set_refl(refl_inst)
-  if "bg" in args.replace:
-    if isinstance(model, nerf.CommonNeRF): model.set_bg(args.bg)
-    elif hasattr(model, "nerf"): model.nerf.set_bg(args.bg)
-  if "sigmoid" in args.replace and hasattr(model, "nerf"):
-    model.nerf.set_sigmoid(args.sigmoid_kind)
+  if "bg" in args.replace: model.set_bg(args.args)
+  if "sigmoid" in args.replace and hasattr(model, "nerf"): model.nerf.set_sigmoid(args.sigmoid_kind)
+
   if "light" in args.replace:
     if isinstance(model.refl, refl.LightAndRefl): model.refl.light = lights.load(args)
     else: raise NotImplementedError("TODO convert to light and reflectance")
 
   if "time_delta" in args.replace:
     if isinstance(model, nerf.DynamicNeRF):
-      if args.spline > 0: model.set_spline_estim()
-      else: model.set_delta_estim()
+      model.set_spline_estim(args.spline) if args.spline > 0 else model.set_delta_estim()
       model = model.to(device)
-    else:
-      print("[warn]: Model is not an instance of dynamic nerf, ignoring replace time_delta.")
-  if args.model == "sdf": return
+    else: print("[warn]: Model is not an instance of dynamic nerf, ignoring `--replace time_delta.`")
 
   # converts from a volsdf with direct integration to one with indirect lighting
   if args.volsdf_direct_to_path:
     print("[note]: Converting VolSDF direct integration to path")
     assert(isinstance(model, nerf.VolSDF)), "--volsdf-direct-to-path only applies to VolSDF"
-    did_convert = model.convert_to_path()
-    if did_convert: model = model.to(device)
+    if model.convert_to_path(): model = model.to(device)
     else: print("[note]: Model already uses pathtracing, nothing changed.")
 
   if args.all_learned_to_joint:
@@ -826,6 +793,7 @@ def set_per_run(model, args):
       isinstance(model.occ, renderers.JointLearnedConstOcc)):
       print("[warn]: model occlusion is not all-learned, cannot decay all learned occ")
       args.decay_all_learned_occ = 0
+
   if args.convert_analytic_to_alt:
     assert(hasattr(model, "refl")), "Model does not have a reflectance in the right place"
     if not isinstance(model.refl, refl.AlternatingOptimization) \
@@ -845,9 +813,9 @@ def set_per_run(model, args):
       model.refl = model.refl.to(device)
     else: print("[note]: redundant alternating optimization, ignoring")
 
+  # swap which portion is being trained for the alternating optimization
   if hasattr(model, "refl"):
-    if isinstance(model.refl, refl.AlternatingOptimization):
-      model.refl.toggle(args.alt_train == "analytic")
+    if isinstance(model.refl, refl.AlternatingOptimization): model.refl.toggle(args.alt_train == "analytic")
     elif isinstance(model.refl, refl.LightAndRefl) and isinstance(model.refl.refl, refl.AlternatingOptimization):
       model.refl.refl.toggle(args.alt_train == "analytic")
 
@@ -904,11 +872,7 @@ def load_model(args):
       assert((not args.dnerfae) or isinstance(model, nerf.NeRFAE)), \
         f"Can only use NeRFAE canonical with DNeRFAE, got {type(model)}"
     constructor = nerf.DynamicNeRFAE if args.dnerfae else nerf.DynamicNeRF
-    model = constructor(
-      canonical=model,
-      spline=args.spline,
-    ).to(device)
-    if args.dnerf_tf_smooth_weight > 0: model.set_smooth_delta()
+    model = constructor(canonical=model, spline=args.spline).to(device)
 
   if args.data_kind == "pixel-single":
     encoder = SpatialEncoder().to(device)
@@ -933,8 +897,8 @@ def load_model(args):
     model = nn.DataParallel(model)
     setattr(model, "nerf", og_model)
 
-  if args.torchjit: model = torch.jit.script(model)
   if args.volsdf_alternate: model = nerf.AlternatingVolSDF(model)
+  if args.torchjit: model = torch.jit.script(model)
   return model
 
 def save(model, args, version=None):
@@ -981,6 +945,9 @@ def main():
     if "occ" in args.train_parts:
       assert(hasattr(model, "occ")), "Model must have occlusion field (maybe internal bug)"
       parameters.append(model.occ.parameters())
+    if "path-tf" in args.train_parts:
+      assert(hasattr(model, "transfer_fn")), "Model must have a transfer function"
+      parameters.append(model.transfer_fn.parameters())
     if "camera" in args.train_parts:
       parameters.append(cam.parameters())
     parameters = chain(*parameters)
