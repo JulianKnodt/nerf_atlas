@@ -426,9 +426,7 @@ class VolSDF(CommonNeRF):
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
         f"Must have light w/ volsdf integration {type(self.sdf.refl)}"
-      args = {}
-      setattr(args, "all_learned_occ_kind", "pos_elaz")
-      self.occ = load_occlusion_kind(args, occ_kind, self.sdf.latent_size)
+      self.occ = load_occlusion_kind({}, occ_kind, self.sdf.latent_size)
 
       if integrator_kind == "direct": self.secondary = self.direct
       elif integrator_kind == "path": self.convert_to_path()

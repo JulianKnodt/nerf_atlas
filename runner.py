@@ -282,6 +282,7 @@ def arguments():
   rprt.add_argument("--normals-from-depth", action="store_true", help="Render extra normal images from depth")
   rprt.add_argument("--depth-query-normal", action="store_true", help="Render extra normal images from depth")
   rprt.add_argument("--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)")
+  rprt.add_argument("--gamma-correct", action="store_true", help="Gamma correct final images")
   # TODO write PSNR, SSIM, to file.
 
   meta = a.add_argument_group("meta runner parameters")
@@ -671,6 +672,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         o = i + offset
         print(f"[{o:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
         name = f"train_{o:03}.png" if training else f"test_{o:03}.png"
+        if args.gamma_correct:
+          exp = exp.clamp(min=1e-10)**(1/2.2)
+          got = got.clamp(min=1e-10)**(1/2.2)
         items = [exp, got.clamp(min=0, max=1)]
         if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0, max=1))
         if (depth != 0).any() and args.normals_from_depth:
@@ -862,7 +866,6 @@ def load_model(args):
 
   if args.model == "ae" and args.latent_l2_weight > 0: model.set_regularize_latent()
 
-  if args.mpi: model = MPI(canonical=model, device=device)
 
   # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":

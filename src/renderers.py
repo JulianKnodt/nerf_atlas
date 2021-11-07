@@ -181,7 +181,9 @@ def load_occlusion_kind(args, kind=None, latent_size:int=0):
   con = occ_kinds.get(kind, -1)
   if con == -1: raise NotImplementedError(f"load occlusion: {args.occ_kind}")
   kwargs = { "latent_size": latent_size, }
-  if kind == "all-learned": kwargs["kind"] = args.all_learned_occ_kind
+  if kind == "all-learned":
+    try: kwargs["kind"] = args["all_learned_occ_kind"]
+    except: kwargs["kind"] = "pos-elaz"
 
   return con(**kwargs)
 
