@@ -142,31 +142,6 @@ class JointLearnedConstOcc(nn.Module):
     spectrum = spectrum * all_att * hit_att.unsqueeze(-1)
     return dir, spectrum
 
-# Learned approximate penumbra based on the SDF values based on how close nearby points
-# are.
-# Inspired by https://iquilezles.org/www/articles/rmshadows/rmshadows.htm
-# Doesn't work so well, maybe worth continuing to experiment with it?
-class ApproximateSmoothShadow(nn.Module):
-  def __init__(
-    self,
-    latent_size:int=0,
-  ):
-    super().__init__()
-    self.attenuation = SkipConnMLP(
-      in_size=2, out=1, latent_size=latent_size,
-      num_layers=6, hidden_size=180, xavier_init=True, skip=999,
-    )
-  def forward(self, pts, lights, isect_fn, latent=None, mask=None):
-    pts = pts if mask is None else pts[mask]
-    dir, dist, spectrum = lights(pts, mask=mask)
-    far = dist.max().item()
-    visible, min_sdf_val, point_of_min = \
-      isect_fn(r_o=pts, r_d=dir, near=2e-3, far=far, eps=1e-3)
-    assert(min_sdf_val is not None), "Cannot use Approx Smooth Shadow w/o throughput"
-    dists = torch.linalg.norm(pts - point_of_min, dim=-1, ord=2, keepdim=True)
-    att = self.attenuation(torch.cat([min_sdf_val, dists], dim=-1), latent).sigmoid()
-    return dir, spectrum * att
-
 occ_kinds = {
   None: lambda **kwargs: lighting_wo_isect,
   "hard": LightingWIsect,
@@ -174,7 +149,6 @@ occ_kinds = {
   "learned-const": LearnedConstantSoftLighting,
   "all-learned": AllLearnedOcc,
   "joint-all-const": JointLearnedConstOcc,
-  #"approx-soft": ApproximateSmoothShadow,
 }
 
 def load_occlusion_kind(args, kind=None, latent_size:int=0):

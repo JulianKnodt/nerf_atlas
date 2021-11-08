@@ -122,14 +122,15 @@ class SDF(nn.Module):
     return pts, hit, tput, self.normals(pts)
   def intersect_mask(self, r_o, r_d, near=None, far=None, eps=1e-3):
     with torch.no_grad():
-      best_pts, hits, best_dist, throughput = march.bisect(
-        self.underlying, r_o, r_d, eps=eps,
+      throughput, _, _, _ = march.throughput_with_sign_change(
+        self.underlying, r_o, r_d,
         near=self.near if near is None else near,
         far=self.far if far is None else far,
         # since this is just for intersection, alright to use fewer steps
-        iters=32 if self.training else 128,
+        batch_size=32 if self.training else 196,
       )
-      return ~hits, throughput, best_pts
+      hits = throughput < eps
+      return ~hits, throughput, None
   def forward(self, rays, with_throughput=True):
     r_o, r_d = rays.split([3,3], dim=-1)
     pts, hit, t, tput = self.isect(

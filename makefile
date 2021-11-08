@@ -155,7 +155,8 @@ nerv_point: clean
   --sigmoid-kind leaky_relu --skip-loss 100 --refl-bidirectional \
   --notraintest --has-multi-light --replace occ --all-learned-occ-kind pos-elaz \
   --normals-from-depth --msssim-loss --display-smoothness --gamma-correct \
-  #--load models/nerv_${nerv_dataset}.pt # --all-learned-to-joint \
+  --all-learned-to-joint \
+  --load models/nerv_${nerv_dataset}.pt # --all-learned-to-joint \
   #--smooth-normals 1e-5 --smooth-eps 1e-3 --smooth-surface 1e-5 \
 
 nerv_point_diffuse: clean
