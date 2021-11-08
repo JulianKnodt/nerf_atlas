@@ -283,7 +283,7 @@ def arguments():
   rprt.add_argument("--depth-query-normal", action="store_true", help="Render extra normal images from depth")
   rprt.add_argument("--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)")
   rprt.add_argument("--gamma-correct", action="store_true", help="Gamma correct final images")
-  # TODO write PSNR, SSIM, to file.
+  rprt.add_argument("--exp-bg", action="store_true", help="Use mask of labels while rendering. For vis only.")
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -464,7 +464,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
 
     ts = None if times is None else times[idxs]
     c0,c1,c2,c3 = crop = get_crop()
-    ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :]
+    ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :3]
 
     if light is not None: model.refl.light = light[idxs]
     # TODO this feels wrong somehow? How to more elegantly handle case of indexing refl.light
@@ -675,6 +675,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         if args.gamma_correct:
           exp = exp.clamp(min=1e-10)**(1/2.2)
           got = got.clamp(min=1e-10)**(1/2.2)
+        if args.exp_bg:
+          exp = torch.cat([exp, labels[i,...,3:]], dim=-1)
+          got = torch.cat([got, labels[i,...,3:]], dim=-1)
         items = [exp, got.clamp(min=0, max=1)]
         if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0, max=1))
         if (depth != 0).any() and args.normals_from_depth:

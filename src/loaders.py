@@ -208,7 +208,7 @@ def nerv_point(
     img = TVF.resize(img, size=(size, size))
     #img[:3,...] = TVF.adjust_gamma(img[:3,...].clamp(min=1e-10), 1/2.2)
     img = img.permute(1,2,0)
-    exp_imgs.append(img[..., :3])
+    exp_imgs.append(img[..., :])
     exp_masks.append((img[..., 3] - 1e-5).ceil())
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
 
