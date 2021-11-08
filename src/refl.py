@@ -261,12 +261,12 @@ class Diffuse(Reflectance):
 
   def forward(self, x, view, normal, light, latent=None):
     rgb = self.act(self.diffuse_color(self.space(x), latent))
-    attenuation = (normal * light).sum(dim=-1, keepdim=True)
-    assert(((attenuation <= 1.001) & (attenuation >= -1.001)).all()), \
-      f"{attenuation.min().item()}, {attenuation.max().item()}"
-    if getattr(self, "bidirectional", False): attenuation = attenuation.abs()
+    att = (normal * light).sum(dim=-1, keepdim=True)
+    assert(((att <= 1.001) & (att >= -1.001)).all()), \
+      f"{att.min().item()}, {att.max().item()}"
+    if getattr(self, "bidirectional", False): att = att.maximum((-normal * light).sum(dim=-1, keepdim=True))
     # NOTE do not clamp attenuation to 0, cannot learn from that.
-    return rgb * attenuation
+    return rgb * att
 
 # https://pbr-book.org/3ed-2018/Reflection_Models/Fourier_Basis_BSDFs
 class FourierBasis(Reflectance):
