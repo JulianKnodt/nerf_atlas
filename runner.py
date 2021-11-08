@@ -283,6 +283,7 @@ def arguments():
   rprt.add_argument("--depth-query-normal", action="store_true", help="Render extra normal images from depth")
   rprt.add_argument("--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)")
   rprt.add_argument("--gamma-correct", action="store_true", help="Gamma correct final images")
+  rprt.add_argument("--render-frame", type=int, default=-1, help="Render 1 frame only, < 0 means none.")
   rprt.add_argument("--exp-bg", action="store_true", help="Use mask of labels while rendering. For vis only.")
 
   meta = a.add_argument_group("meta runner parameters")
@@ -675,9 +676,6 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         if args.gamma_correct:
           exp = exp.clamp(min=1e-10)**(1/2.2)
           got = got.clamp(min=1e-10)**(1/2.2)
-        if args.exp_bg:
-          exp = torch.cat([exp, labels[i,...,3:]], dim=-1)
-          got = torch.cat([got, labels[i,...,3:]], dim=-1)
         items = [exp, got.clamp(min=0, max=1)]
         if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0, max=1))
         if (depth != 0).any() and args.normals_from_depth:
@@ -689,6 +687,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         if args.draw_colormap:
           colormap = utils.color_map(cam[i:i+1])
           items.append(colormap)
+        if args.exp_bg:
+          items = [item * labels[i,...,3:] for item in items if item.shape[:-1] == labels.shape[1:-1]]
         save_plot(os.path.join(args.outdir, name), *items)
         ls.append(psnr)
 
