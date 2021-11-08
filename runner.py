@@ -692,6 +692,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         save_plot(os.path.join(args.outdir, name), *items)
         ls.append(psnr)
 
+  rf = args.render_frame
+  if args.render_frame >= 0: return render_test_set(model, cam[rf:rf+1], labels[rf:rf+1], light[rf:rf+1], offset=rf)
   render_test_set(model, cam, labels, light)
   # also render the multi point light dataset, have to load it separately because it's a
   # slightly different light formulation.
