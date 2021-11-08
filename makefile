@@ -12,12 +12,12 @@ original: clean
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 512 --epochs 50_000 --crop-size 24 --test-crop-size 32 \
+	--size 100 --epochs 50_000 --crop-size 24 --test-crop-size 32 \
 	--near 2 --far 6 --batch-size 2 --model volsdf --sdf-kind curl-mlp \
 	-lr 3e-4 --loss-window 750 --valid-freq 250 \
 	--save-freq 2500 --sigmoid-kind upshifted \
 	--depth-images --refl-kind pos --omit-bg --depth-query-normal \
-	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
+	--save models/lego_volsdf.pt #--load models/lego_volsdf.pt
 
 volsdf_with_normal: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -145,14 +145,14 @@ dtu_diffuse: clean
 nerv_dataset := armadillo
 nerv_point: clean
 	python3 runner.py -d data/nerv_public_release/${nerv_dataset}/ \
-	--data-kind nerv_point --model volsdf --sdf-kind mlp \
+	--data-kind nerv_point --model volsdf --sdf-kind curl-mlp \
 	--save models/nerv_${nerv_dataset}.pt \
 	--size 64 --crop-size 11 --epochs 50_000 --loss-window 1500 \
-	--near 2 --far 6 --batch-size 4 -lr 8e-5 --refl-kind diffuse --refl-bidirectional \
-	--sdf-eikonal 1e-1 --light-kind dataset --seed -1 \
-	--loss-fns l2 --valid-freq 500 --save-freq 2500 --occ-kind all-learned \
+	--near 2 --far 6 --batch-size 4 -lr 3e-4 --refl-kind diffuse --refl-bidirectional \
+	--light-kind dataset --seed -1 \
+	--valid-freq 500 --save-freq 2500 --occ-kind all-learned \
   --color-spaces rgb xyz hsv --depth-images --depth-query-normal \
-  --sigmoid-kind leaky_relu --skip-loss 100 \
+  --sigmoid-kind leaky_relu --skip-loss 100 --refl-bidirectional \
   --notraintest --has-multi-light --replace occ --all-learned-occ-kind pos-elaz \
   --normals-from-depth --msssim-loss --display-smoothness --gamma-correct \
   #--load models/nerv_${nerv_dataset}.pt # --all-learned-to-joint \

@@ -259,11 +259,15 @@ class MLP(SDFModel):
     )
   def forward(self, x): return self.mlp(x)
 
+# CurlMLP is an irrotational field that produces an SDF.
+# It can be thought of as generating a Signed Directional Distance Function,
+# Which is dF(x)/dx * sign(F(x)), but the sign is approximated by tanh.
+# This form works because SDFs have Curl(SDF) = 0 almost everywhere.
 class CurlMLP(SDFModel):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
-      in_size=3, out=2+self.latent_size,
+      in_size=3, out=1+self.latent_size,
       enc=FourierEncoder(input_dims=3, sigma=1<<5),
       num_layers=6, hidden_size=256,
       xavier_init=True,
@@ -271,13 +275,8 @@ class CurlMLP(SDFModel):
   def forward(self, x):
     with torch.enable_grad():
       x = x if x.requires_grad else x.requires_grad_()
-      # better impl?
-      field, inside, latent = self.mlp(x).split([1,1, self.latent_size], dim=-1)
-      pos_field = autograd(x, field)
-      #neg_field = autograd(x, field2)
-      #dist = torch.linalg.norm(pos_field, dim=-1, keepdim=True) \
-      #  - torch.linalg.norm(neg_field, dim=-1, keepdim=True)
-      field = torch.linalg.norm(pos_field, dim=-1, keepdim=True) * inside.tanh()
+      field, latent = self.mlp(x).split([1, self.latent_size], dim=-1)
+      field = torch.linalg.norm(autograd(x, field), dim=-1, keepdim=True) * field.tanh()
       return torch.cat([field, latent], dim=-1)
 
 #def siren_act(v): return (30*v).sin()
