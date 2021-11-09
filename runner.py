@@ -688,7 +688,12 @@ def test(model, cam, labels, args, training: bool = True, light=None):
           colormap = utils.color_map(cam[i:i+1])
           items.append(colormap)
         if args.exp_bg:
-          items = [item * labels[i,...,3:] for item in items if item.shape[:-1] == labels.shape[1:-1]]
+          new_items = []
+          for item in items:
+            if item.shape[:-1] != labels.shape[1:-1]: new_items.append(item)
+            elif item.shape[-1] == 1: new_items.append(item * labels[i,...,3:])
+            else: new_items.append(torch.cat([item, labels[i,...,3:]], dim=-1))
+          items = new_items
         save_plot(os.path.join(args.outdir, name), *items)
         ls.append(psnr)
 

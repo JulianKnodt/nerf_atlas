@@ -265,7 +265,8 @@ class Diffuse(Reflectance):
     assert(((att <= 1.001) & (att >= -1.001)).all()), \
       f"{att.min().item()}, {att.max().item()}"
     if getattr(self, "bidirectional", False): att = att.maximum((-normal * light).sum(dim=-1, keepdim=True))
-    # NOTE do not clamp attenuation to 0, cannot learn from that.
+    else: att.clamp(min=0)
+    # When clamping to 0, it only learns when directly illuminated which seems to be alright.
     return rgb * att
 
 # https://pbr-book.org/3ed-2018/Reflection_Models/Fourier_Basis_BSDFs
