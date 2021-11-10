@@ -265,7 +265,7 @@ class Diffuse(Reflectance):
     assert(((att <= 1.001) & (att >= -1.001)).all()), \
       f"{att.min().item()}, {att.max().item()}"
     if getattr(self, "bidirectional", False): att = att.maximum((-normal * light).sum(dim=-1, keepdim=True))
-    else: att.clamp(min=0)
+    else: att.clamp(min=1e-5)
     # When clamping to 0, it only learns when directly illuminated which seems to be alright.
     return rgb * att
 
@@ -533,7 +533,9 @@ class AlternatingOptimization(nn.Module):
     super().__init__()
     # TODO possibly allow for different constructors
     self.analytic = old_analytic if old_analytic is not None else Diffuse(**kwargs)
+    kwargs["act"] = "normal" # enforce the learned model is a sigmoid function.
     self.learned = old_learned if old_learned is not None else Rusin(**kwargs)
+    self.add_blend()
 
     # always start by optimizing diffuse, else the learned rusinkiewicz is fixed
     self.learn_analytic = True
@@ -553,11 +555,19 @@ class AlternatingOptimization(nn.Module):
       p.requires_grad = self.learn_analytic
     for p in self.learned.parameters():
       p.requires_grad = not self.learn_analytic
+  def add_blend(self):
+    self.blend = SkipConnMLP(
+      in_size=3, out=1, latent_size=self.analytic.latent_size,
+      enc=FourierEncoder(input_dims=in_size),
+      num_layers=5, hidden_size=128, xavier_init=True,
+    )
 
   def forward(self, x, view, normal, light, latent=None):
     learned = self.learned(x, view, normal,light, latent)
     analytic = self.analytic(x, view, normal, light, latent)
-    return learned + analytic
+    if not hasattr(self, "blend"): self.add_blend()
+    t = self.blend(x, latent).sigmoid()
+    return t * learned + (1-t) * analytic
 
 def nonzero_eps(v, eps: float=1e-7):
   # in theory should also be copysign of eps, but so small it doesn't matter
