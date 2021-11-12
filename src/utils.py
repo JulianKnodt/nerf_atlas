@@ -167,6 +167,10 @@ def rotate_vector(v, axis, c, s):
 
 def mse2psnr(x): return -10 * torch.log10(x)
 
+def ssim_loss(xs, refs):
+  from pytorch_msssim import ( ssim )
+  return ssim(xs, refs, data_range=1, size_average=True)
+
 def msssim_loss(xs, refs):
   # only import here in case not installed.
   from pytorch_msssim import ( ms_ssim )

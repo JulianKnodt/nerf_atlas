@@ -12,7 +12,9 @@ def load(args):
   if cons is None: raise NotImplementedError(f"light kind: {args.light_kind}")
 
   kwargs = {}
-  if args.light_kind == "field": kwargs["num_embeddings"] = args.num_labels
+  if args.light_kind == "field":
+    try: kwargs["num_embeddings"] = args.num_labels
+    except: kwargs["num_embeddings"] = 1
   if args.light_kind == "point":
     kwargs["center"] = args.point_light_position[:3]
     kwargs["intensity"] = [args.light_intensity]
@@ -55,6 +57,7 @@ class Field(Light):
   @property
   def supports_idx(self): return self.num_embeddings > 1
   def set_idx(self, v): self.curr_idx = v
+  def expand(self, _n): return self
   def iter(self): yield self
   def forward(self, x, mask=None):
     if mask is not None: raise NotImplementedError()

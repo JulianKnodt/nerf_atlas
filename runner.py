@@ -321,11 +321,12 @@ def arguments():
   if (args.test_crop_size <= 0): args.test_crop_size = args.crop_size
   return args
 
-# TODO add SSIM here? Or LPIPS?
+# TODO add LPIPS?
 loss_map = {
   "l2": F.mse_loss,
   "l1": F.l1_loss,
   "rmse": lambda x, ref: F.mse_loss(x, ref).clamp(min=1e-10).sqrt(),
+  "ssim": utils.ssim_loss,
 }
 
 color_fns = {
