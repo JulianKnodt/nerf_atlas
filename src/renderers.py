@@ -85,6 +85,7 @@ class LearnedConstantSoftLighting(nn.Module):
 
 def just_pos(pos, dir): return pos
 def pos_elaz(pos, dir): return torch.cat([pos, dir_to_elev_azim(dir)], dim=-1)
+
 all_learned_occ_kinds = {
   "pos": (just_pos, 3),
   "pos-elaz": (pos_elaz, 5)
@@ -134,7 +135,7 @@ class JointLearnedConstOcc(nn.Module):
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     if mask is not None: raise NotImplementedError("TODO did not implement handling mask")
     dir, dist, spectrum = lights(pts, mask=mask)
-    far = dist.max().item()
+    far = dist.max().item() if isinstance(dist, torch.Tensor) else dist
     # only include the all learned occ if training.
     all_att = self.alo.encode(pts, dir, latent)
     visible, _, _ = isect_fn(r_o=pts, r_d=dir, near=1e-1, far=far, eps=1e-3)

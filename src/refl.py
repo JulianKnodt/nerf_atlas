@@ -62,7 +62,7 @@ class LightAndRefl(nn.Module):
 
   def forward(self, x, view=None, normal=None, light=None, latent=None, mask=None):
     # if no light is explicitly passed then recompute the direction.
-    if light is None: light, _dist, _spectrum = self.light(x, mask)
+    assert(light is not None), "Must use the stored light in order to compute lighting"
     return self.refl(x, view, normal, light, latent)
 
 # Convert from arbitrary 3d space to a 2d encoding.
@@ -265,7 +265,6 @@ class Diffuse(Reflectance):
     assert(((att <= 1.001) & (att >= -1.001)).all()), \
       f"{att.min().item()}, {att.max().item()}"
     if getattr(self, "bidirectional", False): att = att.maximum((-normal * light).sum(dim=-1, keepdim=True))
-    else: att.clamp(min=1e-5)
     # When clamping to 0, it only learns when directly illuminated which seems to be alright.
     return rgb * att
 

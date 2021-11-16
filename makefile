@@ -12,12 +12,12 @@ original: clean
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 150 --epochs 50_000 --crop-size 24 --test-crop-size 25 \
-	--near 2 --far 6 --batch-size 2 --model volsdf --sdf-kind curl-mlp \
-	-lr 3e-4 --loss-window 750 --valid-freq 250 \
+	--size 200 --epochs 50_000 --crop-size 24 --test-crop-size 25 \
+	--near 2 --far 6 --batch-size 2 --model volsdf --sdf-kind mlp \
+	-lr 3e-4 --loss-window 750 --valid-freq 250 --loss-fns l2 \
 	--save-freq 2500 --sigmoid-kind upshifted --replace refl --notraintest \
-	--depth-images --refl-kind view --light-kind field --depth-query-normal --normals-from-depth \
-	--save models/lego_volsdf.pt #--load models/lego_volsdf.pt
+	--depth-images --refl-kind pos --light-kind field --depth-query-normal --normals-from-depth \
+	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
 
 volsdf_with_normal: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -120,7 +120,7 @@ sdf: clean
   -lr 5e-4 --loss-window 750 --valid-freq 100 \
   --nosave --sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500
 
-scan_number := 97
+scan_number := 63
 dtu: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
 	--size 192 --epochs 50000 --save models/dtu$(scan_number).pt --save-freq 5000 \
@@ -130,13 +130,22 @@ dtu: clean
 
 dtu_diffuse: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
-	--size 256 --epochs 25_000 --save models/dtu_diffuse_$(scan_number).pt \
-	--near 0.3 --far 2 --batch-size 3 --crop-size 12 --model volsdf -lr 3e-4 --light-kind field \
-	--loss-fns l2 rmse --color-spaces rgb hsv xyz --valid-freq 500 --sdf-kind mlp \
-  --refl-kind fourier --refl-order 32 --occ-kind all-learned \
+	--size 256 --epochs 0 --save models/dtu_diffuse_$(scan_number).pt \
+	--near 0.01 --far 2 --batch-size 2 --crop-size 16 --test-crop-size 38 --model volsdf -lr 3e-4 --light-kind field \
+	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --occ-kind all-learned \
+  --depth-images --depth-query-normal --normals-from-depth --msssim-loss --smooth-surface 1e-4 \
+  --save-freq 2500 --notraintest --loss-window 1000 --sdf-eikonal 1e-5 \
+  --sigmoid-kind upshifted_softplus \
+  --load models/dtu_diffuse_$(scan_number).pt
+
+dtu_diffuse_lit: clean
+	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
+	--size 256 --epochs 1 --nosave \
+	--near 0.01 --far 2 --batch-size 1 --crop-size 16 --test-crop-size 38 \
+  -lr 3e-4 --light-kind point --point-light-position -10 2 3 --light-intensity 4500 \
+	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --all-learned-to-joint \
   --depth-images --depth-query-normal --normals-from-depth --msssim-loss \
-  --smooth-surface 1e-2 --save-freq 2500 --notraintest \
-	--loss-window 1000 --sdf-eikonal 1 --sigmoid-kind leaky_relu --replace refl sigmoid \
+  --save-freq 2500 --notraintest --replace light \
   --load models/dtu_diffuse_$(scan_number).pt
 
 # -- Begin NeRV tests

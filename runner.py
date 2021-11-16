@@ -639,8 +639,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         cs = args.test_crop_size
         N = math.ceil(args.render_size/cs)
         for x in range(N):
+          c0 = x * cs
           for y in range(N):
-            c0 = x * cs
             c1 = y * cs
             out, rays = render(
               model, cam[i:i+1, ...], (c0,c1,cs,cs), size=args.render_size,
@@ -771,7 +771,8 @@ def set_per_run(model, args):
   if "sigmoid" in args.replace and hasattr(model, "nerf"): model.nerf.set_sigmoid(args.sigmoid_kind)
 
   if "light" in args.replace:
-    if isinstance(model.refl, refl.LightAndRefl): model.refl.light = lights.load(args)
+    if isinstance(model.refl, refl.LightAndRefl):
+      model.refl.light = lights.load(args).expand(50).to(device)
     else: raise NotImplementedError("TODO convert to light and reflectance")
 
   if "time_delta" in args.replace:
@@ -836,7 +837,7 @@ def set_per_run(model, args):
 
 
 
-def load_model(args):
+def load_model(args, light):
   if args.model == "sdf": return sdf.load(args, with_integrator=True).to(device)
   if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   if args.model != "ae": args.latent_l2_weight = 0
@@ -893,6 +894,10 @@ def load_model(args):
     # args.img is populated in load (single_image)
     model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
 
+  if (args.light_kind is not None) and (args.light_kind != "dataset") and (light is None):
+    light = lights.load(args).expand(labels.shape[0]).to(device)
+    model.refl.light = light
+
   og_model = model
   # tack on neural upsampling if specified
   if args.neural_upsample:
@@ -939,16 +944,16 @@ def main():
   seed(args.seed)
 
   labels, cam, light = loaders.load(args, training=True, device=device)
-  if args.light_kind is not None and args.light_kind != "dataset":
-    light = lights.load(args).expand(labels.shape[0]).to(device)
+
   setattr(args, "num_labels", len(labels))
   if args.train_imgs > 0:
     if type(labels) == tuple: labels = tuple(l[:args.train_imgs, ...] for l in labels)
     else: labels = labels[:args.train_imgs, ...]
     cam = cam[:args.train_imgs, ...]
 
-  model = load_model(args) if args.load is None else torch.load(args.load, map_location=device)
+  model = load_model(args, light) if args.load is None else torch.load(args.load, map_location=device)
   set_per_run(model, args)
+  light = light if light is not None else getattr(model.refl, "light", None)
 
   if "all" in args.train_parts: parameters = model.parameters()
   else:

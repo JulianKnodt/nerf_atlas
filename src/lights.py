@@ -44,7 +44,7 @@ class Field(Light):
     )
     # since this is a field it doesn't have a specific distance and thus is treated like ambient
     # light by having a far distance.
-    self.far_dist = 20
+    self.far_dist = 5
 
     assert(embedding_size >= 1), "Must have embedding size of at least 1"
     self.num_embeddings = num_embeddings
@@ -65,7 +65,7 @@ class Field(Light):
       self.embedding(self.curr_idx)[None, :, None, None].expand(*x.shape[:-1], -1)
     intensity, elaz = self.mlp(x, own_latent).split([self.color_dims, 2], dim=-1)
     r_d = elev_azim_to_dir(elaz)
-    return r_d, self.far_dist, F.relu(intensity).expand_as(x)
+    return r_d, self.far_dist, F.softplus(intensity).expand_as(x)
 
 class Point(Light):
   def __init__(
@@ -121,8 +121,7 @@ class Point(Light):
         distance_decay=self.distance_decay,
       )
   @property
-  def supports_idx(self):
-    return self.center.shape[0] > 1
+  def supports_idx(self): return self.center.shape[0] > 1
 
   def forward(self, x, mask=None):
     loc = self.center[:, None, None, :]
