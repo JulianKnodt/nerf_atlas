@@ -90,16 +90,10 @@ class Point(Light):
     self.intensity = nn.Parameter(intensity)
     self.train_intensity = train_intensity
     self.distance_decay = distance_decay
+    self.curr_idx = 0
 
   # returns some subset of the training batch
-  def __getitem__(self, v):
-    return Point(
-      center=self.center[v],
-      intensity=self.intensity[v],
-      train_center=self.train_center,
-      train_intensity=self.train_intensity,
-      distance_decay=self.distance_decay,
-    )
+  def set_idx(self, v): self.curr_idx = v
   def expand(self, n: int):
     return Point(
       center = self.center.repeat(n, 1, 1),
@@ -122,9 +116,9 @@ class Point(Light):
       )
   @property
   def supports_idx(self): return self.center.shape[0] > 1
-
   def forward(self, x, mask=None):
-    loc = self.center[:, None, None, :]
+    loc = self.center[self.curr_idx, None, None, :]
+    if len(loc.shape) < 4: loc = loc.unsqueeze(0)
     if mask is not None: loc = loc.expand((*mask.shape, 3))[mask]
     # direction from pts to the light
     d = loc - x

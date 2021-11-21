@@ -437,7 +437,7 @@ def sqr(x): return x * x
 
 # train the model with a given camera and some labels (imgs or imgs+times)
 # light is a per instance light.
-def train(model, cam, labels, opt, args, light=None, sched=None):
+def train(model, cam, labels, opt, args, sched=None):
   if args.epochs == 0: return
 
   loss_fn = load_loss_fn(args, model)
@@ -480,9 +480,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
     c0,c1,c2,c3 = crop = get_crop()
     ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :3]
 
-    if light is not None: model.refl.light = light[idxs]
-    # TODO this feels wrong somehow? How to more elegantly handle case of indexing refl.light
-    elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
+    if getattr(model.refl, "light", None) is not None:
       model.refl.light.set_idx(torch.tensor(idxs, device=device))
 
     # omit items which are all darker with some likelihood. This is mainly used when
@@ -622,7 +620,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
   save(model, args)
   save_losses(args, losses)
 
-def test(model, cam, labels, args, training: bool = True, light=None):
+def test(model, cam, labels, args, training: bool = True):
   times = None
   model = model.eval()
   if args.data_kind == "dnerf":
@@ -632,18 +630,16 @@ def test(model, cam, labels, args, training: bool = True, light=None):
   ls = []
   gots = []
 
-  def render_test_set(model, cam, labels, light=None, offset=0):
+  def render_test_set(model, cam, labels, offset=0):
     with torch.no_grad():
       for i in range(labels.shape[0]):
         ts = None if times is None else times[i:i+1, ...]
         exp = labels[i,...,:3]
         got = torch.zeros_like(exp)
         normals = torch.zeros_like(got)
-        depth = torch.zeros(*got.shape[:-1], 1, device=got.device, dtype=torch.float)
+        depth = torch.zeros(*got.shape[:-1], 1, device=device, dtype=torch.float)
 
-        if light is not None: model.refl.light = light[i:i+1]
-        # TODO this feels wrong somehow? How to more elegantly handle case of indexing refl.light
-        elif hasattr(model.refl, "light") and model.refl.light.supports_idx:
+        if getattr(model.refl, "light", None) is not None:
           model.refl.light.set_idx(torch.tensor([i], device=device))
 
         if args.test_crop_size == 0: raise NotImplementedError("TODO implement no crop testing")
@@ -711,8 +707,10 @@ def test(model, cam, labels, args, training: bool = True, light=None):
         ls.append(psnr)
 
   rf = args.render_frame
-  if args.render_frame >= 0: return render_test_set(model, cam[rf:rf+1], labels[rf:rf+1], light[rf:rf+1], offset=rf)
-  render_test_set(model, cam, labels, light)
+  if args.render_frame >= 0:
+    if hasattr(model.refl, "light"): model.refl.light.set_idx(rf)
+    return render_test_set(model, cam[rf:rf+1], labels[rf:rf+1], offset=rf)
+  render_test_set(model, cam, labels)
   # also render the multi point light dataset, have to load it separately because it's a
   # slightly different light formulation.
   if args.data_kind == "nerv_point" and args.has_multi_light:
@@ -721,7 +719,8 @@ def test(model, cam, labels, args, training: bool = True, light=None):
       light_intensity=args.light_intensity,
       with_mask=False, multi_point=True, device=device,
     )
-    render_test_set(model, multi_cams, multi_labels, multi_lights, offset=100)
+    model.refl.lights = multi_lights
+    render_test_set(model, multi_cams, multi_labelsoffset=100)
     labels =  torch.cat([labels, multi_labels], dim=0)
 
   summary_string = f"""[Summary ({"training" if training else "test"})]:
@@ -786,7 +785,7 @@ def set_per_run(model, args):
 
   if "light" in args.replace:
     if isinstance(model.refl, refl.LightAndRefl):
-      model.refl.light = lights.load(args).expand(50).to(device)
+      model.refl.light = lights.load(args).expand(args.num_labels).to(device)
     else: raise NotImplementedError("TODO convert to light and reflectance")
 
   if "time_delta" in args.replace:
@@ -909,7 +908,7 @@ def load_model(args, light):
     model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
 
   if (args.light_kind is not None) and (args.light_kind != "dataset") and (light is None):
-    light = lights.load(args).expand(labels.shape[0]).to(device)
+    light = lights.load(args).expand(args.num_labels).to(device)
     model.refl.light = light
 
   og_model = model
@@ -991,14 +990,15 @@ def main():
 
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.sched_min)
   if args.no_sched: sched = None
-  train(model, cam, labels, opt, args, light=light, sched=sched)
+  train(model, cam, labels, opt, args, sched=sched)
 
 
-  if not args.notraintest: test(model, cam, labels, args, training=True, light=light)
+  if not args.notraintest: test(model, cam, labels, args, training=True)
 
   if args.notest: return
   test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
-  test(model, test_cam, test_labels, args, training=False, light=test_light)
+  if test_light is not None: model.refl.light = test_light
+  test(model, test_cam, test_labels, args, training=False)
 
   if args.render_over_time >= 0: render_over_time(args, model, test_cam)
 

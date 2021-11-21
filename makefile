@@ -76,22 +76,22 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = bouncingballs
+dnerf_dataset = standup
 dnerf: clean
 	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 256 \
-	--epochs 100_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
-	--crop-size 30 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 4 \
-  --refl-kind pos --sigmoid-kind upshifted --loss-fns l2 --loss-window 500 \
-  --render-over-time 0 \
+	--epochs 150_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
+	--crop-size 30 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 5 \
+  --refl-kind pos --sigmoid-kind upshifted --loss-window 500 --loss-fns l2 fft \
+  --render-over-time 8 --notraintest --test-crop-size 64 --depth-images \
 	--load models/dyn_${dnerf_dataset}.pt
 
 dnerf_volsdf: clean
-	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 128 \
-	--epochs 80_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind curl-mlp \
-  --batch-size 1 --crop-size 28 --near 2 --far 6 -lr 1e-4 --valid-freq 500 \
+	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 256 \
+	--epochs 0  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind mlp \
+  --batch-size 1 --crop-size 28 --near 2 --far 6 -lr 3e-4 --valid-freq 500 \
   --refl-kind pos --replace refl --sigmoid-kind upshifted --loss-window 1000 \
-  --sdf-eikonal 1e-5 --spline 4 \
-  #--load models/dvs_$(dnerf_dataset).pt
+  --sdf-eikonal 1e-5 --spline 5 --notraintest --render-over-time 12 \
+  --load models/dvs_$(dnerf_dataset).pt
 
 dnerf_gru: clean
 	python3 runner.py -d data/dynamic/bouncingballs/ --data-kind dnerf --size 64 \
@@ -120,18 +120,18 @@ sdf: clean
   -lr 5e-4 --loss-window 750 --valid-freq 100 \
   --nosave --sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500
 
-scan_number := 63
+scan_number := 97
 dtu: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
 	--size 192 --epochs 50000 --save models/dtu$(scan_number).pt --save-freq 5000 \
-	--near 0.3 --far 1.8 --batch-size 3 --crop-size 28 --model volsdf -lr 1e-3 \
+	--near 0.3 --far 1.8 --batch-size 3 --crop-size 26 --model volsdf -lr 1e-3 \
 	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
-	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat --load models/dtu$(scan_number).pt
+	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat #--load models/dtu$(scan_number).pt
 
 dtu_diffuse: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
-	--size 256 --epochs 0 --save models/dtu_diffuse_$(scan_number).pt \
-	--near 0.01 --far 2 --batch-size 2 --crop-size 16 --test-crop-size 38 --model volsdf -lr 3e-4 --light-kind field \
+	--size 256 --epochs 50_000 --save models/dtu_diffuse_$(scan_number).pt \
+	--near 0.4 --far 2 --batch-size 2 --crop-size 16 --test-crop-size 38 --model volsdf -lr 3e-4 --light-kind field \
 	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --occ-kind all-learned \
   --depth-images --depth-query-normal --normals-from-depth --msssim-loss --smooth-surface 1e-4 \
   --save-freq 2500 --notraintest --loss-window 1000 --sdf-eikonal 1e-5 \
@@ -140,11 +140,11 @@ dtu_diffuse: clean
 
 dtu_diffuse_lit: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
-	--size 256 --epochs 1 --nosave \
-	--near 0.01 --far 2 --batch-size 1 --crop-size 16 --test-crop-size 38 \
-  -lr 3e-4 --light-kind point --point-light-position -10 2 3 --light-intensity 4500 \
+	--size 64 --epochs 1 --nosave \
+	--near 0.01 --far 2 --batch-size 1 --crop-size 16 --test-crop-size 32 \
+  -lr 3e-4 --light-kind point --point-light-position -10 2 3 --light-intensity 3000 \
 	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --all-learned-to-joint \
-  --depth-images --depth-query-normal --normals-from-depth --msssim-loss \
+  --depth-images --depth-query-normal --normals-from-depth \
   --save-freq 2500 --notraintest --replace light \
   --load models/dtu_diffuse_$(scan_number).pt
 
