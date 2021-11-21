@@ -253,6 +253,11 @@ def arguments():
   cam.add_argument("--near", help="near plane for camera", type=float, default=2)
   cam.add_argument("--far", help="far plane for camera", type=float, default=6)
 
+  vida = a.add_argument_group("Video parameters")
+  vida.add_argument("--start-sec", type=float, default=0, help="Start load time of video")
+  vida.add_argument("--end-sec", type=float, default=None, help="Start load time of video")
+  vida.add_argument("--video-frames", type=int, default=1000, help="Use N frames of video.")
+
   rprt = a.add_argument_group("reporting parameters")
   rprt.add_argument("--name", help="Display name for convenience in log file", type=str, default="")
   rprt.add_argument("-q", "--quiet", help="Silence tqdm", action="store_true")
@@ -321,11 +326,18 @@ def arguments():
   if (args.test_crop_size <= 0): args.test_crop_size = args.crop_size
   return args
 
+# Computes the fft of two
+def fft_loss(x, ref):
+  got = torch.fft.rfft2(x,dim=(-3, -2))
+  exp = torch.fft.rfft2(ref,dim=(-3, -2))
+  return (got - exp).abs().square().mean()
+
 # TODO add LPIPS?
 loss_map = {
   "l2": F.mse_loss,
   "l1": F.l1_loss,
   "rmse": lambda x, ref: F.mse_loss(x, ref).clamp(min=1e-10).sqrt(),
+  "fft": fft_loss,
   "ssim": utils.ssim_loss,
 }
 
@@ -543,7 +555,7 @@ def train(model, cam, labels, opt, args, light=None, sched=None):
         smoothness = smoothness + torch.linalg.norm(delta_n, ord=o, dim=-1).sum()
       if args.display_smoothness: display["n-s"] = smoothness.item()
       loss = loss + args.smooth_surface * smoothness
-      if args.surface_eikonal > 0: loss = loss + args.surface_eikonal * utils.eikonal_loss(surface_normals) 
+      if args.surface_eikonal > 0: loss = loss + args.surface_eikonal * utils.eikonal_loss(surface_normals)
       # smooth occ on the surface
     if args.smooth_occ > 0 and args.smooth_surface > 0:
       noise = torch.randn([*isect.shape[:-1], model.total_latent_size()], device=device)
@@ -727,7 +739,9 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
 def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
-  ts = torch.linspace(-0.5, 1.5, steps=200, device=device)
+  ts = torch.linspace(0, 3, steps=200, device=device)
+  ts = ts * ts
+  ts = (ts.sin()+1)/2
   with torch.no_grad():
     for i, t in enumerate(tqdm(ts)):
       got = torch.zeros(args.render_size, args.render_size, 3, device=device)
