@@ -720,7 +720,7 @@ def test(model, cam, labels, args, training: bool = True):
       with_mask=False, multi_point=True, device=device,
     )
     model.refl.lights = multi_lights
-    render_test_set(model, multi_cams, multi_labelsoffset=100)
+    render_test_set(model, multi_cams, multi_labels, offset=100)
     labels =  torch.cat([labels, multi_labels], dim=0)
 
   summary_string = f"""[Summary ({"training" if training else "test"})]:

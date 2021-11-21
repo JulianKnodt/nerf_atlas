@@ -263,10 +263,14 @@ def shiny(path, training=True, size=256, device="cuda"):
   raise NotImplementedError("TODO get camera from poses, bds")
   return imgs, cameras.NeRFCamera(poses, focal=fx), None
 
-def single_video(path, training=True, size=256, device="cuda"):
-  frames, _, _ = torchvision.io.read_video(path, pts_unit='sec')
-  frames = (frames[:100]/255).to(device)
-  return frames, cameras.NeRFMMCamera.identity(len(frames), device=device), None
+def single_video(args, path, training=True, size=256, device="cuda"):
+  frames, fps, _ = torchvision.io.read_video(
+    path, pts_unit='sec', start_pts=args.start_sec, end_pts=args.end_sec
+  )
+  print(frames.max().item(), frames.min().item())
+  frames = (frames[:args.video_frames]/255).to(device)
+  exit()
+  return frames, cameras.StaticCamera().to(device)
 
 def single_image(path, training=True, size=256, device="cuda"):
   img = torchvision.io.read_image(path).to(device)
