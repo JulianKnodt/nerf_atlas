@@ -326,10 +326,10 @@ def arguments():
   if (args.test_crop_size <= 0): args.test_crop_size = args.crop_size
   return args
 
-# Computes the fft of two
+# Computes the difference of the fft of two images
 def fft_loss(x, ref):
-  got = torch.fft.rfft2(x,dim=(-3, -2))
-  exp = torch.fft.rfft2(ref,dim=(-3, -2))
+  got = torch.fft.rfft2(x, dim=(-3, -2), norm="forward")
+  exp = torch.fft.rfft2(ref, dim=(-3, -2), norm="forward")
   return (got - exp).abs().square().mean()
 
 # TODO add LPIPS?
@@ -739,7 +739,7 @@ def test(model, cam, labels, args, training: bool = True, light=None):
 
 def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
-  ts = torch.linspace(0, 3, steps=200, device=device)
+  ts = torch.linspace(0, math.pi, steps=200, device=device)
   ts = ts * ts
   ts = (ts.sin()+1)/2
   with torch.no_grad():
