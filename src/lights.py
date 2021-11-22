@@ -124,7 +124,8 @@ class Point(Light):
     d = loc - x
     dist = torch.linalg.norm(d, ord=2, dim=-1, keepdim=True)
     d = F.normalize(d, eps=1e-6, dim=-1)
-    intn = self.intensity[:, None, None, :]
+    intn = self.intensity[self.curr_idx, None, None, :]
+    if len(loc.shape) < 4: loc = loc.unsqueeze(0)
     if mask is not None: intn = intn.expand((*mask.shape, 3,))[mask]
     spectrum = (intn/(4 * math.pi * dist.square())) if self.distance_decay else intn
     return d, dist, spectrum

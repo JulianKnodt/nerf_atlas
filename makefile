@@ -142,7 +142,7 @@ dtu_diffuse_lit: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
 	--size 64 --epochs 1 --nosave \
 	--near 0.01 --far 2 --batch-size 1 --crop-size 16 --test-crop-size 32 \
-  -lr 3e-4 --light-kind point --point-light-position -10 2 3 --light-intensity 3000 \
+  -lr 3e-4 --light-kind point --point-light-position -10 2 3 --light-intensity 10000 \
 	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --all-learned-to-joint \
   --depth-images --depth-query-normal --normals-from-depth \
   --save-freq 2500 --notraintest --replace light \
