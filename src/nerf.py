@@ -646,9 +646,10 @@ class AlternatingVolSDF(nn.Module):
 
 def one(*args, **kwargs): return 1
 # de_casteljau's algorithm for evaluating bezier splines without numerical instability..
-def de_casteljau(coeffs, t, N):
+def de_casteljau(coeffs, t, N: int):
   betas = coeffs
   m1t = 1 - t
+  # TODO some way to vectorize this?
   for i in range(1, N): betas = betas[:-1] * m1t + betas[1:] * t
   return betas.squeeze(0)
 
@@ -706,11 +707,8 @@ class DynamicNeRF(nn.Module):
     dp = self.delta_estim(torch.cat([x, t], dim=-1))
     dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
     return dp * self.rigidity(x)
-  # Cubic Bezier Spline "spline_n", 3)
   def spline_interpolate(self, x, t):
-    #assert((t <= 1).all()), t[t > 1]
-    #assert((t >= 0).all()), t[t < 0]
-    setattr(self, "spline_n", 3)
+    # t is mostly expected to be between 0 and 1, but can be outside for fun.
     p0 = torch.zeros_like(x)
     ps = self.delta_estim(x).split([3] * self.spline_n, dim=-1)
     ps = torch.stack(ps, dim=0)
@@ -752,7 +750,7 @@ class DynamicNeRFAE(DynamicNeRF):
       rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
     )
     self.ts = ts
-    if self.training and self.time_noise_std > 0: t = t + self.time_noise_std * torch.randn_like(t)
+
     t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
     dp, d_enc = self.time_estim(pts, t).split([3, self.canon.encoding_size], dim=-1)
     encoded = self.canon.compute_encoded(pts + dp, ts, r_o, r_d)
@@ -829,6 +827,23 @@ class MPI(nn.Module):
 
     alpha, weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(weights, self.feat_act(feats))
+
+def load_dyn(args, model, device):
+  dyn_cons = dyn_model_kinds.get(args.dyn_model, None)
+  if dyn_cons is None: raise NotImplementedError(f"Unknown dyn kind: {args.dyn_model}")
+
+  if args.with_canon is not None:
+    model = torch.load(args.with_canon, map_location=device)
+    assert(isinstance(model, CommonNeRF)), f"Can only use NeRF subtype, got {type(model)}"
+    # TODO if dynae need to check that model is NeRFAE
+
+  return dyn_cons(canonical=model, spline=args.spline)
+
+dyn_model_kinds = {
+  "plain": DynamicNeRF,
+  "ae": DynamicNeRFAE,
+  "long": LongDynamicNeRF,
+}
 
 model_kinds = {
   "tiny": TinyNeRF,

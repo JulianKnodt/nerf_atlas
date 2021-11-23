@@ -75,8 +75,12 @@ def arguments():
     type=int, default=32,
   )
   a.add_argument(
-    "--model", help="which model do we want to use", type=str,
+    "--model", help="which model to use?", type=str,
     choices=["tiny", "plain", "ae", "volsdf", "sdf"], default="plain",
+  )
+  a.add_argument(
+    "--dyn-model", help="Which dynamic model to use?", type=str,
+    choices=list(nerf.dyn_model_kinds.keys()),
   )
   a.add_argument(
     "--bg", help="What background to use for NeRF.", type=str,
@@ -237,7 +241,6 @@ def arguments():
 
   sdfa.add_argument("--volsdf-scale-decay", type=float, default=0, help="Decay weight for volsdf scale")
   dnerfa = a.add_argument_group("dnerf")
-  dnerfa.add_argument("--dnerfae", help="Use DNeRFAE on top of DNeRF", action="store_true")
   dnerfa.add_argument(
     "--spline", type=int, default=0, help="Use spline estimator w/ given number of poitns for dynamic nerf delta prediction",
   )
@@ -330,7 +333,7 @@ def arguments():
 def fft_loss(x, ref):
   got = torch.fft.rfft2(x, dim=(-3, -2), norm="forward")
   exp = torch.fft.rfft2(ref, dim=(-3, -2), norm="forward")
-  return (got - exp).abs().square().mean()
+  return (got - exp).abs().mean()
 
 # TODO add LPIPS?
 loss_map = {
@@ -852,7 +855,6 @@ def set_per_run(model, args):
 
 def load_model(args, light):
   if args.model == "sdf": return sdf.load(args, with_integrator=True).to(device)
-  if args.data_kind == "dnerf" and args.dnerfae: args.model = "ae"
   if args.model != "ae": args.latent_l2_weight = 0
   mip = utils.load_mip(args)
   per_pixel_latent_size = 64 if args.data_kind == "pixel-single" else 0
@@ -891,16 +893,8 @@ def load_model(args, light):
 
   if args.model == "ae" and args.latent_l2_weight > 0: model.set_regularize_latent()
 
-
-  # Add in a dynamic model if using dnerf with the underlying model.
   if args.data_kind == "dnerf":
-    if args.with_canon is not None:
-      model = torch.load(args.with_canon, map_location=device)
-      assert(isinstance(model, nerf.CommonNeRF)), f"Can only use NeRF subtype, got {type(model)}"
-      assert((not args.dnerfae) or isinstance(model, nerf.NeRFAE)), \
-        f"Can only use NeRFAE canonical with DNeRFAE, got {type(model)}"
-    constructor = nerf.DynamicNeRFAE if args.dnerfae else nerf.DynamicNeRF
-    model = constructor(canonical=model, spline=args.spline).to(device)
+    model = nerf.load_dyn(args, model, device).to(device)
 
   if args.data_kind == "pixel-single":
     encoder = SpatialEncoder().to(device)
