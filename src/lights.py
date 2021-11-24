@@ -39,7 +39,7 @@ class Field(Light):
     self.color_dims = color_dims = 1 if monochrome else 3
     self.mlp = SkipConnMLP(
       in_size=3, out=color_dims+2, hidden_size=256, xavier_init=True,
-      enc=FourierEncoder(input_dims=3),
+      activation=torch.sin,
       latent_size=0 if num_embeddings == 1 else embedding_size,
     )
     # since this is a field it doesn't have a specific distance and thus is treated like ambient
@@ -65,7 +65,7 @@ class Field(Light):
       self.embedding(self.curr_idx)[None, :, None, None].expand(*x.shape[:-1], -1)
     intensity, elaz = self.mlp(x, own_latent).split([self.color_dims, 2], dim=-1)
     r_d = elev_azim_to_dir(elaz)
-    return r_d, self.far_dist, F.softplus(intensity).expand_as(x)
+    return r_d, self.far_dist, F.softplus(intensity).expand_as(x)+1e-2
 
 class Point(Light):
   def __init__(

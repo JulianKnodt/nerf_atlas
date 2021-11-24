@@ -208,11 +208,13 @@ def elev_azim_to_uv(elev_azim):
 #[-pi, pi]^2 -> [0,1]^3 (actually can use any value for elev_azim)
 #@torch.jit.script
 def elev_azim_to_dir(elev_azim):
-  elev, azim = elev_azim.split([1,1], dim=-1)
+  # compute here so only 1 sin and cos operation as opposed to mmultiple.
+  elev_cos, azim_cos = elev_azim.cos().split([1,1], dim=-1)
+  elev_sin, azim_sin = elev_azim.sin().split([1,1], dim=-1)
   direction = torch.cat([
-    azim.sin() * elev.cos(),
-    azim.cos() * elev.cos(),
-    elev.sin(),
+    azim_sin * elev_cos,
+    azim_cos * elev_cos,
+    elev_sin,
   ], dim=-1)
   return direction
 
