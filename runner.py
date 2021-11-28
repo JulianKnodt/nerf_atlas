@@ -67,7 +67,7 @@ def arguments():
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
   a.add_argument(
-    "--sigmoid-kind", help="What activation to use with the reflectance model.", default="thin", choices=list(utils.sigmoid_kinds.keys()),
+    "--sigmoid-kind", help="What activation to use with the reflectance model.", default="upshifted", choices=list(utils.sigmoid_kinds.keys()),
   )
 
   a. add_argument(
@@ -98,7 +98,7 @@ def arguments():
   )
   a.add_argument(
     "--train-parts", help="Which parts of the model should be trained",
-    choices=["all", "refl", "occ", "path-tf", "[TODO]Camera"], default=["all"], nargs="+",
+    choices=["all", "refl", "occ", "path-tf", "camera"], default=["all"], nargs="+",
   )
   a.add_argument(
     "--loss-fns", help="Loss functions to use", nargs="+", type=str, choices=list(loss_map.keys()), default=["l2"],
@@ -259,7 +259,10 @@ def arguments():
   vida = a.add_argument_group("Video parameters")
   vida.add_argument("--start-sec", type=float, default=0, help="Start load time of video")
   vida.add_argument("--end-sec", type=float, default=None, help="Start load time of video")
-  vida.add_argument("--video-frames", type=int, default=1000, help="Use N frames of video.")
+  vida.add_argument("--video-frames", type=int, default=200, help="Use N frames of video.")
+  vida.add_argument(
+    "--segments", type=int, default=10, help="Decompose the input sequence into some # of frames",
+  )
 
   rprt = a.add_argument_group("reporting parameters")
   rprt.add_argument("--name", help="Display name for convenience in log file", type=str, default="")
@@ -448,11 +451,11 @@ def train(model, cam, labels, opt, args, sched=None):
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
   update = lambda kwargs: iters.set_postfix(**kwargs)
   if args.quiet: update = lambda _: None
-  batch_size = min(args.batch_size, len(cam))
   times=None
-  if args.data_kind == "dnerf":
+  if type(labels) is tuple:
     times = labels[-1]
     labels = labels[0]
+  batch_size = min(args.batch_size, labels.shape[0])
 
   get_crop = lambda: (0,0, args.size, args.size)
   cs = args.crop_size
@@ -461,7 +464,7 @@ def train(model, cam, labels, opt, args, sched=None):
       random.randint(0, args.render_size-cs), random.randint(0, args.render_size-cs), cs, cs,
     )
 
-  next_idxs = lambda _: random.sample(range(len(cam)), batch_size)
+  next_idxs = lambda _: random.sample(range(labels.shape[0]), batch_size)
   if args.serial_idxs: next_idxs = lambda i: [i%len(cam)] * batch_size
   #next_idxs = lambda i: [i%10] * batch_size # DEBUG
 
@@ -626,7 +629,7 @@ def train(model, cam, labels, opt, args, sched=None):
 def test(model, cam, labels, args, training: bool = True):
   times = None
   model = model.eval()
-  if args.data_kind == "dnerf":
+  if type(labels) == tuple:
     times = labels[-1]
     labels = labels[0]
 
@@ -743,7 +746,7 @@ def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
   ts = torch.linspace(0, math.pi, steps=200, device=device)
   ts = ts * ts
-  ts = (ts.sin()+1)/2
+  ts = ((ts.sin()+1)/2)*3
   with torch.no_grad():
     for i, t in enumerate(tqdm(ts)):
       got = torch.zeros(args.render_size, args.render_size, 3, device=device)
@@ -853,7 +856,7 @@ def set_per_run(model, args):
 
 
 
-def load_model(args, light):
+def load_model(args, light, is_dyn=False):
   if args.model == "sdf": return sdf.load(args, with_integrator=True).to(device)
   if args.model != "ae": args.latent_l2_weight = 0
   mip = utils.load_mip(args)
@@ -893,8 +896,7 @@ def load_model(args, light):
 
   if args.model == "ae" and args.latent_l2_weight > 0: model.set_regularize_latent()
 
-  if args.data_kind == "dnerf":
-    model = nerf.load_dyn(args, model, device).to(device)
+  if is_dyn: model = nerf.load_dyn(args, model, device).to(device)
 
   if args.data_kind == "pixel-single":
     encoder = SpatialEncoder().to(device)
@@ -951,17 +953,19 @@ def main():
   seed(args.seed)
 
   labels, cam, light = loaders.load(args, training=True, device=device)
+  is_dyn = type(labels) == tuple
 
   setattr(args, "num_labels", len(labels))
   if args.train_imgs > 0:
-    if type(labels) == tuple: labels = tuple(l[:args.train_imgs, ...] for l in labels)
+    if is_dyn: labels = tuple(l[:args.train_imgs, ...] for l in labels)
     else: labels = labels[:args.train_imgs, ...]
     cam = cam[:args.train_imgs, ...]
 
-  model = load_model(args, light) if args.load is None else torch.load(args.load, map_location=device)
+  model = load_model(args, light, is_dyn) if args.load is None else torch.load(args.load, map_location=device)
   set_per_run(model, args)
   light = light if light is not None else getattr(model.refl, "light", None)
 
+  # TODO move this method to another function
   if "all" in args.train_parts: parameters = model.parameters()
   else:
     parameters = []
@@ -974,9 +978,9 @@ def main():
     if "path-tf" in args.train_parts:
       assert(hasattr(model, "transfer_fn")), "Model must have a transfer function"
       parameters.append(model.transfer_fn.parameters())
-    if "camera" in args.train_parts:
-      parameters.append(cam.parameters())
     parameters = chain(*parameters)
+  if "camera" in args.train_parts:
+    parameters = chain(parameters, cam.parameters())
 
   # for some reason AdamW doesn't seem to work here
   # eps = 1e-7 was in the original paper.
@@ -989,10 +993,9 @@ def main():
 
   if not args.notraintest: test(model, cam, labels, args, training=True)
 
-  if args.notest: return
   test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
   if test_light is not None: model.refl.light = test_light
-  test(model, test_cam, test_labels, args, training=False)
+  if not args.notest: test(model, test_cam, test_labels, args, training=False)
 
   if args.render_over_time >= 0: render_over_time(args, model, test_cam)
 

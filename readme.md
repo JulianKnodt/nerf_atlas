@@ -141,6 +141,15 @@ The visualization is on the training set. On the test set it does not perform as
 it lacks some regularization for temporal consistency, but I'll continue to look for ways to
 make testing better.
 
+##### Smoothly Interpolated Movement
+
+![DNeRF Hook 1](outputs/hook1.gif)
+![DNeRF Hook 2](outputs/hook2.gif)
+![DNeRF Squat](outputs/squat.gif)
+
+Developed a model which allows for guaranteed smooth interpolation at infinite resolution as
+compared to prior work, with no need for additional regularization.
+
 ##### DTU
 
 ![DTU shiny cans](examples/dtu.gif)
