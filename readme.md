@@ -143,9 +143,9 @@ make testing better.
 
 ##### Smoothly Interpolated Movement
 
-![DNeRF Hook 1](outputs/hook1.gif)
-![DNeRF Hook 2](outputs/hook2.gif)
-![DNeRF Squat](outputs/squat.gif)
+![DNeRF Hook 1](examples/hook1.gif)
+![DNeRF Hook 2](examples/hook2.gif)
+![DNeRF Squat](examples/squat.gif)
 
 Developed a model which allows for guaranteed smooth interpolation at infinite resolution as
 compared to prior work, with no need for additional regularization.
