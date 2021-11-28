@@ -113,6 +113,8 @@ training it takes about a day, and my GPU is much smaller than any used in the p
 - NeRV (`--data-kind nerv_point`)
 - DTU Scans (`--data-kind dtu`)
 - NeRFActor (same as NeRF synthetic)
+- **New** Collocated NeRF Synthetic (`--data-kind nerv_point`)
+  - [Link to New Dataset](https://drive.google.com/drive/folders/1-0oZ8OGNR2WDw0R9gbNzt1LpeMaxF_vM)
 
 ---
 
