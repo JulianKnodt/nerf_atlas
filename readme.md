@@ -388,3 +388,10 @@ auto encoder parameters:
   --encoding-size ENCODING_SIZE
                         Intermediate encoding size for AE (default: 32)
 ```
+
+# Fun example
+
+![Fencing](examples/fencing.gif)
+
+
+

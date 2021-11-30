@@ -211,12 +211,11 @@ def elev_azim_to_dir(elev_azim):
   # compute here so only 1 sin and cos operation as opposed to mmultiple.
   elev_cos, azim_cos = elev_azim.cos().split([1,1], dim=-1)
   elev_sin, azim_sin = elev_azim.sin().split([1,1], dim=-1)
-  direction = torch.cat([
+  return torch.cat([
     azim_sin * elev_cos,
     azim_cos * elev_cos,
-    elev_sin,
+    elev_sin
   ], dim=-1)
-  return direction
 
 
 #@torch.jit.script # FIXME cannot save this function

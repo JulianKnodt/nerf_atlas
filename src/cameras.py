@@ -8,8 +8,8 @@ from .neural_blocks import ( SkipConnMLP )
 import random
 
 # General Camera interface
-@dataclass
 class Camera(nn.Module):
+  def __init__(self): super().__init__()
   # samples from positions in [0,size] screen space to global
   def sample_positions(self, positions): raise NotImplementedError()
 
@@ -217,6 +217,42 @@ def lift(x,y,z,intrinsics, size):
 
     # homogeneous
     return torch.stack([x_lift, y_lift, z, torch.ones_like(z)], dim=-1)
+
+# StaticCamera sits at the origin and has no rotations.
+# Should be used when predicting videos with no ground truth camera positions,
+# And also allows for the focal parameters to be optimized over
+class StaticCamera(Camera):
+  def __init__(
+    self,
+    # TODO should these have some kind of unit on them?
+    focal_x: float=5., focal_y: float=5.,
+    train_focal: bool=True,
+    #same_focals: bool=False,
+  ):
+    super().__init__()
+    self.focal_x = nn.Parameter(torch.tensor(focal_x, dtype=torch.float, requires_grad=train_focal))
+    self.focal_y = nn.Parameter(torch.tensor(focal_y, dtype=torch.float, requires_grad=train_focal))
+  def __len__(self): return 1
+  def __getitem__(self, _v): return self
+  def sample_positions(
+    self,
+    position_samples,
+    size:int=512,
+    with_noise: bool = False,
+  ):
+    u,v = position_samples.split([1,1], dim=-1)
+    if with_noise:
+      u = u + (torch.rand_like(u)-0.5)*with_noise
+      v = v + (torch.rand_like(v)-0.5)*with_noise
+
+    r_d = torch.stack([
+        (u - size * 0.5) / self.focal_x,
+        -(v - size * 0.5) / self.focal_y,
+        -torch.ones_like(u),
+    ], dim=-1)
+    r_d = F.normalize(r_d, dim=-1).permute(2,0,1,3)
+    r_o = torch.zeros_like(r_d)
+    return torch.cat([torch.zeros_like(r_o), r_d], dim=-1)
 
 # A camera specifically for rendering DTU scenes as described in IDR.
 @dataclass

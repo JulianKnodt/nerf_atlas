@@ -54,7 +54,7 @@ def load(args, training=True, device="cuda"):
       white_bg=args.bg=="white", device=device,
     )
   elif kind == "single_video":
-    return single_video(args.data)
+    return single_video(args, args.data, size=args.size, device=device)
   elif kind == "pixel-single":
     img, cam = single_image(args.data)
     setattr(args, "img", img)
@@ -267,10 +267,17 @@ def single_video(args, path, training=True, size=256, device="cuda"):
   frames, fps, _ = torchvision.io.read_video(
     path, pts_unit='sec', start_pts=args.start_sec, end_pts=args.end_sec
   )
-  print(frames.max().item(), frames.min().item())
-  frames = (frames[:args.video_frames]/255).to(device)
-  exit()
-  return frames, cameras.StaticCamera().to(device)
+  frames = torchvision.transforms.functional.resize(
+    frames.transpose(1, -1),
+    size=(size, size),
+  ).transpose(1, -1)
+  selected = frames[:args.video_frames]
+  f = torch.empty_like(selected, device=device).copy_(selected)/255
+  # number of segments corresponds to max time
+  max_time = args.segments
+  # assume frames linearly spaced
+  times = torch.linspace(0, args.segments, f.shape[0], device=device)
+  return (f, times), cameras.StaticCamera().to(device), None
 
 def single_image(path, training=True, size=256, device="cuda"):
   img = torchvision.io.read_image(path).to(device)
