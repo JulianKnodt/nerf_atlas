@@ -222,17 +222,12 @@ class ViewLight(Reflectance):
 
 # Positional only (no view dependence)
 class Positional(Reflectance):
-  def __init__(
-    self,
-    space=None,
-
-    **kwargs,
-  ):
+  def __init__(self, space=None, **kwargs):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
       in_size=3, out=self.out_features, latent_size=self.latent_size,
+      enc=FourierEncoder(input_dims=3),
       num_layers=5, hidden_size=256, xavier_init=True,
-      activation=torch.sin,
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))
