@@ -335,6 +335,13 @@ def skew_symmetric_matrix(v):
      -y, x, O
    ], dim=-1).reshape((*v.shape[:-1],3,3))
 
+# Converts rectangular coordinates into spherical coordinates, [el, az, rad]
+@torch.jit.script
+def to_spherical(rect):
+  rad = torch.linalg.norm(rect, dim=-1, keepdim=True)
+  return torch.cat([dir_to_elev_azim(rect), rad], dim=-1)
+
+
 #https://github.com/albertpumarola/D-NeRF/blob/main/load_blender.py#L62
 def spherical_pose(elev, azim, rad):
   assert(0 <= elev <= 180)
@@ -425,11 +432,11 @@ sigmoid_kinds = {
   "normal": torch.sigmoid,
   "thin": thin_sigmoid,
   "tanh": torch.tanh,
-  "fat": fat_sigmoid,
   "cyclic": cyclic_sigmoid,
   "upshifted": upshifted_sigmoid,
+  # oops these aren't sigmoids
+  "fat": fat_sigmoid,
   "softmax": nn.Softmax(dim=-1),
-  # oops this isn't a sigmoid
   "leaky_relu": F.leaky_relu,
   "sin": torch.sin,
   "upshifted_softplus": upshifted_softplus,

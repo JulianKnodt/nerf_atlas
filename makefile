@@ -69,6 +69,7 @@ nerfactor_volsdf_direct: clean
   --sigmoid-kind normal --notest \
   --load models/${nerfactor_ds}-volsdfd.pt
 
+
 # TODO fix this dataset, using it is a complete trash-fire
 food: clean
 	python3 runner.py -d data/food/ --data-kind shiny --size 64 \
@@ -76,14 +77,24 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = standup
+dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 256 \
-	--epochs 150_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
-	--crop-size 30 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 5 \
+	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
+	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
+	--crop-size 32 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 8 \
   --refl-kind pos --sigmoid-kind upshifted --loss-window 500 --loss-fns l2 fft \
+  --render-over-time 8 --notraintest --test-crop-size 64 --depth-images --save-freq 2500 \
+  --flow-map \
+  --dyn-model plain --no-sched # --load models/dyn_${dnerf_dataset}.pt
+
+long_dnerf: clean
+	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
+	--epochs 50_000 --save models/ldyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
+	--crop-size 20 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 5 \
+  --refl-kind pos --sigmoid-kind upshifted --loss-window 500 --loss-fns fft \
   --render-over-time 8 --notraintest --test-crop-size 64 --depth-images \
-	--load models/dyn_${dnerf_dataset}.pt
+  --dyn-model long --clip-gradients 1 \
+  --load models/ldyn_${dnerf_dataset}.pt
 
 dnerf_volsdf: clean
 	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 256 \
@@ -120,33 +131,33 @@ sdf: clean
   -lr 5e-4 --loss-window 750 --valid-freq 100 \
   --nosave --sdf-eikonal 0.1 --loss-fns l2 --save-freq 2500
 
-scan_number := 97
+scan_number := 83
 dtu: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
 	--size 192 --epochs 50000 --save models/dtu$(scan_number).pt --save-freq 5000 \
-	--near 0.3 --far 1.8 --batch-size 3 --crop-size 26 --model volsdf -lr 1e-3 \
+	--near 0.3 --far 1.8 --batch-size 3 --crop-size 26 --model volsdf -lr 3e-4 \
 	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
 	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat #--load models/dtu$(scan_number).pt
 
 dtu_diffuse: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
-	--size 256 --epochs 50_000 --save models/dtu_diffuse_$(scan_number).pt \
-	--near 0.4 --far 2 --batch-size 2 --crop-size 16 --test-crop-size 38 --model volsdf -lr 3e-4 --light-kind field \
+	--size 256 --epochs 10_000 --save models/dtu_diffuse_$(scan_number).pt \
+	--near 0.4 --far 2 --batch-size 2 --crop-size 16 --test-crop-size 38 \
+  --model volsdf -lr 3e-4 --light-kind field \
 	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --occ-kind all-learned \
-  --depth-images --depth-query-normal --normals-from-depth --msssim-loss --smooth-surface 1e-4 \
-  --save-freq 2500 --notraintest --loss-window 1000 --sdf-eikonal 1e-5 \
+  --depth-images --depth-query-normal --normals-from-depth --msssim-loss \
+  --save-freq 2500 --notraintest --loss-window 1000 --sdf-eikonal 1e-5 --loss-fns l2 fft \
   --sigmoid-kind upshifted_softplus \
   --load models/dtu_diffuse_$(scan_number).pt
 
 dtu_diffuse_lit: clean
-	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
-	--size 64 --epochs 1 --nosave \
-	--near 0.01 --far 2 --batch-size 1 --crop-size 16 --test-crop-size 32 \
-  -lr 3e-4 --light-kind point --point-light-position -10 2 3 --light-intensity 10000 \
+	python3 -O runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
+	--size 200 --epochs 1 --nosave \
+	--near 0.01 --far 1.3 --batch-size 1 --crop-size 16 --test-crop-size 40 \
+  -lr 1e-8 --light-kind point --point-light-position 0 -8 8 --light-intensity 4000 \
 	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --all-learned-to-joint \
-  --depth-images --depth-query-normal --normals-from-depth \
   --save-freq 2500 --notraintest --replace light \
-  --load models/dtu_diffuse_$(scan_number).pt
+  --load models/dtu_diffuse_$(scan_number).pt --render-frame 13
 
 # -- Begin NeRV tests
 
@@ -320,13 +331,6 @@ ae: clean
 	--near 2 --far 6 --batch-size 5 --crop-size 20 --model ae -lr 1e-3 \
 	--valid-freq 499 --no-sched --loss-fns l2 #--load models/lego_ae.pt #--omit-bg
 
-# [WIP]
-single_video: clean
-	python3 runner.py -d data/video/fencing.mp4 \
-	--size 128 --epochs 30_000 --save models/fencing.pt \
-	--near 2 --far 10 --batch-size 5 --mip cylinder --model ae -lr 1e-3 \
-	#--load models/lego_plain.pt --omit-bg
-
 og_upsample: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--render-size 16 --size 64 --epochs 80_000 --save models/lego_up.pt \
@@ -371,3 +375,31 @@ rnn_nerf: clean
 	--near 2 --far 6 --batch-size 4 --crop-size 12 -lr 1e-3 \
   --save-freq 2500 \
 	--loss-fns l2 --valid-freq 499 --load models/rnn_lego.pt
+
+monsune: clean
+	python3 runner.py -d data/video/monsune_outta_my_mind.mp4 --data-kind single_video \
+	--size 64 --epochs 30_000 --save models/monsune.pt --steps 32 \
+  --dyn-model long --spline 4 --start-sec 46 --end-sec 48 --video-frames 100 \
+	--near 0.01 --far 3 --batch-size 2 --crop-size 20 --model plain -lr 3e-4 --segments 8 \
+	--loss-fns l2 fft --valid-freq 500 --refl-kind pos --save-freq 2500 --depth-images \
+  --loss-window 1000 --train-imgs 20 --notest --train-parts camera all --sigmoid-kind fat \
+  --load models/monsune.pt
+
+fencing: clean
+	python3 runner.py -d data/video/fencing.mp4 --data-kind single_video \
+	--size 100 --epochs 0 --save models/fencing_video.pt --steps 32 \
+  --dyn-model long --spline 4 --start-sec 47 --end-sec 49 --video-frames 100 \
+	--near 0.01 --far 2 --batch-size 2 --crop-size 20 --model plain -lr 8e-5 --segments 10 \
+  --clip-gradients 1 \
+	--loss-fns l2 fft --valid-freq 500 --refl-kind pos --save-freq 2500 --sigmoid-kind upshifted \
+  --depth-images --loss-window 1000 --train-imgs 40 --notest --train-parts camera all \
+  --load models/fencing_video.pt --cam-save-load models/fencing_cam.pt --render-over-time 0 \
+  --no-sched --seed -1
+
+spline: clean
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 128 --epochs 0 --save models/lego_spline.pt \
+	--near 2 --far 6 --batch-size 2 --crop-size 24 --model spline -lr 3e-4 \
+	--loss-fns l2 --valid-freq 500 --refl-kind view --sigmoid-kind upshifted \
+	--depth-images --test-crop-size 32 --notraintest \
+  #--load models/lego_spline.pt

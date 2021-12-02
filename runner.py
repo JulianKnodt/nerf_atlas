@@ -67,7 +67,8 @@ def arguments():
     "--mip", help="Use MipNeRF with different sampling", type=str, choices=["cone", "cylinder"],
   )
   a.add_argument(
-    "--sigmoid-kind", help="What activation to use with the reflectance model.", default="upshifted", choices=list(utils.sigmoid_kinds.keys()),
+    "--sigmoid-kind", help="What activation to use with the reflectance model.",
+    default="upshifted", choices=list(utils.sigmoid_kinds.keys()),
   )
 
   a. add_argument(
@@ -76,7 +77,7 @@ def arguments():
   )
   a.add_argument(
     "--model", help="which model to use?", type=str,
-    choices=["tiny", "plain", "ae", "volsdf", "sdf"], default="plain",
+    choices=list(nerf.model_kinds.keys()) + ["sdf"], default="plain",
   )
   a.add_argument(
     "--dyn-model", help="Which dynamic model to use?", type=str,
@@ -252,9 +253,10 @@ def arguments():
     help="Fix camera to i, and render over a time frame. < 0 is no camera",
   )
 
-  cam = a.add_argument_group("camera parameters")
-  cam.add_argument("--near", help="near plane for camera", type=float, default=2)
-  cam.add_argument("--far", help="far plane for camera", type=float, default=6)
+  cama = a.add_argument_group("camera parameters")
+  cama.add_argument("--near", help="near plane for camera", type=float, default=2)
+  cama.add_argument("--far", help="far plane for camera", type=float, default=6)
+  cama.add_argument("--cam-save-load", help="Location to save/load camera to", default=None)
 
   vida = a.add_argument_group("Video parameters")
   vida.add_argument("--start-sec", type=float, default=0, help="Start load time of video")
@@ -262,6 +264,9 @@ def arguments():
   vida.add_argument("--video-frames", type=int, default=200, help="Use N frames of video.")
   vida.add_argument(
     "--segments", type=int, default=10, help="Decompose the input sequence into some # of frames",
+  )
+  vida.add_argument(
+    "--dyn-diverge-decay", type=float, default=0, help="Decay divergence of movement field."
   )
 
   rprt = a.add_argument_group("reporting parameters")
@@ -296,6 +301,9 @@ def arguments():
   rprt.add_argument("--gamma-correct", action="store_true", help="Gamma correct final images")
   rprt.add_argument("--render-frame", type=int, default=-1, help="Render 1 frame only, < 0 means none.")
   rprt.add_argument("--exp-bg", action="store_true", help="Use mask of labels while rendering. For vis only.")
+  rprt.add_argument(
+    "--flow-map", action="store_true", help="Render a flow map for a dynamic nerf scene",
+  )
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -515,6 +523,9 @@ def train(model, cam, labels, opt, args, sched=None):
 
     # E[d sdf(x)/dx] = 1, enforces that the SDF is valid.
     if args.sdf_eikonal > 0: loss = loss + args.sdf_eikonal * utils.eikonal_loss(n)
+    # E[div(change in x)] = 0, enforcing the change in motion does not compress space.
+    if args.dyn_diverge_decay > 0:
+      loss=loss+args.dyn_diverge_decay*utils.divergence(model.pts, model.dp).mean()
 
     # automatically apply eikonal loss for DynamicNeRF
     if args.sdf_eikonal > 0 and isinstance(model, nerf.DynamicNeRF):
@@ -616,14 +627,17 @@ def train(model, cam, labels, opt, args, sched=None):
           if args.normals_from_depth:
             depth_normal = (50*utils.depth_to_normals(depth)+1)/2
             items.append(depth_normal.clamp(min=0, max=1))
+        if args.flow_map and hasattr(model, "dp"):
+          flow_map = nerf.volumetric_integrate(model.nerf.weights, model.dp)
+          items.append(F.normalize(flow_map[0], dim=-1).add(1).div(2))
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
 
     if i % args.save_freq == 0 and i != 0:
       version = (i // args.save_freq) if args.versioned_save else None
-      save(model, args, version)
+      save(model, cam, args, version)
       save_losses(args, losses)
   # final save does not have a version and will write to original file
-  save(model, args)
+  save(model, cam, args)
   save_losses(args, losses)
 
 def test(model, cam, labels, args, training: bool = True):
@@ -644,6 +658,7 @@ def test(model, cam, labels, args, training: bool = True):
         got = torch.zeros_like(exp)
         normals = torch.zeros_like(got)
         depth = torch.zeros(*got.shape[:-1], 1, device=device, dtype=torch.float)
+        flow_map = torch.zeros_like(normals)
 
         if getattr(model.refl, "light", None) is not None:
           model.refl.light.set_idx(torch.tensor([i], device=device))
@@ -680,6 +695,8 @@ def test(model, cam, labels, args, training: bool = True):
                 normals[c0:c0+cs, c1:c1+cs, :] = (render_n[0]+1)/2
             elif hasattr(model, "n") and hasattr(model, "sdf"):
               ...
+            if args.flow_map and hasattr(model, "dp"):
+              flow_map[c0:c0+cs,c1:c1+cs] = nerf.volumetric_integrate(model.nerf.weights, model.dp)
 
         gots.append(got)
         loss = F.mse_loss(got, exp)
@@ -699,6 +716,9 @@ def test(model, cam, labels, args, training: bool = True):
         if hasattr(model, "nerf") and args.depth_images:
           depth = (depth-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
+        if args.flow_map and hasattr(model, "dp"):
+          max_flow = flow_map.norm(dim=-1).max()
+          items.append((flow_map/max_flow).add(1).div(2))
         if args.draw_colormap:
           colormap = utils.color_map(cam[i:i+1])
           items.append(colormap)
@@ -746,7 +766,7 @@ def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
   ts = torch.linspace(0, math.pi, steps=200, device=device)
   ts = ts * ts
-  ts = ((ts.sin()+1)/2)*3
+  ts = ((ts.sin()+1)/2)
   with torch.no_grad():
     for i, t in enumerate(tqdm(ts)):
       got = torch.zeros(args.render_size, args.render_size, 3, device=device)
@@ -858,43 +878,13 @@ def set_per_run(model, args):
 
 def load_model(args, light, is_dyn=False):
   if args.model == "sdf": return sdf.load(args, with_integrator=True).to(device)
-  if args.model != "ae": args.latent_l2_weight = 0
-  mip = utils.load_mip(args)
-  per_pixel_latent_size = 64 if args.data_kind == "pixel-single" else 0
-  kwargs = {
-    "mip": mip,
-    "out_features": args.feature_space,
-    "device": device,
-    "steps": args.steps,
-    "t_near": args.near,
-    "t_far": args.far,
-    "per_pixel_latent_size": per_pixel_latent_size,
-    "per_point_latent_size": 0,
-    "instance_latent_size": 0,
-    "sigmoid_kind": args.sigmoid_kind if args.sigmoid_kind != "curr" else "thin",
-    "bg": args.bg,
-  }
-  if args.model == "tiny": constructor = nerf.TinyNeRF
-  elif args.model == "plain": constructor = nerf.PlainNeRF
-  elif args.model == "ae":
-    constructor = nerf.NeRFAE
-    kwargs["normalize_latent"] = args.normalize_latent
-    kwargs["encoding_size"] = args.encoding_size
-  elif args.model == "volsdf":
-    constructor = nerf.VolSDF
-    kwargs["sdf"] = sdf.load(args, with_integrator=False)
-    kwargs["occ_kind"] = args.occ_kind
-    kwargs["integrator_kind"] = args.integrator_kind or "direct"
-  else: raise NotImplementedError(args.model)
-  model = constructor(**kwargs).to(device)
+  model = nerf.load_nerf(args).to(device)
 
   # set reflectance kind for new models (but volsdf handles it differently)
   if args.refl_kind != "curr":
     ls = model.refl.latent_size
     refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
     model.set_refl(refl_inst)
-
-  if args.model == "ae" and args.latent_l2_weight > 0: model.set_regularize_latent()
 
   if is_dyn: model = nerf.load_dyn(args, model, device).to(device)
 
@@ -929,7 +919,7 @@ def load_model(args, light, is_dyn=False):
   if args.torchjit: model = torch.jit.script(model)
   return model
 
-def save(model, args, version=None):
+def save(model, cam, args, version=None):
   if args.nosave: return
   save = args.save if version is None else f"{args.save}_{version}.pt"
   print(f"Saved to {save}")
@@ -940,6 +930,7 @@ def save(model, args, version=None):
     setattr(args, "curr_time", datetime.today().strftime('%Y-%m-%d-%H:%M:%S'))
     with open(os.path.join(args.outdir, args.log), 'w') as f:
       json.dump(args.__dict__, f, indent=2)
+  if args.cam_save_load is not None: torch.save(cam, args.cam_save_load)
 
 def seed(s):
   if s == -1: return
@@ -955,13 +946,17 @@ def main():
   labels, cam, light = loaders.load(args, training=True, device=device)
   is_dyn = type(labels) == tuple
 
+  model = load_model(args, light, is_dyn) if args.load is None else torch.load(args.load, map_location=device)
+  if args.cam_save_load is not None:
+    try: cam = torch.load(args.cam_save_load, map_location=device)
+    except Exception as e: print(f"[warn]: Failed to load camera: {e}")
+
   setattr(args, "num_labels", len(labels))
   if args.train_imgs > 0:
     if is_dyn: labels = tuple(l[:args.train_imgs, ...] for l in labels)
     else: labels = labels[:args.train_imgs, ...]
     cam = cam[:args.train_imgs, ...]
 
-  model = load_model(args, light, is_dyn) if args.load is None else torch.load(args.load, map_location=device)
   set_per_run(model, args)
   light = light if light is not None else getattr(model.refl, "light", None)
 
@@ -989,7 +984,6 @@ def main():
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.sched_min)
   if args.no_sched: sched = None
   train(model, cam, labels, opt, args, sched=sched)
-
 
   if not args.notraintest: test(model, cam, labels, args, training=True)
 
