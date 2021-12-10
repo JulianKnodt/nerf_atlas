@@ -227,7 +227,7 @@ class Positional(Reflectance):
     self.mlp = SkipConnMLP(
       in_size=3, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=3),
-      num_layers=5, hidden_size=256, xavier_init=True,
+      num_layers=5, hidden_size=512, xavier_init=True,
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))

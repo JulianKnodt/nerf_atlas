@@ -59,6 +59,8 @@ def alpha_from_density(
   while len(dists.shape) < 4: dists = dists[..., None]
   dists = dists * torch.linalg.norm(r_d, dim=-1)
   alpha = 1 - torch.exp(-sigma_a * dists)
+  # TODO is this equivalent to -expm1? Does it matter?
+  #alpha = -torch.expm1(-sigma_a * dists)
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
 
@@ -766,6 +768,10 @@ def de_casteljau(coeffs, t, N: int):
   for i in range(1, N): betas = betas[:-1] * m1t + betas[1:] * t
   return betas.squeeze(0)
 
+# de_moor's algorithm for evaluating bezier splines with a given knot vector
+def de_moors(coeffs, t, knots, N: int):
+  raise NotImplementedError("TODO implement")
+
 def cubic_bezier(coeffs, t, N: int):
   assert(N == 4), f"Must be cubic, got {N}"
   m1t = 1 - t
@@ -775,68 +781,56 @@ def cubic_bezier(coeffs, t, N: int):
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
-  def __init__(
-    self,
-    canonical: CommonNeRF,
-    spline:int=0,
-    rigid_net:bool=True,
-  ):
+  def __init__(self, canonical: CommonNeRF, spline:int=0):
     super().__init__()
     self.canonical = canonical
     self.spline = spline
 
     if spline > 0: self.set_spline_estim(spline)
     else: self.set_delta_estim()
-
-  @property
-  def nerf(self): return self.canonical
-
-  def set_refl(self, refl): self.canonical.set_refl(refl)
-
   def set_delta_estim(self):
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz, rigidity
       in_size=4, out=3+1,
-
-      num_layers = 5, hidden_size = 256,
-      zero_init=True, activation=torch.sin,
+      num_layers = 6, hidden_size = 324,
+      xavier_init=True,
     )
     self.time_estim = self.direct_predict
   def set_spline_estim(self, spline_points):
-    spline_points -= 1 # subtract 1 to ensure that we can have 0 as first point.
-    assert(spline_points > 0), "Must pass N > 1 spline"
+    assert(spline_points > 1), "Must pass N > 1 spline"
+    # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
-      # x,y,z -> n control points
-      in_size=3, out=spline_points*3,
-      enc=FourierEncoder(input_dims=3),
-      num_layers = 5, hidden_size = 324, xavier_init=True,
+      in_size=3, out=spline_points*3+1, num_layers=6,
+      hidden_size=324, xavier_init=True,
     )
-    self.spline_fn = cubic_bezier if spline_points == 3 else de_casteljau
+    self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
     self.spline_n = spline_points
     self.time_estim = self.spline_interpolate
 
   def direct_predict(self, x, t):
     dp, rigidity = self.delta_estim(torch.cat([x, t], dim=-1)).split([3, 1], dim=-1)
-    dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
-    return dp * upshifted_sigmoid(rigidity.div(16), 1e-2)
+    #self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
+    self.dp = dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
+    return dp#* rigidity
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
-    p0 = torch.zeros_like(x)
-    ps = torch.stack(self.delta_estim(x).split([3] * self.spline_n, dim=-1),dim=0)
-    self.dp = dp = self.spline_fn(torch.cat([p0[None, ...], ps], dim=0), t, self.spline_n + 1)
-    return dp
+    rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)
+    self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
+    ps = torch.stack(ps.split([3] * self.spline_n, dim=-1), dim=0)
+    init_ps = ps[None, 0]
+    self.dp = dp = self.spline_fn(ps - init_ps, t, self.spline_n)
+    return (dp + init_ps.squeeze(0)) * rigidity
 
+  @property
+  def nerf(self): return self.canonical
   @property
   def refl(self): return self.canonical.refl
-
   @property
   def sdf(self): return getattr(self.canonical, "sdf", None)
-
-  def total_latent_size(self): return self.canonical.total_latent_size()
-
   @property
   def intermediate_size(self): return self.canonical.intermediate_size
-
+  def total_latent_size(self): return self.canonical.total_latent_size()
+  def set_refl(self, refl): self.canonical.set_refl(refl)
   def forward(self, rays_t):
     rays, t = rays_t
     pts, self.ts, r_o, r_d = compute_pts_ts(
@@ -845,65 +839,50 @@ class DynamicNeRF(nn.Module):
     )
     self.canonical.ts = self.ts
     t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
-
     dp = self.time_estim(pts, t)
     return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
 
-def skew_op(v):
-  x,y,z = v.split([1,1,1], dim=-1)
-  O = torch.zeros_like(x)
-  return torch.cat([
-    O, -x, y,
-    x, O, -z,
-    -y, z, O,
-  ]).reshape(*v.shape[:-1], 3, 3)
-
+# Long Dynamic NeRF for computing arbitrary continuous sequences.
 class LongDynamicNeRF(nn.Module):
   def __init__(
     self,
     canonical: CommonNeRF,
     segments: int = 32,
-    spline:int=0,
+    spline:int=4,
     segment_embedding_size:int=128,
-    local_rigidity = True,
-    global_rigidity = True,
+    # intermediate size from the anchors to the poinst estimator
+    anchor_interim:int=128,
   ):
     super().__init__()
+
     self.canonical = canonical
     self.spline_n = spline
     self.ses = ses = segment_embedding_size
     self.segments = segments
 
-    n_points = segments * spline - 1
-
-    # keep an embedding for each segment
+    n_points = segments * spline
+    # keep an embedding for each segment # TODO is there an off by 1 error
     self.seg_emb = nn.Embedding(segments+1, ses)
-
-    self.out_size=out_size=3
-    spline -= 1
-    assert(spline > 0), "Must pass N > 1 spline"
+    self.interim_size = interim_size
+    assert(spline > 2), "Must pass N > 2 spline"
     # the anchor points of each spline
     self.anchors = SkipConnMLP(
-      in_size=3, out=out_size,
-      num_layers=5, hidden_size=256, latent_size=ses,
-      xavier_init=True, activation=torch.sin,
+      in_size=3, out=3+anchor_interim,
+      num_layers=5, hidden_size=512, latent_size=ses, xavier_init=True,
     )
-    # the interior of each spline
+    # the interior of each spline, will get passed latent values from the anchors.
     self.point_estim = SkipConnMLP(
-      in_size=3, out=(spline-1) * out_size,
+      in_size=3, out=(spline-2) * 3,
       num_layers=6, hidden_size=512,
-      latent_size=ses, xavier_init=True, activation=torch.sin,
+      latent_size=ses+anchor_interim, xavier_init=True,
     )
     self.spline_n = spline
-    self.global_rigidity = one if not global_rigidity else nn.Sequential(
-      SkipConnMLP(
-        in_size=3, out=1, activation=torch.sin, xavier_init=True,
-        num_layers=5, hidden_size=256,
-      ), nn.Sigmoid(),
+    self.global_rigidity = SkipConnMLP(
+      in_size=3, out=1, xavier_init=True, num_layers=5, hidden_size=256,
     )
     # Parameters in SE3, except 0 which is always 0
     self.global_spline = nn.Parameter(torch.randn(n_points, 6))
-    self.spline_fn = de_casteljeu if self.spline_n != 3 else cubic_bezier
+    self.spline_fn = de_casteljeu if self.spline_n != 4 else cubic_bezier
 
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def total_latent_size(self): return self.canonical.total_latent_size()
@@ -927,16 +906,22 @@ class LongDynamicNeRF(nn.Module):
     t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
     seg = t.floor().int().clamp(min=0)
     assert((seg >= 0).all()), "must have all positive segments"
+
     embs = self.seg_emb(torch.cat([seg, seg+1], dim=-1))
-    anchors = self.anchors(pts[..., None, :].expand(*pts.shape[:-1], 2, pts.shape[-1]), embs)
+    anchors, anchor_latent = self.anchors(
+      pts[..., None, :].expand(*pts.shape[:-1], 2, pts.shape[-1]), embs,
+    ).split([3, self.interim_size], dim=-1)
+    print(anchors.shape)
+    exit()
     starting, end = [a.squeeze(-2).unsqueeze(0) for a in anchors.split([1,1], dim=-2)]
     seg_emb = embs[..., 0, :]
 
-    inner_points = torch.stack(
-      self.point_estim(pts, seg_emb).split([self.out_size] * (self.spline_n-1), dim=-1), dim=0
-    ) + starting
+    point_estim_latent = torch.cat([seg_emb, anchor_latent.flatten(start_dim=-2)], dim=-1)
+    inner_points = torch.stack(self.point_estim(pts, point_estim_latent).split(3, dim=-1), dim=0)
+
     control_pts = torch.cat([starting, inner_points, end], dim=0)
-    dp = self.spline_fn(control_pts, t.frac(), self.spline_n+1)#* self.global_rigidity(pts)
+    self.rigidity = rigidity = upshifted_sigmoid(self.global_rigidity(pts)/2)
+    self.dp = dp = self.spline_fn(control_pts, t.frac(), self.spline_n+1) * rigidity
     return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
 
 # Dynamic NeRFAE for multiple frames with changing materials

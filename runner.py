@@ -35,6 +35,7 @@ import os
 
 def arguments():
   a = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  ST="store_true"
   a.add_argument("-d", "--data", help="path to data", required=True)
   a.add_argument(
     "--data-kind", help="Kind of data to load", default="original",
@@ -59,7 +60,7 @@ def arguments():
 
   a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
   a.add_argument("--batch-size", help="# views for each training batch", type=int, default=8)
-  a.add_argument("--neural-upsample", help="add neural upsampling", action="store_true")
+  a.add_argument("--neural-upsample", help="add neural upsampling", action=ST)
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
   a.add_argument("--test-crop-size",help="what size to use while cropping at test time",type=int, default=0)
   a.add_argument("--steps", help="Number of depth steps", type=int, default=64)
@@ -91,11 +92,10 @@ def arguments():
   a.add_argument("-lr", "--learning-rate", help="learning rate", type=float, default=5e-4)
   a.add_argument("--seed", help="Random seed to use, -1 is no seed", type=int, default=1337)
   a.add_argument("--decay", help="Weight decay value", type=float, default=0)
-  a.add_argument("--notest", help="Do not run test set", action="store_true")
-  a.add_argument("--data-parallel", help="Use data parallel for the model", action="store_true")
+  a.add_argument("--notest", help="Do not run test set", action=ST)
+  a.add_argument("--data-parallel", help="Use data parallel for the model", action=ST)
   a.add_argument(
-    "--omit-bg", action="store_true",
-    help="Omit black bg with some probability. Only used for faster training",
+    "--omit-bg", action=ST, help="Omit black bg with some probability. Only used for faster training",
   )
   a.add_argument(
     "--train-parts", help="Which parts of the model should be trained",
@@ -109,17 +109,17 @@ def arguments():
     choices=["rgb", "hsv", "luminance", "xyz"], default=["rgb"],
   )
   a.add_argument(
-    "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action="store_true",
+    "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action=ST,
   )
   a.add_argument(
-    "--has-multi-light", help="For NeRV point if there is a multi point light dataset", action="store_true",
+    "--has-multi-light", help="For NeRV point if there is a multi point light dataset", action=ST,
   )
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
-  a.add_argument("--no-sched", help="Do not use a scheduler", action="store_true")
+  a.add_argument("--no-sched", help="Do not use a scheduler", action=ST)
   a.add_argument(
     "--sched-min", default=5e-5, type=float, help="Minimum value for the scheduled learning rate.",
   )
-  a.add_argument("--serial-idxs", help="Train on images in serial", action="store_true")
+  a.add_argument("--serial-idxs", help="Train on images in serial", action=ST)
   # TODO really fix MPIs
   a.add_argument(
     "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "time_delta", "al_occ"],
@@ -135,8 +135,7 @@ def arguments():
     help="Convert an existing direct volsdf model to a path tracing model",
   )
   a.add_argument(
-    "--volsdf-alternate", help="Use alternating volume rendering/SDF training volsdf",
-    action="store_true",
+    "--volsdf-alternate", help="Use alternating volume rendering/SDF training volsdf", action=ST,
   )
   a.add_argument(
     "--latent-size",type=int, default=32,
@@ -220,7 +219,7 @@ def arguments():
     type=float, default=1e-3,
   )
   sdfa.add_argument(
-    "--smooth-eps-rng", action="store_true", help="Smooth by random amount instead of smoothing by a fixed distance",
+    "--smooth-eps-rng", action=ST, help="Smooth by random amount instead of smoothing by a fixed distance",
   )
   sdfa.add_argument(
     "--smooth-n-ord", nargs="+", default=[2], choices=[1,2], type=int,
@@ -230,7 +229,7 @@ def arguments():
     "--sdf-kind", help="Which SDF model to use", type=str,
     choices=list(sdf.sdf_kinds.keys()), default="mlp",
   )
-  sdfa.add_argument("--sphere-init", help="Initialize SDF to a sphere", action="store_true")
+  sdfa.add_argument("--sphere-init", help="Initialize SDF to a sphere", action=ST)
   sdfa.add_argument(
     "--bound-sphere-rad", type=float, default=-1,
     help="Intersect the learned SDF with a bounding sphere at the origin, < 0 is no sphere",
@@ -245,9 +244,9 @@ def arguments():
   dnerfa.add_argument(
     "--spline", type=int, default=0, help="Use spline estimator w/ given number of poitns for dynamic nerf delta prediction",
   )
-  dnerfa.add_argument("--time-gamma", help="Apply a gamma based on time", action="store_true")
+  dnerfa.add_argument("--time-gamma", help="Apply a gamma based on time", action=ST)
   dnerfa.add_argument("--with-canon", help="Preload a canonical NeRF", type=str, default=None)
-  dnerfa.add_argument("--fix-canon", help="Do not train canonical NeRF", action="store_true")
+  dnerfa.add_argument("--fix-canon", help="Do not train canonical NeRF", action=ST)
   dnerfa.add_argument(
     "--render-over-time", default=-1, type=int,
     help="Fix camera to i, and render over a time frame. < 0 is no camera",
@@ -267,6 +266,9 @@ def arguments():
   )
   vida.add_argument(
     "--dyn-diverge-decay", type=float, default=0, help="Decay divergence of movement field."
+  )
+  vida.add_argument(
+    "--delta-x-decay", type=float, default=0, help="How much decay for change in position for dyn.",
   )
 
   rprt = a.add_argument_group("reporting parameters")
@@ -301,9 +303,8 @@ def arguments():
   rprt.add_argument("--gamma-correct", action="store_true", help="Gamma correct final images")
   rprt.add_argument("--render-frame", type=int, default=-1, help="Render 1 frame only, < 0 means none.")
   rprt.add_argument("--exp-bg", action="store_true", help="Use mask of labels while rendering. For vis only.")
-  rprt.add_argument(
-    "--flow-map", action="store_true", help="Render a flow map for a dynamic nerf scene",
-  )
+  rprt.add_argument("--flow-map", action=ST, help="Render a flow map for a dynamic nerf scene")
+  rprt.add_argument("--rigidity-map", action=ST, help="Render a flow map for a dynamic nerf scene")
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -596,6 +597,9 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.decay_all_learned_occ > 0:
       loss = loss + args.decay_all_learned_occ * model.occ.all_learned_occ.raw_att.neg().mean()
 
+    if args.delta_x_decay > 0:
+      loss = loss + args.delta_x_decay * model.dp.norm(dim=-1).mean()
+
     update(display)
     losses.append(l2_loss)
 
@@ -622,14 +626,18 @@ def train(model, cam, labels, opt, args, sched=None):
           raw_depth = nerf.volumetric_integrate(
             model.nerf.weights, model.nerf.ts[:, None, None, None, None]
           )
-          depth = (raw_depth[0,...]-args.near)/(args.far - args.near)
+          depth = (raw_depth[0]-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
           if args.normals_from_depth:
             depth_normal = (50*utils.depth_to_normals(depth)+1)/2
             items.append(depth_normal.clamp(min=0, max=1))
         if args.flow_map and hasattr(model, "dp"):
-          flow_map = nerf.volumetric_integrate(model.nerf.weights, model.dp)
-          items.append(F.normalize(flow_map[0], dim=-1).add(1).div(2))
+          flow_map = nerf.volumetric_integrate(model.nerf.weights, model.dp)[0]
+          flow_map /= flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
+          items.append(flow_map.add(1).div(2))
+        if args.rigidity_map and hasattr(model, "rigidity"):
+          rigidity_map = nerf.volumetric_integrate(model.nerf.weights, model.rigidity)[0]
+          items.append(rigidity_map)
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
 
     if i % args.save_freq == 0 and i != 0:
@@ -658,7 +666,9 @@ def test(model, cam, labels, args, training: bool = True):
         got = torch.zeros_like(exp)
         normals = torch.zeros_like(got)
         depth = torch.zeros(*got.shape[:-1], 1, device=device, dtype=torch.float)
+        # dynamic nerf visualization tools
         flow_map = torch.zeros_like(normals)
+        rigidity_map = torch.zeros_like(depth)
 
         if getattr(model.refl, "light", None) is not None:
           model.refl.light.set_idx(torch.tensor([i], device=device))
@@ -697,6 +707,9 @@ def test(model, cam, labels, args, training: bool = True):
               ...
             if args.flow_map and hasattr(model, "dp"):
               flow_map[c0:c0+cs,c1:c1+cs] = nerf.volumetric_integrate(model.nerf.weights, model.dp)
+            if args.rigidity_map and hasattr(model, "rigidity"):
+              rigidity_map[c0:c0+cs,c1:c1+cs] = \
+                nerf.volumetric_integrate(model.nerf.weights, model.rigidity)
 
         gots.append(got)
         loss = F.mse_loss(got, exp)
@@ -709,6 +722,7 @@ def test(model, cam, labels, args, training: bool = True):
           exp = exp.clamp(min=1e-10)**(1/2.2)
           got = got.clamp(min=1e-10)**(1/2.2)
         items = [exp, got.clamp(min=0, max=1)]
+
         if hasattr(model, "n") and hasattr(model, "nerf"): items.append(normals.clamp(min=0, max=1))
         if (depth != 0).any() and args.normals_from_depth:
           depth_normals = (utils.depth_to_normals(depth * 100)+1)/2
@@ -717,8 +731,9 @@ def test(model, cam, labels, args, training: bool = True):
           depth = (depth-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
         if args.flow_map and hasattr(model, "dp"):
-          max_flow = flow_map.norm(dim=-1).max()
+          max_flow = flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
           items.append((flow_map/max_flow).add(1).div(2))
+        if args.rigidity_map and hasattr(model, "rigidity"): items.append(rigidity_map)
         if args.draw_colormap:
           colormap = utils.color_map(cam[i:i+1])
           items.append(colormap)
@@ -807,7 +822,8 @@ def set_per_run(model, args):
       refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
       model.set_refl(refl_inst)
   if "bg" in args.replace: model.set_bg(args.args)
-  if "sigmoid" in args.replace and hasattr(model, "nerf"): model.nerf.set_sigmoid(args.sigmoid_kind)
+  if "sigmoid" in args.replace and hasattr(model, "nerf"):
+    model.nerf.set_sigmoid(args.sigmoid_kind)
 
   if "light" in args.replace:
     if isinstance(model.refl, refl.LightAndRefl):
