@@ -809,9 +809,9 @@ class DynamicNeRF(nn.Module):
 
   def direct_predict(self, x, t):
     dp, rigidity = self.delta_estim(torch.cat([x, t], dim=-1)).split([3, 1], dim=-1)
-    #self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
+    self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
     self.dp = dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
-    return dp#* rigidity
+    return dp * rigidity
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
     rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)

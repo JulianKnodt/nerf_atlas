@@ -1,0 +1,32 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage{hyperref}
+
+\begin{document}
+
+\title{$C^0$-Continuous Networks for Interpolation}
+\author{Julian Knodt}
+
+\begin{abstract}
+Methodology for predicting smooth functions over time using neural nets has previously relied on
+some form of consistency loss to ensure smoothness over time, which has showed good results on
+short sequences, where it is able to effectively apply the loss function over the whole duration.
+This approach is difficult to scale to larger sequences, as it requires more pairwise
+constraints as the sequence length grows.
+
+We propose an alternate formulation, which ensures $C^0$ continuity of sequences using a
+Bezier-spline formulation. We examine the problem of smooth function reconstruction for dynamic
+scenes using NeRF, but note that our approach is much more general and can be applied to a large
+variety of problems. For dynamic NeRF, we are interested in reconstructing a ray-warping
+function $f(x\in\mathbb{R}^3,t\in[0,1])\to\delta(x)$. We decompose this into two functions,
+$f(x\in\mathb{R}^3)\to\beta_x, B_\beta(t)\to\delta(x)$, where $B_\beta$ is a bezier spline
+parametrized by the control points $\beta$. This allows for $C^0$, and in this case $C^1$ continuity,
+allowing for perfect interpolation in time. We model $f(x\in\mathb{R}^3)\to\beta_x$ as an MLP,
+blending machine learning with classical animation techniques.
+\end{abstract}
+
+\input{intro}
+\input{background}
+\input{method}
+
+\end{document}

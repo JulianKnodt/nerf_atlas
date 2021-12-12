@@ -1,0 +1,19 @@
+\section{Background}
+
+\subsection{NeRF}
+
+TODO put in some reference to NeRF here.
+
+\subsection{Bezier Curves}
+
+Bezier curves refer to a class of functions defined as a polynomial parametrized by a set of
+control points. They are most commonly used as cubic polynomials: $f(x) = ax^3 + bx^2 + cx + d$,
+where x is the variable we are interested in interpolating over. The general formulation for
+the Bezier basis functions is defined as $B^n(t) = \Sigma^n_{i=0} {n}\choose{i} (1-t)^{n-i} t^i$ where n
+is the degree of the Bezier polynomial. In order to give control of the Bezier curve, we
+introduce "control points", which weighs different points along the curve differently:
+$B^n(t) = \Sigma^n_{i=0} P_i {n}\choose{i} (1-t)^{n-i} t^i$, where $P_i\in\mathbb{R}^3$ for 3D
+movement. For a more complete reference on Bezier splines, we refer the reader to a more
+\href{https://pomax.github.io/bezierinfo/index.html}{complete reference}.
+
+

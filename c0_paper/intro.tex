@@ -1,0 +1,38 @@
+\section{Introduction}
+
+The problem of learning smooth functions is a key problem in machine learning, as many problems
+are framed as finding continuous solutions to problems with only a small number of data points.
+This smoothness is often not guaranteed, and is enforced through regularization of the output,
+usually using something like $L_2$ loss or temporal consistency~\cite{nr-nerf}. Since
+the consistency is usually imposed as some weighted loss, it is not a guaranteed property of the
+network. This leads to difficulties in interpolation between time-steps, which can be used to
+exaggerate motion, or predict intermediate time steps. In addition, there is also the
+possibility for sudden changes in motion.
+Notably, we are interested in constructing functions with $C^0$ continuity. That is, the
+function must be continuous on some domain. We are also to some extent interested in $C^1$
+continuity, or the derivative of a function is continuous on some domain, which often is
+reflected in the realism of motion by enforcing smooth velocity changes.
+
+We examine the specific problem of predicting movement for dynamic scenes using NeRF. For this,
+we define some static configuration, which is referred to as the canonical scene. From this, we
+march rays into the scene, warping them in order to deform the rendered view, which is
+essentially a perspective shift from moving objects in the scene. This is layered on top of the
+original NeRF model in order to reconstruct movement from a fixed set of views. This simple
+formulation is highly effective at reconstructing lambertian scenes with continuous movement as
+described in D-NeRF~\cite{dnerf} and NR(non-rigid)-NeRF~\cite{nr-nerf}. These works show convincing
+reconstructions of dynamic movement in scenes, predicting accurate reconstructions on both real
+and synthetic scenes. If we are satisfied with pure reconstruction these methods suffice, but we
+are also interested in performing operations on movement, such as interpolating between frames,
+exaggerating it, or classifying regions of movement. These methods demonstrate capability to
+perform well on certain tasks such as motion interpolation, but require specific optimizations
+in order to demonstrate improvements. In contrast, we examine classical animation tools in order
+to better handle movement.
+
+In animation, there are many existing tools for creating smooth movement with a high-degree of
+control for artists and animators. For example, there are tools such as keyframing, splines,
+and other techniques. These tools allow artists and animators to breathe life into animation,
+with a high degree of control. Mathematical constructs such as splines have also been thoroughly
+studied to understand their behaviour, as well as how they can be manipulated. These tools are
+clearly powerful enough to represent most movement, but have not been leveraged in machine
+learning for this purpose.
+

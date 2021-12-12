@@ -1,0 +1,15 @@
+\section{Discussion}
+
+Our method produces coherent movement in objects without explicit regularization, and is able to
+converge much faster as compared to prior work. It also does not suffer extremely significant
+around time extremities as compared to D-NeRF, since we are analytically able to ensure that at
+time 0 there is no motion.
+
+In addition, our method demonstrates extremely smooth interpolation, as enforced by the network.
+We are thus able to exaggerate movements significantly. Also because of the analytic nature
+of splines, we are likely able to perform interesting motion deformations, such as diverging
+motion paths in order to construct novel motion.
+
+One issue with our approach is that because it is forced to learn continuous representations, it
+has some difficulty when surfaces collide and bounce apart, as it must separate each surface but
+the boundary between them may be very small and thus hard to distinguish.

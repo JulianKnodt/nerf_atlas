@@ -1,0 +1,94 @@
+\section{Method}
+
+Our method consists of imposing additional structure on top of existing machine learning
+approaches to reconstruction. For some function $f(p, t)\to\mathbb{R}^n, t\in[0,1]$ which is modelled through
+some learned approach, we decompose it into a function $f(p)\to\mathbb{R}^{n\times O}, B_O(f(p), t)$, where
+$O$ is the order of the Bezier spline, $f$ is the learned component, and $B_O$ is the evaluation
+of the $O$th order Bezier spline with control points defined by $f(p)$.
+
+Specifically for the case of dynamic NeRF, we formulate $f(p)$ as
+$\text{MLP}(x,y,z)\to\mathbb{R}^{3\times O}$. We raymarch from a camera with known position and
+view direction through the scene, and at every point we compute the set of control points for
+the amount the ray is being bent. We then are able to evaluate it at any time $t=[0,1]$ in order
+to reconstruct movement, $\delta_0(x)$. The number of spline points is variable, but we are able
+to reconstruct movement with as low as 4 spline points, but experiment with at least 16 spline
+points. In order to evaluate the Bezier curve in a numerically stable way, we use De Casteljau's
+algorithm, and further plan on extending it to handle rational bezier splines, which would allow
+for even greater control of movement.
+
+Following NR-NeRF, we also apply a rigidity to every ray, which is also computed as a function of position:
+$\text{Rigidity} =\sigma_{\epsilon^\uparrow}(\text{MLP}(x,y,z)\to\mathbb{R}),
+\sigma_{\epsilon^\uparrow}(v) = \sigma(v)(1-\epsilon) + \epsilon$, which essentially rescales the
+difficulty of learning movement, making it more easy to represent and classify static scene
+objects. The final change in position is thus defined as $\delta(x) = \text{Rigidity}\times
+\delta_0(x)$.
+
+In order to reconstruct RGB values, we also diverge from traditional NeRF, and only allow for
+positional dependent colors: $\text{RGB} =
+\sigma_{\epsilon^\Longleftrightarrow}(\text{MLP}(x,y,z)),
+\sigma_{\epsilon^\Longleftrightarrow}(v) = \sigma(v)(1+2\epsilon) - \epsilon$, using the
+activation function as described in MIP-NeRF~\cite{mipnerf}. Because of the low number of
+samples for a moving object at a given view, it is much more difficult to learn specular
+reflection, thus it becomes necessary to only model the lambertian component of the color.
+
+While training, we also introduce an additional loss term, as the $\ell_2$ loss may have
+difficulty when there is a large pixelwise gap in movement between the learned and predicted
+component. We formulate the loss term as $\text{MSE}(\text{FFT}(I_\text{GT}),
+\text{FFT}(I_\text{predicted}))$, where the FFT is the 2D fast fourier transform of an image.
+The MSE here is defined over the complex domain as the FFT has both a real and imaginary
+component, and is defined as $L_\text{FFT} =\text{MSE}(a\in\mathbb{C}^k,b\in\mathbb{C}^k) =
+\frac{1}{k}\Sigma_{i=0}^k|a_i-b_i|, |z| = (\mathbb{Re}(z)+\mathbb{Im}(z))(\mathbb{Re}(z)-\mathbb{Im}(z))$.
+We introduce this term as a cheap approximation to structural similarity, since the FFT captures
+information about the structure of the whole image, which is useful in a dynamic setting due to
+the disjointedness of where a predicted object may be as opposed to its final position.
+
+Our final loss formulation is thus:
+\[ \ell_2(I_\text{predicted}, I_\text{GT}) + L_\text{FFT}(I_\text{predicted}, I_\text{GT}) \]
+without any additional regularization terms.
+
+Our formulation is simpler compared to NR-NeRF since there is no need to regularize over
+temporal consistency, and that makes the optimization process simpler.
+
+\subsection{Long Duration $C^0$ Continuity}
+
+While the above structure is sufficient to model short-term $C^0$ continuity, it runs into
+computational instability and higher cost the longer the sequence is, due to the $O(n^2)$
+evaluation cost of De Casteljau's algorithm. We also design an additional architecture which
+composes the previous architecture for many small $C^0$ curves. Fundamentally, this idea permits
+for reconstruction of infinitely long sequences with guaranteed smoothness at little extra cost.
+
+We define the architecture akin to poly-splines, or a composition of many small Bezier splines.
+For a known-length sequence, we divide it into $K$ different segments, and without loss of
+generality assume that $K$ evenly divides the total number of frames. This implies that $t$ is
+now in the range $0, K$, and can be decomposed into a segment number and fractional component:
+$k\in\mathbb{Z}_K=\floor{t}, t'=t-k$.
+Then we define an embedding $\text{Emb} = \mathbb{R}^{Z\times(K+1)}$, where $Z$ is some latent
+dimension size. We then create an "anchor" network,
+$\text{anchor}(x\in\mathbb{R}^3,z\in\mathbb{R}^Z) =
+\text{MLP}(x,z)\to(\mathbb{R}^3,\mathbb{R}^{Z'}$, so named because it computes "anchors"
+or endpoints of the curves, as well as a representative latent vector. Between these two
+anchors, we are interested in computing some number of intermediate spline points. We define the
+control point estimation network as $\text{control}(x\in\mathbb{R}^3, z_1\in\mathbb{R}^{Z'},
+z_2\in\mathbb{R}^{Z'}) = \text{MLP}(x,z_1,z_2)\to\mathbb{R}^{O\times\mathbb{R}^3}$, where $z_1,z_2$ are the
+representative latent vectors from the anchor network, and it outputs $O$ spline points in
+$R^3$. We optionally also can include a per-segment rigidity value, similar to above, but lose
+some guarantees of continuity by doing so.
+
+In order to evaluate the spline at a given time $t$ for a point $x$, we first compute $k, t'$. Then, we compute
+the anchor points at
+$p_0,z_1=\text{anchor}(x,\text{Emb}[k]),p_\text{end},z_2=\text{anchor}(x,\text{Emb}[k])$, and
+the middle control points as $p_{1\ldots O-2}\text{control}(x,z_1,z_2)$. The final set of control points we use
+is the concatentation of the anchors with the intermediate points:
+$[p_0, p_{1\ldots O-2}, p_\text{end}]$. Using this set of control points, evaluate the bezier
+curve spline at $t'$ using De Casteljau's algorithm. Because we are using adjacent points from
+the embedding for each anchor, we are guaranteed that the endpoints between each spline segment
+are continuous. Information is also carried over between segments through the anchor's
+representative latent vector, allowing the network to maintain velocity between curves.
+
+This architecture enforces a guarantee of consistency, regardless of sequence length. It also
+naturally allows for disentangling motion between distinct time-steps, as while the endpoints of
+the spline are fixed, movement in the middle is allowed to be fully independent of other
+segments if it needs to be.
+
+We do not demonstrate the plausibility of this architecture, due to lack of data known to the
+author of long videos with known camera positions, but hope to test it in future work.
