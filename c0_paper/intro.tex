@@ -1,9 +1,9 @@
-\section{Introduction}
+\section*{Introduction}
 
 The problem of learning smooth functions is a key problem in machine learning, as many problems
 are framed as finding continuous solutions to problems with only a small number of data points.
 This smoothness is often not guaranteed, and is enforced through regularization of the output,
-usually using something like $L_2$ loss or temporal consistency~\cite{nr-nerf}. Since
+usually using something like $L_2$ loss or temporal consistency~\cite{tretschk2021nonrigid}. Since
 the consistency is usually imposed as some weighted loss, it is not a guaranteed property of the
 network. This leads to difficulties in interpolation between time-steps, which can be used to
 exaggerate motion, or predict intermediate time steps. In addition, there is also the
@@ -19,7 +19,7 @@ march rays into the scene, warping them in order to deform the rendered view, wh
 essentially a perspective shift from moving objects in the scene. This is layered on top of the
 original NeRF model in order to reconstruct movement from a fixed set of views. This simple
 formulation is highly effective at reconstructing lambertian scenes with continuous movement as
-described in D-NeRF~\cite{dnerf} and NR(non-rigid)-NeRF~\cite{nr-nerf}. These works show convincing
+described in D-NeRF~\cite{pumarola2020dnerf} and NR(non-rigid)-NeRF~\cite{tretschk2021nonrigid}. These works show convincing
 reconstructions of dynamic movement in scenes, predicting accurate reconstructions on both real
 and synthetic scenes. If we are satisfied with pure reconstruction these methods suffice, but we
 are also interested in performing operations on movement, such as interpolating between frames,
@@ -36,3 +36,10 @@ studied to understand their behaviour, as well as how they can be manipulated. T
 clearly powerful enough to represent most movement, but have not been leveraged in machine
 learning for this purpose.
 
+We blend these existing tools in order to apply a prior on movement in Dynamic NeRF, finding that we are able to get a slight increase in performance without additional cost. In addition, we propose a new architecture for long duration $C^0$-continuous signal reconstruction. In summary, our contributions are as follows:
+
+\begin{enumerate}
+    \item A formulation of a prior on top of existing D-NeRF, which enforces smoothness of movement, a canonical basis, and an analytic form at no additional cost, while slightly outperforming the original.
+    \item An evaluation of our architecture against D-NeRF which demonstrates its performance.
+    \item A general architecture for reconstructing long, continuous signals, which guarantees smoothness. This architecture can be used to reconstruct long, dynamic sequences, but is more general and can be applied broadly to smooth signal reconstruction.
+\end{enumerate}
