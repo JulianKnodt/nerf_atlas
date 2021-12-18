@@ -189,7 +189,7 @@ class CommonNeRF(nn.Module):
     if bg == "mlp":
       self.sky_mlp = SkipConnMLP(
         in_size=2, out=3, enc=FourierEncoder(input_dims=2),
-        num_layers=3, hidden_size=64, xavier_init=True,
+        num_layers=3, hidden_size=64, init="xavier",
       )
       self.sky_color_fn = self.sky_from_mlp
 
@@ -266,7 +266,7 @@ class TinyNeRF(CommonNeRF):
     self.estim = SkipConnMLP(
       in_size=3, out=1 + out_features,
       latent_size = self.total_latent_size(),
-      num_layers=6, hidden_size=256, xavier_init=True,
+      num_layers=6, hidden_size=256, init="xavier",
     )
 
   def forward(self, rays):
@@ -304,7 +304,7 @@ class PlainNeRF(CommonNeRF):
     self.first = SkipConnMLP(
       in_size=3, out=1 + self.intermediate_size, latent_size=self.total_latent_size(),
       enc=FourierEncoder(input_dims=3),
-      num_layers = 6, hidden_size = 128, xavier_init=True,
+      num_layers = 6, hidden_size = 128, init="xavier",
     )
 
   def forward(self, rays):
@@ -362,13 +362,13 @@ class HistogramNeRF(CommonNeRF):
 
     self.ray_query = SkipConnMLP(
       in_size=5, out=self.step_size, enc=FourierEncoder(input_dims=3),
-      num_layers = 6, hidden_size = 128, xavier_init=True,
+      num_layers = 6, hidden_size = 128, init="xavier",
     )
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + self.intermediate_size, latent_size=self.total_latent_size(),
       enc=FourierEncoder(input_dims=3),
-      num_layers = 6, hidden_size = 128, xavier_init=True,
+      num_layers = 6, hidden_size = 128, init="xavier",
     )
 
   def forward(self, rays):
@@ -409,7 +409,7 @@ class SplineNeRF(CommonNeRF):
     self.first = SkipConnMLP(
       in_size=1, out=1 + self.intermediate_size, latent_size=32,
       enc=FourierEncoder(input_dims=1),
-      num_layers = 5, hidden_size = 256, xavier_init=True,
+      num_layers = 5, hidden_size = 256, init="xavier",
     )
   def forward(self, rays):
     pts, self.ts, r_o, r_d = compute_pts_ts(
@@ -463,16 +463,14 @@ class NeRFAE(CommonNeRF):
     self.latent_size = self.total_latent_size()
 
     self.encode = SkipConnMLP(
-      in_size=3, out=encoding_size,
-      latent_size=self.latent_size,
-      num_layers=5, hidden_size=128,
-      enc=FourierEncoder(input_dims=3),
-      xavier_init=True,
+      in_size=3, out=encoding_size, latent_size=self.latent_size,
+      num_layers=5, hidden_size=128, enc=FourierEncoder(input_dims=3),
+      init="xavier",
     )
 
     self.density_tform = SkipConnMLP(
       in_size=encoding_size, out=1+self.intermediate_size, latent_size=0,
-      num_layers=5, hidden_size=64, xavier_init=True,
+      num_layers=5, hidden_size=64, init="xavier",
     )
 
     self.encoding_size = encoding_size
@@ -793,7 +791,7 @@ class DynamicNeRF(nn.Module):
       # x,y,z,t -> dx, dy, dz, rigidity
       in_size=4, out=3+1,
       num_layers = 6, hidden_size = 324,
-      xavier_init=True,
+      init="xavier",
     )
     self.time_estim = self.direct_predict
   def set_spline_estim(self, spline_points):
@@ -801,7 +799,7 @@ class DynamicNeRF(nn.Module):
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
       in_size=3, out=(spline_points-1)*3+1, num_layers=6,
-      hidden_size=324, xavier_init=True,
+      hidden_size=324, init="xavier",
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
     self.spline_n = spline_points
@@ -868,17 +866,17 @@ class LongDynamicNeRF(nn.Module):
     # the anchor points of each spline
     self.anchors = SkipConnMLP(
       in_size=3, out=3+anchor_interim,
-      num_layers=5, hidden_size=512, latent_size=ses, xavier_init=True,
+      num_layers=5, hidden_size=512, latent_size=ses, init="xavier",
     )
     # the interior of each spline, will get passed latent values from the anchors.
     self.point_estim = SkipConnMLP(
       in_size=3, out=(spline-2) * 3,
       num_layers=6, hidden_size=512,
-      latent_size=ses+anchor_interim, xavier_init=True,
+      latent_size=ses+anchor_interim, init="xavier",
     )
     self.spline_n = spline
     self.global_rigidity = SkipConnMLP(
-      in_size=3, out=1, xavier_init=True, num_layers=5, hidden_size=256,
+      in_size=3, out=1, init="xavier", num_layers=5, hidden_size=256,
     )
     # Parameters in SE3, except 0 which is always 0
     self.global_spline = nn.Parameter(torch.randn(n_points, 6))

@@ -85,6 +85,15 @@ class NNEncoder(nn.Module):
     assert(x.shape[-1] == self.fwd.in_features)
     return torch.sin(30 * self.fwd(x))
 
+# how to initialize the MLP, otherwise defaults to torch
+mlp_init_kinds = {
+  None,
+  "zero",
+  "kaiming",
+  "siren",
+  "xavier",
+}
+
 class SkipConnMLP(nn.Module):
   "MLP with skip connections and fourier encoding"
   def __init__(
@@ -103,9 +112,9 @@ class SkipConnMLP(nn.Module):
     # Record the last layers activation
     last_layer_act = False,
 
-    zero_init = False,
-    xavier_init = False,
+    init=None,
   ):
+    assert(init in mlp_init_kinds), "Must use init kind"
     super(SkipConnMLP, self).__init__()
     self.in_size = in_size
     map_size = 0
@@ -136,11 +145,22 @@ class SkipConnMLP(nn.Module):
       self.init.bias, self.out.bias,
       *[l.bias for l in self.layers],
     ]
-    if zero_init:
+    if init is None:
+      ...
+    elif init == "zero":
       for t in weights: nn.init.zeros_(t)
       for t in biases: nn.init.zeros_(t)
-    if xavier_init:
+    elif init == "xavier":
       for t in weights: nn.init.xavier_uniform_(t)
+      for t in biases: nn.init.zeros_(t)
+    elif init == "siren":
+      for t in weights:
+        fan_in, fan_out = nn.init._calculate_fan_in_and_fan_out(t)
+        a = math.sqrt(1 / fan_in)
+        nn.init._no_grad_uniform_(t, -a, a)
+      for t in biases: nn.init._no_grad_uniform_(t, -0.01, 0.01)
+    elif init == "kaiming":
+      for t in weights: nn.init.kaiming_normal_(t, mode='fan_out')
       for t in biases: nn.init.zeros_(t)
 
     self.activation = activation
@@ -451,14 +471,12 @@ class PointNet(nn.Module):
     feats=feature_size
     self.first = SkipConnMLP(
       in_size=feats, out=intermediate_size,
-      enc=enc,
-      xavier_init=True,
+      enc=enc, init="xavier",
       num_layers=3, skip=999
     )
     self.second = SkipConnMLP(
       in_size=intermediate_size * 2, out=classes,
-      xavier_init=True,
-      num_layers=3, skip=999
+      init="xavier", num_layers=3, skip=999
     )
   def forward(self, pos, feats):
     # input has shape (batches, num_samples, C)

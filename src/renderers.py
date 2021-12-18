@@ -54,7 +54,7 @@ class LearnedLighting(nn.Module):
     in_size=5
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size, num_layers=5, hidden_size=128,
-      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      enc=FourierEncoder(input_dims=in_size), init="xavier",
     )
   def forward(self, pts, lights, isect_fn, latent=None, mask=None):
     pts = pts if mask is None else pts[mask]
@@ -104,7 +104,7 @@ class AllLearnedOcc(nn.Module):
     self.attenuation = SkipConnMLP(
       in_size=in_size, out=1, latent_size=latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=6, hidden_size=256, xavier_init=True,
+      num_layers=6, hidden_size=256, init="xavier",
     )
   @property
   def all_learned_occ(self): return self

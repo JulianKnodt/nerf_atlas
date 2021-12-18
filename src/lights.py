@@ -38,8 +38,7 @@ class Field(Light):
     super().__init__()
     self.color_dims = color_dims = 1 if monochrome else 3
     self.mlp = SkipConnMLP(
-      in_size=3, out=color_dims+2, hidden_size=256, xavier_init=True,
-      activation=torch.sin,
+      in_size=3, out=color_dims+2, hidden_size=256, init="siren", activation=torch.sin,
       latent_size=0 if num_embeddings == 1 else embedding_size,
     )
     # since this is a field it doesn't have a specific distance and thus is treated like ambient

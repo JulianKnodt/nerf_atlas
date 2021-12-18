@@ -40,7 +40,7 @@ class SmoothImageApprox(nn.Module):
       in_size=2, out=3, latent_size=latent_size,
       enc=FourierEncoder(input_dims=2, freqs=32),
       num_layers=5, hidden_size=256,
-      xavier_init=True, activation=torch.sin,
+      init="siren", activation=torch.sin,
     )
     self.displacement = SkipConnMLP(
       in_size=3, out=1, latent_size=latent_size,

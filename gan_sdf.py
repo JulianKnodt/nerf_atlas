@@ -418,8 +418,7 @@ class MLP(nn.Module):
       in_size=3, out=1 + output_latent_size, latent_size=latent_size,
       enc=FourierEncoder(input_dims=3),
       activation=torch.sin, num_layers=7, hidden_size=512,
-      skip=3,
-      xavier_init=True,
+      skip=3, init="siren",
     )
     self.bounds = bounds
   def set_assigned_latent(self, latent): self.assigned_latent = latent
@@ -480,7 +479,7 @@ class MultiRes(nn.Module):
       SkipConnMLP(
         in_size=3, out=1 + output_latent_size, latent_size=latent_size,
         enc=FourierEncoder(input_dims=3), activation=torch.sin,
-        num_layers=4, hidden_size=256, skip=3, xavier_init=True,
+        num_layers=4, hidden_size=256, skip=3, init="xavier",
       ) for _ in range(resolutions)
     ])
     self.assigned_latent = None

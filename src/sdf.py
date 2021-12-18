@@ -187,10 +187,8 @@ class SmoothedSpheres(SDFModel):
     self.tfs = nn.Parameter(torch.zeros(n, 3, 3, requires_grad=True))
     if with_mlp:
       self.mlp = SkipConnMLP(
-        in_size=3, out=1,
-        num_layers=5, hidden_size=128,
-        enc=FourierEncoder(input_dims=3),
-        xavier_init=True,
+        in_size=3, out=1, num_layers=5, hidden_size=128,
+        enc=FourierEncoder(input_dims=3), init="xavier",
       )
 
   @torch.jit.export
@@ -255,8 +253,7 @@ class MLP(SDFModel):
     self.mlp = SkipConnMLP(
       in_size=3, out=1+self.latent_size,
       enc=FourierEncoder(input_dims=3, sigma=1<<4),
-      num_layers=6, hidden_size=256,
-      xavier_init=True,
+      num_layers=6, hidden_size=256, init="xavier",
     )
   def forward(self, x): return self.mlp(x)
 
@@ -268,10 +265,8 @@ class CurlMLP(SDFModel):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
-      in_size=3, out=1+self.latent_size,
-      enc=FourierEncoder(input_dims=3, sigma=1<<5),
-      num_layers=6, hidden_size=256,
-      xavier_init=True,
+      in_size=3, out=1+self.latent_size, enc=FourierEncoder(input_dims=3, sigma=1<<5),
+      num_layers=6, hidden_size=256, init="xavier",
     )
   def forward(self, x):
     with torch.enable_grad():
@@ -289,7 +284,7 @@ class SIREN(SDFModel):
       num_layers=5, hidden_size=256,
       activation=torch.sin,
       # Do not have skip conns
-      skip=1000,
+      skip=1000, init="siren",
     )
   def forward(self, x):
     out = self.siren((30*x).sin())

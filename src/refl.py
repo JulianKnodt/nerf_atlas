@@ -161,7 +161,7 @@ class Basic(Reflectance):
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=5, hidden_size=128, init="xavier",
     )
     self.space = space
 
@@ -194,7 +194,7 @@ class View(Reflectance):
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=4, hidden_size=256, xavier_init=True,
+      num_layers=4, hidden_size=256, init="xavier",
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
@@ -210,7 +210,7 @@ class ViewLight(Reflectance):
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=256, xavier_init=True,
+      num_layers=5, hidden_size=256, init="xavier",
     )
   @property
   def can_use_light(self): return True
@@ -227,7 +227,7 @@ class Positional(Reflectance):
     self.mlp = SkipConnMLP(
       in_size=3, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=3),
-      num_layers=5, hidden_size=512, xavier_init=True,
+      num_layers=5, hidden_size=512, init="xavier",
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))
@@ -247,7 +247,7 @@ class Diffuse(Reflectance):
     self.diffuse_color = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       num_layers=3,hidden_size=512,
-      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      enc=FourierEncoder(input_dims=in_size), init="xavier",
     )
 
   @property
@@ -282,7 +282,7 @@ class FourierBasis(Reflectance):
       in_size=in_size, out=self.order * self.out_features,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=6, hidden_size=128, xavier_init=True,
+      num_layers=6, hidden_size=128, init="xavier",
     )
     # this model does not use an activation function
   @property
@@ -324,25 +324,25 @@ class CookTorrance(Reflectance):
       in_size=in_size, out=1,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=5, hidden_size=128, init="xavier",
     )
     self.ior = SkipConnMLP(
       in_size=in_size, out=1,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=5, hidden_size=128, init="xavier",
     )
     self.facet_slope_dist = SkipConnMLP(
       in_size=in_size + 1, out=1,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=5, hidden_size=128, init="xavier",
     )
     self.diffuse_color = SkipConnMLP(
       in_size=in_size, out=3,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=5, hidden_size=128, init="xavier",
     )
   @property
   def can_use_normal(self): return True
@@ -412,7 +412,7 @@ class WeightedChoice(Reflectance):
     in_size = space.dims
     self.selection = SkipConnMLP(
       in_size=in_size, out=len(choices), latent_size=self.latent_size,
-      xavier_init=True, enc=FourierEncoder(input_dims=in_size),
+      init="xavier", enc=FourierEncoder(input_dims=in_size),
     )
 
   @property
@@ -441,7 +441,7 @@ class Rusin(Reflectance):
     in_size = rusin_size + space.dims
     self.rusin = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      enc=FourierEncoder(input_dims=in_size), init="xavier",
 
       num_layers=5, hidden_size=256,
     )
@@ -481,12 +481,12 @@ class RusinHelmholtz(Reflectance):
     in_size = rusin_size + space.dims
     self.scalar_potential = SkipConnMLP(
       in_size=in_size, out=1, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      enc=FourierEncoder(input_dims=in_size), init="xavier",
       num_layers=5, hidden_size=256,
     )
     self.solenoidal = SkipConnMLP(
       in_size=in_size, out=3, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size), xavier_init=True,
+      enc=FourierEncoder(input_dims=in_size), init="xavier",
       num_layers=5, hidden_size=256,
     )
 
@@ -554,7 +554,7 @@ class AlternatingOptimization(nn.Module):
     self.blend = SkipConnMLP(
       in_size=3, out=1, latent_size=self.analytic.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=5, hidden_size=128, init="xavier",
     )
 
   def forward(self, x, view, normal, light, latent=None):
@@ -657,7 +657,7 @@ class SphericalHarmonic(Reflectance):
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features*((order+1)*(order+1)), latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
-      num_layers=5, hidden_size=128, xavier_init=True,
+      num_layers=5, hidden_size=128, init="xavier",
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
