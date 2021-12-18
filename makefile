@@ -77,15 +77,15 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = bouncingballs
+dnerf_dataset = hellwarrior
 dnerf: clean
-	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
+	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
 	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 20 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 24 \
+	--crop-size 20 --near 2 --far 6 -lr 1e-4 --valid-freq 500 --spline 16 \
   --sigmoid-kind fat --loss-window 2000 --loss-fns l2 fft \
   --render-over-time 8 --notraintest --test-crop-size 64 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos \
-  --load models/dyn_${dnerf_dataset}.pt
+  #--load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 256 \
 	--epochs 0 --save models/dyn_n_${dnerf_dataset}.pt --model plain --batch-size 2 \

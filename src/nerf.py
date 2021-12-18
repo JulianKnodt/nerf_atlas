@@ -800,7 +800,7 @@ class DynamicNeRF(nn.Module):
     assert(spline_points > 1), "Must pass N > 1 spline"
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
-      in_size=3, out=spline_points*3+1, num_layers=6,
+      in_size=3, out=(spline_points-1)*3+1, num_layers=6,
       hidden_size=324, xavier_init=True,
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
@@ -814,12 +814,12 @@ class DynamicNeRF(nn.Module):
     return dp * rigidity
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
-    rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)
+    rigidity, ps = self.delta_estim(x).split([1, 3 * (self.spline_n-1)], dim=-1)
     self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
-    ps = torch.stack(ps.split([3] * self.spline_n, dim=-1), dim=0)
+    ps = torch.stack(ps.split([3] * self.spline_n-1, dim=-1), dim=0)
     init_ps = ps[None, 0]
     self.dp = dp = self.spline_fn(ps - init_ps, t, self.spline_n)
-    return (dp + init_ps.squeeze(0)) * rigidity
+    return dp * rigidity + init_ps.squeeze(0)
 
   @property
   def nerf(self): return self.canonical
