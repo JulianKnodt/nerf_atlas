@@ -7,8 +7,8 @@ clean:
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --epochs 80_000 --save models/lego.pt \
-	--near 2 --far 6 --batch-size 4 --crop-size 24 --model plain -lr 1e-3 \
-	--loss-fns l2 --valid-freq 499 --refl-kind view --replace refl #--load models/lego.pt #--omit-bg
+	--near 2 --far 6 --batch-size 4 --crop-size 20 --model plain -lr 5e-4 \
+	--loss-fns l2 --refl-kind pos #--load models/lego.pt #--omit-bg
 
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -369,6 +369,12 @@ volsdf_gan_no_refl:
 	--bounds 1.5 --noglobal --render-size 128 --G-model mlp
 
 # evaluates the reflectance of a rusin model
+mpi: clean
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 64 --epochs 30_000 --save models/lego_mpi.pt --mpi \
+	--near 2 --far 6 --batch-size 4 --crop-size 50 --model plain -lr 1e-4 \
+	--loss-fns l2 --refl-kind pos
+
 eval_rusin:
 	python3 eval_rusin.py --refl-model models/nerv_hotdogs.pt
 

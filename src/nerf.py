@@ -58,9 +58,7 @@ def alpha_from_density(
   dists = torch.cat([ts[..., 1:] - ts[..., :-1], end_val], dim=-1)
   while len(dists.shape) < 4: dists = dists[..., None]
   dists = dists * torch.linalg.norm(r_d, dim=-1)
-  alpha = 1 - torch.exp(-sigma_a * dists)
-  # TODO is this equivalent to -expm1? Does it matter?
-  #alpha = -torch.expm1(-sigma_a * dists)
+  alpha = 1-torch.exp(-sigma_a * dists)
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
 
@@ -966,52 +964,73 @@ class SinglePixelNeRF(nn.Module):
     self.canon.set_per_pixel_latent(latent)
     return self.canon(rays)
 
+# Multi Plane Imaging
+# https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-plane-and-ray-disk-intersection
 class MPI(nn.Module):
-  # Multi Plane Imaging.
   def __init__(
     self,
+    # TODO
     canonical: CommonNeRF,
 
+    # position of most frontal plane, all others will be behind it according to delta.
     position = [0,0,0],
     normal = [0,0,-1],
-    delta=0.1,
+    n_planes: int = 9,
+    delta:float=1e-1,
 
-    n_planes: int = 6,
 
     device="cuda",
   ):
     super().__init__()
 
-    self.n_planes = torch.linspace(canon.t_near, canon.t_far, steps=n_planes, device=device)
-    self.position = torch.tensor(position, device=device, dtype=torch.float)
-    self.normal = torch.tensor(normal, device=device, dtype=torch.float)
+    self.n = nn.Parameter(
+      torch.tensor(normal, requires_grad=False, dtype=torch.float), requires_grad=False
+    )
+    self.p = nn.Parameter(
+      torch.tensor(position, requires_grad=False, dtype=torch.float), requires_grad=False,
+    )
+
+    self.n_planes = n_planes
     self.delta = delta
 
-    self.canonical = canonical.to(device)
+    self.canonical = canonical
+  @property
+  def nerf(self): return self.canonical
+  @property
+  def refl(self): return self.canonical.refl
+  @property
+  def intermediate_size(self): return self.canonical.intermediate_size
+
   def forward(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
     device = r_o.device
-
-    n = self.normal.expand_as(r_d)
-    denom = (n * r_d).sum(dim=-1, keepdim=True)
-    centers = self.position.unsqueeze(0) + torch.tensordot(
-      self.delta * torch.arange(self.n_planes, device=device, dtype=torch.float),
-      -self.normal, dims=0,
+    # Compute intersection with N_planes
+    dp = torch.arange(self.n_planes, device=device)[:, None] * self.delta * self.n[None, :]
+    assert(dp.isfinite().all())
+    ps = self.p[None, :] - dp
+    assert(ps.isfinite().all())
+    # since they all have same normal, and abs since do not care about plane direction
+    denom = (self.n[None, None, None, :] * r_d).sum(dim=-1).abs()
+    to_pt = ps[:,None, None, None,:] - r_o.unsqueeze(0)
+    assert(to_pt.isfinite().all())
+    ts = (to_pt * self.n[None,None,None,None,:]).sum(dim=-1)/denom.clamp(min=1e-4)
+    assert(ts.isfinite().all())
+    # TODO any way to handle negative ts?
+    pts = r_o + ts.unsqueeze(-1) * r_d
+    assert(pts.isfinite().all())
+    rgb = self.canonical.from_pts(pts, ts, r_o, r_d)
+    rgb = torch.where(
+      # need to explicitly zero where ts is negative, can't handle case where only some are
+      # unless designing a more intrusive module.
+      ((ts >= 0).all(dim=0) & (denom > 1e-6)).unsqueeze(-1),
+      rgb,
+      torch.zeros_like(rgb)
     )
-    ts = ((centers - r_o) * n).sum(dim=-1, keepdim=True)/denom
-    # if denom is too small it will have numerical instability because it's near parallel.
-    hits = torch.where(denom.abs() > 1e-3, ts, torch.zeros_like(denom))
-    pts = r_o.unsqueeze(0) + r_d.unsqueeze(0) * hits
+    assert(rgb.isfinite().all())
+    return rgb
 
-    return self.canonical.from_pts(pts, ts, r_o, r_d)
-
-  @property
-  def nerf(self): return self.canon
   def from_pts(self, pts, ts, r_o, r_d):
-    density, feats = self.estim(pts).split([1, 3], dim=-1)
-
-    alpha, weights = alpha_from_density(density, ts, r_d)
-    return volumetric_integrate(weights, self.feat_act(feats))
+    return self.canonical.from_pts(pts, ts, r_o, r_d)
 
 def load_dyn(args, model, device):
   dyn_cons = dyn_model_kinds.get(args.dyn_model, None)
