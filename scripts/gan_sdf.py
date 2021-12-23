@@ -1,3 +1,6 @@
+import sys
+sys.path[0] = sys.path[0][:-len("scripts/")] # hacky way to treat it as root directory
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

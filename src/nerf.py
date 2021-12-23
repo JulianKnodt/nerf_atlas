@@ -62,6 +62,8 @@ def alpha_from_density(
   weights = alpha * cumuprod_exclusive(1.0 - alpha + 1e-10)
   return alpha, weights
 
+def alpha_composite(alpha): return alpha * cumuprod_exclusive(1 - alpha + 1e-10)
+
 # perform volumetric integration of density with some other quantity
 # returns the integrated 2nd value over density at timesteps.
 @torch.jit.script
@@ -655,6 +657,46 @@ class VolSDF(CommonNeRF):
     if isinstance(self.refl, refl.LightAndRefl): self.refl.refl.act = act
     else: self.refl.act = act
 
+class RigNeRF(CommonNeRF):
+  def __init__(
+    self,
+    out_features:int = 3,
+    points:int=256,
+
+    **kwargs,
+  ):
+    super().__init__(
+      r = lambda latent_size: refl.View(
+        out_features=out_features,
+        latent_size=latent_size+self.intermediate_size,
+      ),
+      **kwargs,
+    )
+    self.points = nn.Parameter(torch.rand(512, 3, requires_grad=True))
+    self.correlation = SkipConnMLP(
+      in_size=points,out=1+self.intermediate_size, latent_size=self.total_latent_size(),
+      num_layers=5, hidden_size=256, init="xavier",
+    )
+  def forward(self, x):
+    pts, self.ts, r_o, r_d = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+    )
+    return self.from_pts(pts, self.ts, r_o, r_d)
+
+  def from_pts(self, pts, ts, r_o, r_d):
+    # assume there is no implicit latent component
+    dists = (x[..., None, :] * self.points[None, None, None]).sum(dim=-1)
+    density, intermediate = self.correlation(x).split([1, self.intermediate_size], dim=-1)
+
+    if self.training and self.noise_std > 0:
+      density = density + torch.randn_like(density) * self.noise_std
+
+    view = r_d[None, ...].expand_as(pts)
+    rgb = self.refl(x=pts, view=view, latent=intermediate)
+
+    self.alpha, self.weights = alpha_from_density(density, ts, r_d)
+    return volumetric_integrate(self.weights, rgb)
+
 class RecurrentNeRF(CommonNeRF):
   def __init__(
     self,
@@ -846,7 +888,7 @@ class LongDynamicNeRF(nn.Module):
     segments: int = 32,
     spline:int=4,
     segment_embedding_size:int=128,
-    # intermediate size from the anchors to the poinst estimator
+    # intermediate size from the anchors to the points estimator
     anchor_interim:int=128,
   ):
     super().__init__()
@@ -966,71 +1008,69 @@ class SinglePixelNeRF(nn.Module):
 
 # Multi Plane Imaging
 # https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-plane-and-ray-disk-intersection
-class MPI(nn.Module):
+class MPI(CommonNeRF):
   def __init__(
     self,
-    # TODO
-    canonical: CommonNeRF,
-
+    out_features: int = 3,
     # position of most frontal plane, all others will be behind it according to delta.
     position = [0,0,0],
     normal = [0,0,-1],
+    up=[0,1,0],
     n_planes: int = 9,
-    delta:float=1e-1,
+    delta:float=0.3,
 
-
-    device="cuda",
+    **kwargs,
   ):
-    super().__init__()
+    assert(up != normal)
+    super().__init__(
+      r = lambda ls: refl.View(
+        out_features=out_features,
+        latent_size=ls+self.intermediate_size,
+      ), **kwargs,
+    )
 
-    self.n = nn.Parameter(
+    self.normal = nn.Parameter(
       torch.tensor(normal, requires_grad=False, dtype=torch.float), requires_grad=False
     )
-    self.p = nn.Parameter(
-      torch.tensor(position, requires_grad=False, dtype=torch.float), requires_grad=False,
+    up = torch.tensor(up, requires_grad=False, dtype=torch.float)
+    self.right = nn.Parameter(torch.cross(up, self.normal), requires_grad=False)
+    self.up = nn.Parameter(torch.cross(self.normal, self.right), requires_grad=False)
+    p = torch.tensor(position, requires_grad=False, dtype=torch.float)
+    self.p = nn.Parameter(p, requires_grad=False)
+    # embedding for each point
+    self.emb = nn.Embedding(n_planes, 256)
+    self.alphas = SkipConnMLP(
+      in_size=2, out=4, latent_size=256,
+      init="siren", activation=torch.sin,
     )
 
     self.n_planes = n_planes
     self.delta = delta
 
-    self.canonical = canonical
-  @property
-  def nerf(self): return self.canonical
-  @property
-  def refl(self): return self.canonical.refl
-  @property
-  def intermediate_size(self): return self.canonical.intermediate_size
 
   def forward(self, rays):
     r_o, r_d = rays.split([3,3], dim=-1)
     device = r_o.device
     # Compute intersection with N_planes
-    dp = torch.arange(self.n_planes, device=device)[:, None] * self.delta * self.n[None, :]
-    assert(dp.isfinite().all())
+    plane_idx = torch.arange(self.n_planes, device=device)
+    dp = plane_idx[:, None] * self.delta * self.normal[None, :]
     ps = self.p[None, :] - dp
-    assert(ps.isfinite().all())
     # since they all have same normal, and abs since do not care about plane direction
-    denom = (self.n[None, None, None, :] * r_d).sum(dim=-1).abs()
+    denom = (self.normal[None, None, None, :] * r_d).sum(dim=-1).abs()
     to_pt = ps[:,None, None, None,:] - r_o.unsqueeze(0)
-    assert(to_pt.isfinite().all())
-    ts = (to_pt * self.n[None,None,None,None,:]).sum(dim=-1)/denom.clamp(min=1e-4)
-    assert(ts.isfinite().all())
-    # TODO any way to handle negative ts?
+    ts = (to_pt * self.normal[None,None,None,None,:]).sum(dim=-1)/denom.clamp(min=1e-4)
     pts = r_o + ts.unsqueeze(-1) * r_d
-    assert(pts.isfinite().all())
-    rgb = self.canonical.from_pts(pts, ts, r_o, r_d)
-    rgb = torch.where(
-      # need to explicitly zero where ts is negative, can't handle case where only some are
-      # unless designing a more intrusive module.
-      ((ts >= 0).all(dim=0) & (denom > 1e-6)).unsqueeze(-1),
-      rgb,
-      torch.zeros_like(rgb)
-    )
-    assert(rgb.isfinite().all())
-    return rgb
+    # convert pts to uvs
+    ps_to_pts = ps[:,None, None, None,:] - pts
+    basis = torch.stack([self.up, self.right], dim=0)
+    uv = (basis[None,None,None,None] * ps_to_pts[..., None, :]).sum(dim=-1)
+    emb = self.emb(plane_idx)[:,None,None,None].expand(*uv.shape[:-1], -1)
+    alphas, rgb = self.alphas(uv, emb).sigmoid().split([1,3], dim=-1)
+    torch.where((ts < 0).unsqueeze(-1), torch.zeros_like(alphas), alphas)
+    self.weights = weights = alpha_composite(alphas)
+    return (rgb * weights).sum(dim=0)
 
-  def from_pts(self, pts, ts, r_o, r_d):
-    return self.canonical.from_pts(pts, ts, r_o, r_d)
+  def from_pts(self, *args, **kwargs): raise NotImplementedError()
 
 def load_dyn(args, model, device):
   dyn_cons = dyn_model_kinds.get(args.dyn_model, None)
@@ -1055,6 +1095,7 @@ model_kinds = {
   "plain": PlainNeRF,
   "ae": NeRFAE,
   "volsdf": VolSDF,
+  "mpi": MPI,
   # experimental:
   "hist": HistogramNeRF,
   "spline": SplineNeRF,

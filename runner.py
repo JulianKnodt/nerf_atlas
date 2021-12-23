@@ -147,7 +147,6 @@ def arguments():
   a.add_argument(
     "--inc-fourier-freqs", action="store_true", help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
-  a.add_argument("--mpi", action=ST, help="Use MPI for model")
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -904,7 +903,6 @@ def load_model(args, light, is_dyn=False):
     refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
     model.set_refl(refl_inst)
 
-  if args.mpi: model = nerf.MPI(canonical=model).to(device)
   if is_dyn: model = nerf.load_dyn(args, model, device).to(device)
 
   if args.data_kind == "pixel-single":

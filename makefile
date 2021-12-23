@@ -3,6 +3,7 @@ PHONY:
 clean:
 	-@rm outputs/*.png
 	-@rm outputs/results.txt
+	@-rm outputs/*.mp4
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -371,9 +372,9 @@ volsdf_gan_no_refl:
 # evaluates the reflectance of a rusin model
 mpi: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 64 --epochs 30_000 --save models/lego_mpi.pt --mpi \
-	--near 2 --far 6 --batch-size 4 --crop-size 50 --model plain -lr 1e-4 \
-	--loss-fns l2 --refl-kind pos
+	--size 64 --epochs 30_000 --save models/lego_mpi.pt \
+	--near 2 --far 6 --batch-size 4 --crop-size 50 --model mpi -lr 1e-4 \
+	--loss-fns l2 --refl-kind pos --train-imgs 1
 
 eval_rusin:
 	python3 eval_rusin.py --refl-model models/nerv_hotdogs.pt
@@ -416,3 +417,6 @@ spline: clean
 	--loss-fns l2 --valid-freq 500 --refl-kind view --sigmoid-kind upshifted \
 	--depth-images --test-crop-size 32 --notraintest \
   #--load models/lego_spline.pt
+
+generate_animation: clean
+	python3 scripts/2d_recon.py

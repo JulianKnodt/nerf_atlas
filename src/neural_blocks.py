@@ -7,6 +7,7 @@ import torchvision.transforms.functional as TVF
 
 from itertools import chain
 from typing import Optional, Union
+import math
 
 from .utils import ( fourier, create_fourier_basis, smooth_min )
 
