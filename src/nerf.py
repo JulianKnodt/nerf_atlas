@@ -661,7 +661,7 @@ class RigNeRF(CommonNeRF):
   def __init__(
     self,
     out_features:int = 3,
-    points:int=256,
+    points:int=200,
 
     **kwargs,
   ):
@@ -672,21 +672,33 @@ class RigNeRF(CommonNeRF):
       ),
       **kwargs,
     )
-    self.points = nn.Parameter(torch.rand(512, 3, requires_grad=True))
+    self.points = nn.Parameter(torch.randn(points, 3, requires_grad=True))
+    self.masses = nn.Parameter(torch.randn(points, requires_grad=True))
     self.correlation = SkipConnMLP(
       in_size=points,out=1+self.intermediate_size, latent_size=self.total_latent_size(),
+      enc=FourierEncoder(input_dims=points),
       num_layers=5, hidden_size=256, init="xavier",
     )
-  def forward(self, x):
+  def forward(self, rays):
     pts, self.ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
 
-  def from_pts(self, pts, ts, r_o, r_d):
-    # assume there is no implicit latent component
-    dists = (x[..., None, :] * self.points[None, None, None]).sum(dim=-1)
-    density, intermediate = self.correlation(x).split([1, self.intermediate_size], dim=-1)
+  def get_masses(self):
+    return 1 + self.masses.square()
+  def from_pts(self, pts, ts, r_o, r_d, rigs=None):
+    # assume there is no implicit latent component for now (self.curr_latent() not called)
+    if rigs is None: rigs=self.points
+    if self.training: rigs = rigs + torch.randn_like(self.points) * 1e-2
+    self.displace = displace = (pts[..., None, :] - rigs[None, None, None])
+    # Use square of distance to point, this makes it so points must be closer to give more
+    # signal.
+    sq_dists = displace.square().sum(dim=-1)
+    weighted_dists = self.get_masses()[None, None, None] * sq_dists
+    spring = 1/weighted_dists
+    density, intermediate = self.correlation(spring).split([1, self.intermediate_size], dim=-1)
+    density = density.squeeze(dim=-1)
 
     if self.training and self.noise_std > 0:
       density = density + torch.randn_like(density) * self.noise_std
@@ -967,7 +979,6 @@ class DynamicNeRFAE(DynamicNeRF):
   def __init__(self, canonical: NeRFAE, spline:int=0):
     assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
     super().__init__(self, canonical, spline)
-    # TODO how to make the spline return more values
   def forward(self, rays_t):
     rays, t = rays_t
     pts, ts, r_o, r_d = compute_pts_ts(
@@ -979,6 +990,24 @@ class DynamicNeRFAE(DynamicNeRF):
     dp, d_enc = self.time_estim(pts, t).split([3, self.canon.encoding_size], dim=-1)
     encoded = self.canon.compute_encoded(pts + dp, ts, r_o, r_d)
     return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
+
+# Dynamic NeRFAE for multiple frames with changing materials
+class DynamicRigNeRF(DynamicNeRF):
+  def __init__(self, canonical: RigNeRF, spline:int=0):
+    assert(isinstance(canonical, RigNeRF)), "Must use RigNeRF for DynamicRigNeRF"
+    super().__init__(self, canonical, spline)
+    # TODO how to make the spline return more values
+  def forward(self, rays_t):
+    rays, t = rays_t
+    pts, ts, r_o, r_d = compute_pts_ts(
+      rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
+    )
+    self.ts = ts
+
+    rigs = self.canonical.points
+    B = t.shape[0]
+    dp = self.time_estim(rigs[None].expand(B,-1,-1), t[:, None,None])
+    return self.canon.from_pts(pts, ts, r_o, r_d, rigs+dp)
 
 # TODO fix this
 class SinglePixelNeRF(nn.Module):
@@ -1097,6 +1126,7 @@ model_kinds = {
   "volsdf": VolSDF,
   "mpi": MPI,
   # experimental:
+  "rig": RigNeRF,
   "hist": HistogramNeRF,
   "spline": SplineNeRF,
 }

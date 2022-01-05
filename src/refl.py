@@ -190,7 +190,7 @@ class View(Reflectance):
   ):
     super().__init__(**kwargs)
     view_dims, self.view_enc = enc_norm_dir(view)
-    in_size = view_dims
+    in_size = view_dims+3
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
@@ -198,7 +198,7 @@ class View(Reflectance):
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
-    return self.act(self.mlp(v, latent))
+    return self.act(self.mlp(torch.cat([x, v], dim=-1), latent))
 
 # ViewLight reflectance takes a view direction, light and a latent vector.
 class ViewLight(Reflectance):

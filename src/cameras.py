@@ -59,6 +59,14 @@ class NeRFCamera(Camera):
     r_d = r_d.permute(2,0,1,3) # [H, W, B, 3] -> [B, H, W, 3]
     r_o = self.cam_to_world[..., :3, -1][:, None, None, :].expand_as(r_d)
     return torch.cat([r_o, r_d], dim=-1)
+  def project_pts(self, pts, size):
+    untrans = pts - self.cam_to_world[..., :3, -1]
+    w2c = torch.linalg.inv(self.cam_to_world[..., :3, :3])
+    w = (w2c * pts[..., None, :]).sum(dim=-1)
+    K = torch.tensor([self.focal, -self.focal, -1], device=pts.device)
+    v = K[None] * w
+    v = v[..., :-1]/v[..., -1:]
+    return v + size * 0.5
 
 def vec2skew(v):
   zero = torch.zeros(v.shape[:-1] + (1,), device=v.device, dtype=v.dtype)

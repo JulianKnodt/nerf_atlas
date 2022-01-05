@@ -345,6 +345,12 @@ og_upsample: clean
 	--near 2 --far 6 --batch-size 4 --model plain -lr 5e-4 \
 	--loss-fns l2 --valid-freq 499 --no-sched --neural-upsample --nosave
 
+rig_nerf: clean
+	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 128 --epochs 50_000 --save models/rig_lego.pt --seed -1 \
+	--near 2 --far 6 --batch-size 4 --crop-size 16 --model rig -lr 2e-4 \
+  --test-crop-size 48 --save-freq 2500 --notraintest --depth-images --sigmoid-kind fat \
+	--loss-fns fft l2 --refl-kind view --load models/rig_lego.pt #--omit-bg
 
 # [WIP]
 pixel_single: clean
@@ -368,6 +374,13 @@ volsdf_gan_no_refl:
 	python3 gan_sdf.py --epochs 25_000 --num-test-samples 256 --sample-size 1024 \
   --eikonal-weight 1e-2 --target volsdf --volsdf-model models/lego_volsdf.pt \
 	--bounds 1.5 --noglobal --render-size 128 --G-model mlp
+
+project_pts: clean
+	python3 scripts/project_pts.py -d data/nerf_synthetic/lego/ --model models/rig_lego.pt \
+  --size 128
+
+psp: clean
+	python3 scripts/rig_physics.py -d data/nerf_synthetic/lego/ --model models/rig_lego.pt
 
 # evaluates the reflectance of a rusin model
 mpi: clean

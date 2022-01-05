@@ -343,8 +343,8 @@ def arguments():
 
 # Computes the difference of the fft of two images
 def fft_loss(x, ref):
-  got = torch.fft.rfft2(x, dim=(-3, -2), norm="forward")
-  exp = torch.fft.rfft2(ref, dim=(-3, -2), norm="forward")
+  got = torch.fft.rfft2(x, dim=(-3, -2), norm="ortho")
+  exp = torch.fft.rfft2(ref, dim=(-3, -2), norm="ortho")
   return (got - exp).abs().mean()
 
 # TODO add LPIPS?
@@ -660,13 +660,17 @@ def test(model, cam, labels, args, training: bool = True):
   gots = []
 
   def render_test_set(model, cam, labels, offset=0):
+    original = model.points
     with torch.no_grad():
       for i in range(labels.shape[0]):
         ts = None if times is None else times[i:i+1, ...]
+        model.points = nn.Parameter(original + torch.randn_like(original)*3e-2)
         exp = labels[i,...,:3]
         got = torch.zeros_like(exp)
         normals = torch.zeros_like(got)
         depth = torch.zeros(*got.shape[:-1], 1, device=device, dtype=torch.float)
+        # RigNeRF visualization
+        if isinstance(model, nerf.RigNeRF): proximity_map = torch.zeros_like(exp)
         # dynamic nerf visualization tools
         flow_map = torch.zeros_like(normals)
         rigidity_map = torch.zeros_like(depth)
@@ -711,6 +715,10 @@ def test(model, cam, labels, args, training: bool = True):
             if args.rigidity_map and hasattr(model, "rigidity"):
               rigidity_map[c0:c0+cs,c1:c1+cs] = \
                 nerf.volumetric_integrate(model.nerf.weights, model.rigidity)
+            if hasattr(model, "displace"):
+              proximity_map[c0:c0+cs,c1:c1+cs] = nerf.volumetric_integrate(
+                model.nerf.weights, model.displace.max(dim=-2)[0],
+              ).clamp(min=0, max=1)
 
         gots.append(got)
         loss = F.mse_loss(got, exp)
@@ -735,6 +743,7 @@ def test(model, cam, labels, args, training: bool = True):
           max_flow = flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
           items.append((flow_map/max_flow).add(1).div(2))
         if args.rigidity_map and hasattr(model, "rigidity"): items.append(rigidity_map)
+        if hasattr(model, "displace"): items.append(proximity_map)
         if args.draw_colormap:
           colormap = utils.color_map(cam[i:i+1])
           items.append(colormap)
