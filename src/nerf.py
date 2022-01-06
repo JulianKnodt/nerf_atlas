@@ -99,6 +99,7 @@ sky_kinds = {
 }
 def load_nerf(args):
   if args.model != "ae": args.latent_l2_weight = 0
+  if args.dyn_model == "rig": assert(args.model == "rig"), "Must use rig model with dyn rig"
   mip = load_mip(args)
   per_pixel_latent_size = 64 if args.data_kind == "pixel-single" else 0
   kwargs = {
@@ -122,6 +123,8 @@ def load_nerf(args):
     kwargs["sdf"] = sdf.load(args, with_integrator=False)
     kwargs["occ_kind"] = args.occ_kind
     kwargs["integrator_kind"] = args.integrator_kind or "direct"
+  elif args.model == "rig":
+    kwargs["points"] = args.rig_points
   model = cons(**kwargs)
   if args.model == "ae" and args.latent_l2_weight > 0: model.set_regularize_latent()
 
@@ -661,7 +664,7 @@ class RigNeRF(CommonNeRF):
   def __init__(
     self,
     out_features:int = 3,
-    points:int=200,
+    points:int=128,
 
     **kwargs,
   ):
@@ -683,7 +686,7 @@ class RigNeRF(CommonNeRF):
     pts, self.ts, r_o, r_d = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
-    return self.from_pts(pts, self.ts, r_o, r_d)
+    return self.from_pts(pts, self.ts, r_o, r_d, self.points)
 
   def get_masses(self):
     return 1 + self.masses.square()
@@ -691,9 +694,9 @@ class RigNeRF(CommonNeRF):
     # assume there is no implicit latent component for now (self.curr_latent() not called)
     if rigs is None: rigs=self.points
     if self.training: rigs = rigs + torch.randn_like(self.points) * 1e-2
-    self.displace = displace = (pts[..., None, :] - rigs[None, None, None])
+    self.displace = displace = (pts[..., None, :] - rigs)
     # Use square of distance to point, this makes it so points must be closer to give more
-    # signal.
+    # signal. In theory this could be replaced with other distance measures?
     sq_dists = displace.square().sum(dim=-1)
     weighted_dists = self.get_masses()[None, None, None] * sq_dists
     spring = 1/weighted_dists
@@ -866,9 +869,9 @@ class DynamicNeRF(nn.Module):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
     rigidity, ps = self.delta_estim(x).split([1, 3 * (self.spline_n-1)], dim=-1)
     self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
-    ps = torch.stack(ps.split([3] * self.spline_n-1, dim=-1), dim=0)
+    ps = torch.stack(ps.split([3] * (self.spline_n-1), dim=-1), dim=0)
     init_ps = ps[None, 0]
-    self.dp = dp = self.spline_fn(ps - init_ps, t, self.spline_n)
+    self.dp = dp = self.spline_fn(ps - init_ps, t, self.spline_n-1)
     return dp * rigidity + init_ps.squeeze(0)
 
   @property
@@ -978,36 +981,36 @@ class LongDynamicNeRF(nn.Module):
 class DynamicNeRFAE(DynamicNeRF):
   def __init__(self, canonical: NeRFAE, spline:int=0):
     assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
-    super().__init__(self, canonical, spline)
+    super().__init__(canonical, spline)
   def forward(self, rays_t):
     rays, t = rays_t
     pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
+      rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
     )
     self.ts = ts
 
     t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
-    dp, d_enc = self.time_estim(pts, t).split([3, self.canon.encoding_size], dim=-1)
-    encoded = self.canon.compute_encoded(pts + dp, ts, r_o, r_d)
-    return self.canon.from_encoded(encoded + d_enc, ts, r_d, pts)
+    dp, d_enc = self.time_estim(pts, t).split([3, self.canonical.encoding_size], dim=-1)
+    encoded = self.canonical.compute_encoded(pts + dp, ts, r_o, r_d)
+    return self.canonical.from_encoded(encoded + d_enc, ts, r_d, pts)
 
 # Dynamic NeRFAE for multiple frames with changing materials
 class DynamicRigNeRF(DynamicNeRF):
   def __init__(self, canonical: RigNeRF, spline:int=0):
     assert(isinstance(canonical, RigNeRF)), "Must use RigNeRF for DynamicRigNeRF"
-    super().__init__(self, canonical, spline)
+    super().__init__(canonical, spline)
     # TODO how to make the spline return more values
   def forward(self, rays_t):
     rays, t = rays_t
     pts, ts, r_o, r_d = compute_pts_ts(
-      rays, self.canon.t_near, self.canon.t_far, self.canon.steps,
+      rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
     )
-    self.ts = ts
+    self.canonical.ts = self.ts = ts
 
     rigs = self.canonical.points
     B = t.shape[0]
     dp = self.time_estim(rigs[None].expand(B,-1,-1), t[:, None,None])
-    return self.canon.from_pts(pts, ts, r_o, r_d, rigs+dp)
+    return self.canonical.from_pts(pts, ts, r_o, r_d, (rigs+dp)[None,:,None,None])
 
 # TODO fix this
 class SinglePixelNeRF(nn.Module):
@@ -1116,6 +1119,7 @@ def load_dyn(args, model, device):
 dyn_model_kinds = {
   "plain": DynamicNeRF,
   "ae": DynamicNeRFAE,
+  "rig": DynamicRigNeRF,
   "long": LongDynamicNeRF,
 }
 

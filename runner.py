@@ -147,6 +147,9 @@ def arguments():
   a.add_argument(
     "--inc-fourier-freqs", action="store_true", help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
+  a.add_argument(
+    "--rig-points", type=int, default=128, help="Number of rigs points to use in RigNeRF"
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -660,11 +663,9 @@ def test(model, cam, labels, args, training: bool = True):
   gots = []
 
   def render_test_set(model, cam, labels, offset=0):
-    original = model.points
     with torch.no_grad():
       for i in range(labels.shape[0]):
         ts = None if times is None else times[i:i+1, ...]
-        model.points = nn.Parameter(original + torch.randn_like(original)*3e-2)
         exp = labels[i,...,:3]
         got = torch.zeros_like(exp)
         normals = torch.zeros_like(got)

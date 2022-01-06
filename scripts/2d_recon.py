@@ -96,7 +96,7 @@ class LongAnimator(nn.Module):
     self.segments = segments
     self.midsize = anchor_interim
 
-    self.seg_emb = nn.Embedding(segments+2, ses)
+    self.seg_emb = nn.Embedding(segments+2, ses, max_norm=1)
     self.anchors = SkipConnMLP(
       in_size=2, out=2+anchor_interim, latent_size=ses,
       num_layers=5, hidden_size=512, init="xavier",
@@ -116,8 +116,12 @@ class LongAnimator(nn.Module):
     ).split([2, self.midsize], dim=-1)
     start, end = [a[None].squeeze(-2) for a in anchors.split([1,1], dim=-2)]
     point_estim_latent = torch.cat([emb[..., 0, :], anchor_latent.flatten(-2)], dim=-1)
-    midpts = torch.stack(self.point_estim(x.expand(B,-1,-1,-1), point_estim_latent).split(2, dim=-1), dim=0)
+    midpts = torch.stack(
+      self.point_estim(x.expand(B,-1,-1,-1), point_estim_latent).split(2, dim=-1), dim=0
+    )
     ctrl_pts = torch.cat([start, midpts-start, end], dim=0)
+    # Bound pts within some space
+    ctrl_pts = 2*ctrl_pts.tanh()
     dx = de_casteljau(ctrl_pts, t.frac(), self.spline_n)
     return self.img(x+dx)
 
@@ -199,7 +203,7 @@ def train(model, ref, times):
     torch.linspace(-SCALE, SCALE, ts),
     indexing="ij",
   ),dim=-1).unsqueeze(0).to(device)
-  opt = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=0)
+  opt = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-6)
   for i in t:
     opt.zero_grad()
     for rs, ats in zip(ref.split(bs, dim=0), times.split(bs, dim=0)):
