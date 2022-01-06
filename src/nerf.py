@@ -675,6 +675,7 @@ class RigNeRF(CommonNeRF):
       ),
       **kwargs,
     )
+    self.num_points = points
     self.points = nn.Parameter(torch.randn(points, 3, requires_grad=True))
     self.masses = nn.Parameter(torch.randn(points, requires_grad=True))
     self.correlation = SkipConnMLP(
@@ -994,12 +995,28 @@ class DynamicNeRFAE(DynamicNeRF):
     encoded = self.canonical.compute_encoded(pts + dp, ts, r_o, r_d)
     return self.canonical.from_encoded(encoded + d_enc, ts, r_d, pts)
 
-# Dynamic NeRFAE for multiple frames with changing materials
-class DynamicRigNeRF(DynamicNeRF):
+# Dynamic Rig NeRF
+class DynamicRigNeRF(nn.Module):
   def __init__(self, canonical: RigNeRF, spline:int=0):
     assert(isinstance(canonical, RigNeRF)), "Must use RigNeRF for DynamicRigNeRF"
-    super().__init__(canonical, spline)
-    # TODO how to make the spline return more values
+    assert(spline > 2)
+    super().__init__()
+    self.canonical = canonical
+    self.ctrl_pts = nn.Parameter(
+      torch.randn(spline, canonical.num_points, 3, requires_grad=True),
+    )
+    self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
+    self.num_spline_pts = spline
+  @property
+  def nerf(self): return self.canonical
+  @property
+  def refl(self): return self.canonical.refl
+  @property
+  def sdf(self): return getattr(self.canonical, "sdf", None)
+  @property
+  def intermediate_size(self): return self.canonical.intermediate_size
+  def total_latent_size(self): return self.canonical.total_latent_size()
+  def set_refl(self, refl): self.canonical.set_refl(refl)
   def forward(self, rays_t):
     rays, t = rays_t
     pts, ts, r_o, r_d = compute_pts_ts(
@@ -1007,9 +1024,9 @@ class DynamicRigNeRF(DynamicNeRF):
     )
     self.canonical.ts = self.ts = ts
 
-    rigs = self.canonical.points
     B = t.shape[0]
-    dp = self.time_estim(rigs[None].expand(B,-1,-1), t[:, None,None])
+    dp = self.spline_fn(self.ctrl_pts[:, None],t[None,:,None,None],self.num_spline_pts)
+    rigs = self.canonical.points[None]
     return self.canonical.from_pts(pts, ts, r_o, r_d, (rigs+dp)[None,:,None,None])
 
 # TODO fix this

@@ -354,12 +354,12 @@ rig_nerf: clean
 
 dyn_rig_nerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf \
-	--size 128 --epochs 25_000 --save models/dyn_rig_${dnerf_dataset}.pt --seed -1 \
+	--size 32 --epochs 25_000 --save models/dyn_rig_${dnerf_dataset}.pt --seed -1 \
 	--near 2 --far 6 --batch-size 4 --crop-size 16 --model rig --dyn-model rig -lr 2e-4 \
   --test-crop-size 48 --save-freq 2500 --notraintest --depth-images --sigmoid-kind fat \
 	--loss-fns fft l2 --refl-kind pos --render-over-time 8 \
-  --loss-window 500 --spline 5 \
-  --load models/dyn_rig_${dnerf_dataset}.pt
+  --loss-window 500 --spline 5 --save-freq 1000 \
+  #--load models/dyn_rig_${dnerf_dataset}.pt
 
 # [WIP]
 pixel_single: clean
