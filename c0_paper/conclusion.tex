@@ -1,21 +1,23 @@
 \section*{Conclusion}
 
 In conclusion, we devise a new architecture for $C^0$ continuous interpolation, and demonstrate
-its efficacy on Dynamic Neural Rendering. Our architecture is able to accurately and quickly
-reconstruct scenes, while providing stronger guarantees with a simpler formulation than before.
-This hopefully inspires more introduction of classical tools inside of the differentiable rendering pipeline.
+that it works on Dynamic Neural Rendering. Our architecture is able to accurately and quickly
+reconstruct scenes, while providing stronger guarantees with a well understood tool.
+Hopefully, this inspires more introduction of classical tools inside of the differentiable rendering pipeline.
+
+While our work is incremental, requiring very little code, because it changes the underlying structure there are a significant number of extensions that can be done with it.
 
 \section*{Future Work}
 
-For future work, we plan on applying this architecture to other signals, such as sound for
-reconstruction of long duration music. This can be used to generalize over sound, by generating
-an embedding from using an encoder-decoder architecture.
+For future work, we plan on applying Bezier splines to other signals, such as sound for
+reconstruction of long music. Sound must be continuous, even if it has sharp changes, and may change significantly over time, so our architecture is suitable for its reconstruction.
 
-Another next step, in the realm of neural rendering, is to encode this using a Plenoxel, so that
-rapid training can be done. Since we are storing a fixed number of parameters predicted from a
-neural network, this should allow for much more efficient rendering and training, on the order
-of 100 times faster, but make it significantly easier to reconstruct dynamic scenes. We note that this is now possible with our formulation, because it is not necessary to query a neural net if the spline is already known, and this can be cached in a sparse voxel structure.
+Another next step in neural rendering is to encode this using a Plenoxel~\cite{yu2021plenoxels} or another sparse structure, to allow for rapid training of dynamic scenes. To the author's knowledge, there is no real-time construction of 3D scenes since there did not exist a deep-learning approach to reconstructing movement. Bezier splines fill in this gap, and since they only require a fixed number of parameters, this should allow for efficient rendering and training without requiring an MLP evaluation. If this follows the trend of scene reconstruction, it may be on the order of 100 times faster to reconstruct dynamic scenes, without any loss in quality, and we hope that our work gets adopted for this purpose.
 
 It may also be interesting to explore different formulations of splines, as we only select
 Bezier splines due to ease of implementation, but it may be that other splines might be more
 numerically stable or have stronger expressivity for reconstruction.
+
+\section*{Acknowledgements}
+
+Thanks to Elliot Cuzzillo for helping proofread this work.
