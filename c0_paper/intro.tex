@@ -1,45 +1,29 @@
 \section*{Introduction}
 
-The problem of learning smooth functions is a key problem in machine learning, as many problems
-are framed as finding continuous solutions to problems with only a small number of data points.
-This smoothness is often not guaranteed, and is enforced through regularization of the output,
-usually using something like $L_2$ loss or temporal consistency~\cite{tretschk2021nonrigid}. Since
-the consistency is usually imposed as some weighted loss, it is not a guaranteed property of the
-network. This leads to difficulties in interpolation between time-steps, which can be used to
-exaggerate motion, or predict intermediate time steps. In addition, there is also the
-possibility for sudden changes in motion.
-Notably, we are interested in constructing functions with $C^0$ continuity. That is, the
-function must be continuous on some domain. We are also to some extent interested in $C^1$
-continuity, or the derivative of a function is continuous on some domain, which often is
-reflected in the realism of motion by enforcing smooth velocity changes.
+Learning $C^0$-continuous functions is a key problem in machine learning, as many problems
+are framed as finding good interpolations between a few data points, where we define continuity as $\lim\limits_{x\to c}f(x) = f(c)$.
+The continuity of the learned model is not guaranteed, and is enforced through regularization of the output,
+usually using something temporal consistency~\cite{tretschk2021nonrigid}. Since consistency is imposed as some loss, it cannot be guaranteed. This leads to difficulties in interpolating between time-steps which is necessary to get higher resolution movement. In addition, there is also the possibility for sudden changes in motion, such as suddenly jumping from one frame to the next.
+To enforce a continuity, we are interested in constructing functions with $C^0$ continuity. $C^0$ continuity is necessary for many things, such as reconstructing movement, to ensure, for example, that an object cannot warp between two points instantaneously. We are also interested in $C^1$ continuity, or that the derivative of a function is continuous on some domain. This is because in reality, it is not possible for an object to instantly change its velocity, and thus any reconstruction must have $C^1$ continuity for plausible movement.
 
-We examine the specific problem of predicting movement for dynamic scenes using NeRF. For this,
-we define some static configuration, which is referred to as the canonical scene. From this, we
-march rays into the scene, warping them in order to deform the rendered view, which is
-essentially a perspective shift from moving objects in the scene. This is layered on top of the
-original NeRF model in order to reconstruct movement from a fixed set of views. This simple
-formulation is highly effective at reconstructing lambertian scenes with continuous movement as
-described in D-NeRF~\cite{pumarola2020dnerf} and NR(non-rigid)-NeRF~\cite{tretschk2021nonrigid}. These works show convincing
-reconstructions of dynamic movement in scenes, predicting accurate reconstructions on both real
-and synthetic scenes. If we are satisfied with pure reconstruction these methods suffice, but we
-are also interested in performing operations on movement, such as interpolating between frames,
-exaggerating it, or classifying regions of movement. These methods demonstrate capability to
-perform well on certain tasks such as motion interpolation, but require specific optimizations
-in order to demonstrate improvements. In contrast, we examine classical animation tools in order
-to better handle movement.
+To demonstrate our architecture, we tackle the problem of dynamic scene reconstruction using NeRF, which is a method for representing scenes. Following previous work, we define a static scene, which is referred to as the canonical scene, and a model which can produce deformations to the canonical scene. The deformation model is what we are interested for demonstrating continuity. To represent the canonical scene, we use a NeRF~\cite{mildenhall2020nerf}, and the deformation model is our proposed Bezier network. This general approach with deformation networks has been shown to be effective at reconstructing Lambertian scenes with continuous movement as in D-NeRF~\cite{pumarola2020dnerf} and NR(non-rigid)-NeRF~\cite{tretschk2021nonrigid}. These works show convincing
+reconstructions of moving scenes, predicting accurate reconstructions on both real
+and synthetic scenes. These methods do not have an analytic form, relying purely on learned components but we
+are also interested in analyzing and modifying the movement itself, such as
+exaggerating movement, or clustering regions based on similar movement. These methods are capable of each of these tasks, but must be extended in order to handle each case. In contrast, classical animation tools are designed to handle all of these problems.
 
-In animation, there are many existing tools for creating smooth movement with a high-degree of
+In animation, there are existing tools for creating realistic movement with a high-degree of
 control for artists and animators. For example, there are tools such as keyframing, splines,
 and other techniques. These tools allow artists and animators to breathe life into animation,
 with a high degree of control. Mathematical constructs such as splines have also been thoroughly
-studied to understand their behaviour, as well as how they can be manipulated. These tools are
-clearly powerful enough to represent most movement, but have not been leveraged in machine
-learning for this purpose.
+studied to understand their behaviour and how they can be manipulated.
 
-We blend these existing tools in order to apply a prior on movement in Dynamic NeRF, finding that we are able to get a slight increase in performance without additional cost. In addition, we propose a new architecture for long duration $C^0$-continuous signal reconstruction. In summary, our contributions are as follows:
+We take the interpretable animation techniques of Bezier splines as a method to enforce continuous interpolation in Dynamic NeRF, finding that we are able to get comparable performance without additional cost in memory.
+%We also design a new architecture for long duration $C^0$-continuous signal reconstruction.
+In summary, our contributions are as follows:
 
 \begin{enumerate}
-    \item A formulation of a prior on top of existing D-NeRF, which enforces smoothness of movement, a canonical basis, and an analytic form at no additional cost, while slightly outperforming the original.
-    \item An evaluation of our architecture against D-NeRF which demonstrates its performance.
-    \item A general architecture for reconstructing long, continuous signals, which guarantees smoothness. This architecture can be used to reconstruct long, dynamic sequences, but is more general and can be applied broadly to smooth signal reconstruction.
+    \item A general architecture for $C^0, C^1$ continuity over a continuous domain.
+    \item An application of this architecture combined with D-NeRF to enforce continuity of movement, a canonical NeRF, and an analytic form at no additional cost, while slightly outperforming the original.
+    \item An evaluation of our architecture against an implementation of D-NeRF which performs comparably to the original.
 \end{enumerate}

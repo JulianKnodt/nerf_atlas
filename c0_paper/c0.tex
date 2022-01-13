@@ -14,7 +14,7 @@
 \begin{document}
 
 
-\title{$C^0$-Continuous Networks for Smooth Interpolation}
+\title{$C^0$-Continuous Learned Time-Series Reconstruction for Dynamic NeRF}
 \author{Julian Knodt}
 \affiliation{
   \institution{Princeton University}
@@ -26,28 +26,23 @@
 \maketitle
 
 \begin{abstract}
-Methodology for predicting smooth functions over time using neural nets has previously relied on
-some form of consistency loss to ensure smoothness over time, which has showed good results on
-short sequences, where it is able to effectively apply the loss function over the whole duration.
-This approach is difficult to scale to larger sequences, as it requires more pairwise
-constraints as the sequence length grows.
+The problem of reconstructing continuous functions over time is important for problems such as reconstructing moving scenes, music generation, and plausible interpolation.
+Previous approaches that use deep-learning rely on regularization to ensure that reconstructions are approximately continuous, which works well on short sequences. As sequence length grows, though, it becomes more difficult to regularize, and it becomes less feasible to learn only through regularization.
 
-We propose an alternate formulation, which ensures $C^0$ continuity of sequences using a
-Bezier-spline formulation. We examine the problem of smooth function reconstruction for dynamic
-scenes using NeRF, but note that our approach is much more general and can be applied to a large
-variety of problems. For dynamic NeRF, we are interested in reconstructing a ray-warping
-function $f(x\in\mathbb{R}^3,t\in[0,1])\to\delta(x)$. We decompose this into two functions,
-$f(x\in\mathbb{R}^3)\to\beta, B_\beta(t)\to\delta(x)$, where $B_\beta$ is a Bezier spline
-parametrized by the control points $\beta$. This allows for $C^0$, and in this case $C^1$ continuity,
-allowing for perfect interpolation in time. We model $f(x\in\mathbb{R}^3)\to\beta$ as an MLP,
-blending machine learning with classical animation techniques. All code is available at \url{https://github.com/JulianKnodt/nerf_atlas}.
+We propose a new architecture for function reconstruction based on classical Bezier splines, which ensures $C^0, C^1$-continuity. What is meant by $C^0$ continuity is that $\forall c:\lim\limits_{x\to c} f(x) = f(c)$, or more intuitively there are no breaks at any point in the function. In order to demonstrate our architecture, we reconstruct dynamic scenes using Neural Radiance Fields, but hope it is clear that our approach is more general and can be applied to a large
+variety of problems. We demonstrate that we can recover a function $B_(\beta, t\in[0,1])$, where $B$ is a Bezier spline
+parametrized by the control points $\beta$. This allows for $C^0$ and $C^1$ continuity, allowing for guaranteed interpolation over time. We reconstruct $\beta$ with an MLP, blending machine learning with classical animation techniques. All code is available at \url{https://github.com/JulianKnodt/nerf_atlas}.
+
+I am publishing this earlier than when I'd like to do so, and my reasoning for doing so is at \url{TODO}.
 \end{abstract}
 
 \begin{figure*}
     \centering
     \includegraphics[width=\textwidth]{teaser}
-    \caption{The proposed model is able to recover dynamic movements in synthetic data, with plausible flow maps. With a classical formulation of movement using Bezier splines, we impose a stronger prior on the kind of movement that can be reproduced, while enforcing that it is smooth. We compare our model to an implementation of D-NeRF~\cite{pumarola2020dnerf}, and find our model is able to slightly outperform it. This can be seen qualitatively in video, as the movement characterized by ours is much smoother.}
+    \caption{
     \label{fig:intro_figure}
+    A Bezier spline model is able to recover dynamic movements in synthetic data, with realistic flow maps. Using a classical formulation of movement using Bezier splines, we impose a strong prior on the kind of movement that can be reproduced, while enforcing that it is smooth. We compare our model to an implementation of D-NeRF~\cite{pumarola2020dnerf}, and find our model is able to slightly outperform it. This can be seen qualitatively in video, as the movement characterized by ours appears smoother.
+    }
 \end{figure*}
 
 \input{intro}
