@@ -11,6 +11,12 @@ original: clean
 	--near 2 --far 6 --batch-size 4 --crop-size 20 --model plain -lr 5e-4 \
 	--loss-fns l2 --refl-kind pos #--load models/lego.pt #--omit-bg
 
+coarse_fine: clean
+	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 64 --epochs 80_000 --save models/lego.pt \
+	--near 2 --far 6 --batch-size 4 --crop-size 10 --model coarse_fine -lr 3e-4 \
+	--loss-fns l2 --refl-kind view #--load models/lego.pt #--omit-bg
+
 volsdf: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 200 --epochs 50_000 --crop-size 24 --test-crop-size 25 \
@@ -82,7 +88,7 @@ dnerf_dataset = bouncingballs
 dnerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
 	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 20 --near 2 --far 6 -lr 1e-4 --valid-freq 500 --spline 16 \
+	--crop-size 20 --near 2 --far 6 -lr 1e-4 --valid-freq 500 --spline 8 \
   --sigmoid-kind fat --loss-window 2000 --loss-fns l2 fft \
   --render-over-time 8 --notraintest --test-crop-size 64 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos \
@@ -354,12 +360,12 @@ rig_nerf: clean
 
 dyn_rig_nerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf \
-	--size 32 --epochs 25_000 --save models/dyn_rig_${dnerf_dataset}.pt --seed -1 \
-	--near 2 --far 6 --batch-size 4 --crop-size 16 --model rig --dyn-model rig -lr 2e-4 \
+	--size 100 --epochs 100_000 --save models/dyn_rig_${dnerf_dataset}.pt --seed -1 \
+	--near 2 --far 6 --batch-size 4 --crop-size 16 --model rig --dyn-model rig -lr 1e-4 \
   --test-crop-size 48 --save-freq 2500 --notraintest --depth-images --sigmoid-kind fat \
-	--loss-fns fft l2 --refl-kind pos --render-over-time 8 \
+	--loss-fns fft --refl-kind pos --render-over-time 8 \
   --loss-window 500 --spline 5 --save-freq 1000 \
-  #--load models/dyn_rig_${dnerf_dataset}.pt
+  --load models/dyn_rig_${dnerf_dataset}.pt
 
 # [WIP]
 pixel_single: clean

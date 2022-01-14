@@ -417,7 +417,7 @@ def divergence(x, field):
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,
 # or prevent it from representing full density items.
 # fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
-def fat_sigmoid(v, eps: float = 1e-3): return v.sigmoid() * (1+2*eps) - eps
+def fat_sigmoid(v, eps: float = 1e-2): return v.sigmoid() * (1+2*eps) - eps
 def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps) + eps
 def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
   return ((v/period).sin()+1)/2 * (1+2*eps) - eps

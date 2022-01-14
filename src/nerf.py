@@ -42,7 +42,7 @@ def compute_pts_ts(
     rand = torch.rand_like(lower) * perturb
     ts = lower + (upper - lower) * rand
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
-  return pts, ts, r_o, r_d
+  return pts, ts, r_o, r_d, mids
 
 # given a set of densities, and distances between the densities,
 # compute alphas from them.
@@ -98,6 +98,7 @@ sky_kinds = {
   "random": random_color,
 }
 def load_nerf(args):
+  from .sdf import load as load_sdf
   if args.model != "ae": args.latent_l2_weight = 0
   if args.dyn_model == "rig": assert(args.model == "rig"), "Must use rig model with dyn rig"
   mip = load_mip(args)
@@ -120,7 +121,7 @@ def load_nerf(args):
     kwargs["normalize_latent"] = args.normalize_latent
     kwargs["encoding_size"] = args.encoding_size
   elif args.model == "volsdf":
-    kwargs["sdf"] = sdf.load(args, with_integrator=False)
+    kwargs["sdf"] = load_sdf(args, with_integrator=False)
     kwargs["occ_kind"] = args.occ_kind
     kwargs["integrator_kind"] = args.integrator_kind or "direct"
   elif args.model == "rig":
@@ -273,7 +274,7 @@ class TinyNeRF(CommonNeRF):
     )
 
   def forward(self, rays):
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
@@ -311,7 +312,7 @@ class PlainNeRF(CommonNeRF):
     )
 
   def forward(self, rays):
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
@@ -336,6 +337,63 @@ class PlainNeRF(CommonNeRF):
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
+
+class CoarseFineNeRF(CommonNeRF):
+  def __init__(
+    self,
+    out_features: int = 3,
+    steps_fine: int = 36,
+    **kwargs,
+  ):
+    super().__init__(
+      r = lambda ls: refl.View(
+        out_features=out_features,
+        latent_size=ls+self.intermediate_size,
+      ),
+      **kwargs,
+    )
+    self.steps_fine = steps_fine
+
+    self.first = SkipConnMLP(
+      in_size=3, out=1 + self.intermediate_size, latent_size=self.total_latent_size(),
+      enc=FourierEncoder(input_dims=3),
+      num_layers = 5, hidden_size = 128, init="xavier",
+    )
+  def forward(self, rays):
+    pts, self.ts, r_o, r_d, mids = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+    )
+    self.from_pts(pts, self.ts, r_o, r_d, mids=mids)
+
+  def from_pts(self, pts, ts, r_o, r_d, mids=None):
+    #latent = self.curr_latent(pts.shape)
+
+    # If there is a mip encoding, stack it with the latent encoding.
+    #mip_enc = self.mip_encoding(r_o, r_d, ts)
+    #if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+
+    first_out = self.first(pts, None)
+
+    density = first_out[..., 0]
+    if self.training and self.noise_std > 0:
+      density = density + torch.randn_like(density) * self.noise_std
+
+    intermediate = first_out[..., 1:]
+
+    view = r_d[None, ...].expand_as(pts)
+    rgb = self.refl(x=pts, view=view, latent=intermediate)
+
+    self.alpha, self.weights = alpha_from_density(density, ts, r_d)
+    self.coarse = volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
+    if mids is None: return self.coarse
+    new_ts = sample_pdf(
+      mids, # TODO see if ts works ok here?
+      self.weights[:-1],
+      self.steps_fine,
+    )
+    exit()
+
+    return
 
 def histogram_pts_ts(
   rays, near, far, rq,
@@ -415,7 +473,7 @@ class SplineNeRF(CommonNeRF):
       num_layers = 5, hidden_size = 256, init="xavier",
     )
   def forward(self, rays):
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
@@ -484,7 +542,7 @@ class NeRFAE(CommonNeRF):
     self.regularize_latent = True
     self.latent_l2_loss = 0
   def forward(self, rays):
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
@@ -621,7 +679,7 @@ class VolSDF(CommonNeRF):
 
     return out
   def forward(self, rays):
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
@@ -677,14 +735,14 @@ class RigNeRF(CommonNeRF):
     )
     self.num_points = points
     self.points = nn.Parameter(torch.randn(points, 3, requires_grad=True))
-    self.masses = nn.Parameter(torch.randn(points, requires_grad=True))
+
     self.correlation = SkipConnMLP(
       in_size=points,out=1+self.intermediate_size, latent_size=self.total_latent_size(),
       enc=FourierEncoder(input_dims=points),
       num_layers=5, hidden_size=256, init="xavier",
     )
   def forward(self, rays):
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d, self.points)
@@ -699,8 +757,7 @@ class RigNeRF(CommonNeRF):
     # Use square of distance to point, this makes it so points must be closer to give more
     # signal. In theory this could be replaced with other distance measures?
     sq_dists = displace.square().sum(dim=-1)
-    weighted_dists = self.get_masses()[None, None, None] * sq_dists
-    spring = 1/weighted_dists
+    spring = 1/sq_dists
     density, intermediate = self.correlation(spring).split([1, self.intermediate_size], dim=-1)
     density = density.squeeze(dim=-1)
 
@@ -744,7 +801,7 @@ class RecurrentNeRF(CommonNeRF):
     )
 
   def forward(self, rays):
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
@@ -854,7 +911,7 @@ class DynamicNeRF(nn.Module):
     assert(spline_points > 1), "Must pass N > 1 spline"
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
-      in_size=3, out=(spline_points-1)*3+1, num_layers=6,
+      in_size=3, out=spline_points*3+1, num_layers=6,
       hidden_size=324, init="xavier",
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
@@ -868,11 +925,11 @@ class DynamicNeRF(nn.Module):
     return dp * rigidity
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
-    rigidity, ps = self.delta_estim(x).split([1, 3 * (self.spline_n-1)], dim=-1)
+    rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)
     self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
-    ps = torch.stack(ps.split([3] * (self.spline_n-1), dim=-1), dim=0)
+    ps = torch.stack(ps.split([3] * self.spline_n, dim=-1), dim=0)
     init_ps = ps[None, 0]
-    self.dp = dp = self.spline_fn(ps - init_ps, t, self.spline_n-1)
+    self.dp = dp = self.spline_fn(ps - init_ps, t, self.spline_n)
     return dp * rigidity + init_ps.squeeze(0)
 
   @property
@@ -887,7 +944,7 @@ class DynamicNeRF(nn.Module):
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def forward(self, rays_t):
     rays, t = rays_t
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
@@ -951,7 +1008,7 @@ class LongDynamicNeRF(nn.Module):
   def forward(self, rays_t):
     rays, t = rays_t
     rays = rays.expand(t.shape[0], *rays.shape[1:])
-    pts, self.ts, r_o, r_d = compute_pts_ts(
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
@@ -985,7 +1042,7 @@ class DynamicNeRFAE(DynamicNeRF):
     super().__init__(canonical, spline)
   def forward(self, rays_t):
     rays, t = rays_t
-    pts, ts, r_o, r_d = compute_pts_ts(
+    pts, ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
     )
     self.ts = ts
@@ -1019,7 +1076,7 @@ class DynamicRigNeRF(nn.Module):
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def forward(self, rays_t):
     rays, t = rays_t
-    pts, ts, r_o, r_d = compute_pts_ts(
+    pts, ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
     )
     self.canonical.ts = self.ts = ts
@@ -1145,6 +1202,9 @@ model_kinds = {
   "plain": PlainNeRF,
   "ae": NeRFAE,
   "volsdf": VolSDF,
+
+  "coarse_fine": CoarseFineNeRF,
+
   "mpi": MPI,
   # experimental:
   "rig": RigNeRF,
@@ -1175,36 +1235,38 @@ def metropolis_sampling(
       curr_density = torch.where(mask, density, curr_density)
   return curr, r_o + curr * r_d
 
-# TODO need to test this more, doesn't seem to work that well
-def inverse_sample(
-  density_estimator,
-  pts, ts, r_o, r_d,
+def sample_pdf(
+  z_vals,
+  weights,
+  N: int = 64,
+  # deterministic/uniform samples
+  uniform: bool = False
 ):
-  with torch.no_grad():
-    _, weights = alpha_from_density(density_estimator(pts.squeeze(-1)), ts, r_d)
-    weights = weights.clamp(min=1e-10)
-    pdf = weights/weights.sum(dim=0,keepdim=True)
-    cdf = torch.cumsum(pdf, dim=0)
-    N = ts.shape[0]
-    # XXX this only works because we assume that the number of samples (N) is the same.
-    #u = torch.rand_like(cdf)
-    u = torch.linspace(0, 1, N, device=cdf.device)\
-      [..., None, None, None].expand_as(cdf)
-    # XXX this operates on innermost dimension, so need to do this transpose
-    inds = torch.searchsorted(
-      cdf.transpose(0, -1).contiguous(), u.transpose(0, -1).contiguous(), right=True
-    ).transpose(0, -1)
-    below = (inds - 1).clamp(min=0)
-    above = inds.clamp(max=N-1)
-    inds_g = torch.stack([below, above], dim=-1)
+  print(z_vals.shape, weights.shape)
+  device=weights.device
+  weights = weights + 1e-5
+  pdf = weights / weights.sum(dim=0, keepdim=True)
+  cdf = torch.cumsum(pdf, dim=0)
+  cdf = torch.cat([torch.zeros_like(cdf[:1]), cdf], dim=0)
+  if uniform:
+    u = torch.linspace(0, 1, steps=N, dtype=torch.float, device=device)\
+      .expand(N, *cdf.shape[1:])
+  else: u = torch.rand(N, *cdf.shape[1:], dtype=torch.float, device=device)
+  u = u.contiguous()
+  cdf = cdf.contiguous()
+  inds = torch.searchsorted(cdf, u, right=True)
+  below = (inds-1).clamp(min=0)
+  above = inds.clamp(max=cdf.shape[0]-1)
+  inds_g = torch.stack([below, above], dim=0)
 
-    # TODO what is the right dimension to add here?
-    cdf_g = torch.gather(cdf.unsqueeze(1).expand_as(inds_g), 0, inds_g)
-    bins_g = torch.gather(ts[:, None, None, None, None].expand_as(inds_g), 0, inds_g)
+  matched_shape = [cdf.shape[0], inds_g.shape[0], inds_g.shape[1]]
+  cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+  z_vals = torch.gather(z_vals.unsqueeze(1).expand(matched_shape), 2, inds_g)
+  exit()
 
-    denom = cdf_g[..., 1] - cdf_g[..., 0]
-    denom = torch.where(denom < 1e-5, torch.ones_like(denom), denom)
-    t = (u - cdf_g[..., 0]) / denom
-    samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
-    new_pts = r_o + samples.unsqueeze(-1) * r_d
-  return samples, new_pts
+  denom = cdf_g[1] - cdf_g[0]
+  denom = torch.where(denom < 1e-5, torch.ones_like(denom), denom)
+  t = (u - cdf_g[0])/denom
+  samples = bins_g[0] + t * (bins_g[1] - bins_g[0])
+  print(samples.shape)
+  return samples

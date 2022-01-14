@@ -450,6 +450,10 @@ def load_loss_fn(args, model):
   if args.volsdf_alternate:
     return nerf.alternating_volsdf_loss(model, loss_fn, sdf.masked_loss(loss_fn))
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
+  # if using a coarse fine model, necessary to perform loss on both coarse and fine components.
+  if args.model == "coarse_fine":
+    prev_loss_fn = loss_fn
+    loss_fn = lambda x, ref: prev_loss_fn(model.coarse, ref) + prev_loss_fn(x, ref)
   return loss_fn
 
 def sqr(x): return x * x
