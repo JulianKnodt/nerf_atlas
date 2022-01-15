@@ -975,14 +975,18 @@ def main():
   seed(args.seed)
 
   labels, cam, light = loaders.load(args, training=True, device=device)
+  setattr(args, "num_labels", len(labels))
   is_dyn = type(labels) == tuple
 
-  model = load_model(args, light, is_dyn) if args.load is None else torch.load(args.load, map_location=device)
+  model = None
+  if args.load is not None:
+    try: model = torch.load(args.load, map_location=device)
+    except Exception as e: print(f"[warn]: Could not load model starting from scratch: {e}")
+  if model is None: model = model = load_model(args, light, is_dyn)
   if args.cam_save_load is not None:
     try: cam = torch.load(args.cam_save_load, map_location=device)
     except Exception as e: print(f"[warn]: Failed to load camera: {e}")
 
-  setattr(args, "num_labels", len(labels))
   if args.train_imgs > 0:
     if is_dyn: labels = tuple(l[:args.train_imgs, ...] for l in labels)
     else: labels = labels[:args.train_imgs, ...]
