@@ -61,8 +61,7 @@ class LightAndRefl(nn.Module):
   def latent_size(self): return self.refl.latent_size
 
   def forward(self, x, view=None, normal=None, light=None, latent=None, mask=None):
-    # if no light is explicitly passed then recompute the direction.
-    assert(light is not None), "Must use the stored light in order to compute lighting"
+    if light is None: light = self.light(x)[0]
     return self.refl(x, view, normal, light, latent)
 
 # Convert from arbitrary 3d space to a 2d encoding.
@@ -635,7 +634,6 @@ def coordinate_system2(n):
   return torch.stack([s,t,n], dim=-1)
 # frame: [..., 3, 3], wo: [..., 3], return a vector of wo in the reference frame
 
-@torch.jit.script
 def to_local(frame, wo):
   return F.normalize((frame * wo.unsqueeze(-1)).sum(dim=-2), eps=1e-7, dim=-1)
 

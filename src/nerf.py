@@ -35,6 +35,7 @@ def compute_pts_ts(
   else:
     ts = torch.linspace(near, far, steps=steps, device=device, dtype=r_o.dtype)
 
+  mids = None
   if perturb > 0:
     mids = 0.5 * (ts[:-1] + ts[1:])
     lower = torch.cat([mids, ts[-1:]])
@@ -919,10 +920,11 @@ class DynamicNeRF(nn.Module):
     self.time_estim = self.spline_interpolate
 
   def direct_predict(self, x, t):
-    dp, rigidity = self.delta_estim(torch.cat([x, t], dim=-1)).split([3, 1], dim=-1)
+    enc = getattr(self.canonical, "encoding_size", 0)
+    dp, rigidity, encoding = self.delta_estim(torch.cat([x, t], dim=-1)).split([3, 1, enc], dim=-1)
     self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
     self.dp = dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
-    return dp * rigidity
+    return torch.cat([dp * rigidity, encoding], dim=-1)
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
     rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)
@@ -974,7 +976,7 @@ class LongDynamicNeRF(nn.Module):
     n_points = segments * spline
     # keep an embedding for each segment # TODO is there an off by 1 error
     self.seg_emb = nn.Embedding(segments+1, ses)
-    self.interim_size = interim_size
+    self.interim_size = anchor_interim
     assert(spline > 2), "Must pass N > 2 spline"
     # the anchor points of each spline
     self.anchors = SkipConnMLP(
@@ -985,7 +987,7 @@ class LongDynamicNeRF(nn.Module):
     self.point_estim = SkipConnMLP(
       in_size=3, out=(spline-2) * 3,
       num_layers=6, hidden_size=512,
-      latent_size=ses+anchor_interim, init="xavier",
+      latent_size=ses+2*anchor_interim, init="xavier",
     )
     self.spline_n = spline
     self.global_rigidity = SkipConnMLP(
@@ -993,7 +995,7 @@ class LongDynamicNeRF(nn.Module):
     )
     # Parameters in SE3, except 0 which is always 0
     self.global_spline = nn.Parameter(torch.randn(n_points, 6))
-    self.spline_fn = de_casteljeu if self.spline_n != 4 else cubic_bezier
+    self.spline_fn = de_casteljau if self.spline_n != 4 else cubic_bezier
 
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def total_latent_size(self): return self.canonical.total_latent_size()
@@ -1022,8 +1024,6 @@ class LongDynamicNeRF(nn.Module):
     anchors, anchor_latent = self.anchors(
       pts[..., None, :].expand(*pts.shape[:-1], 2, pts.shape[-1]), embs,
     ).split([3, self.interim_size], dim=-1)
-    print(anchors.shape)
-    exit()
     starting, end = [a.squeeze(-2).unsqueeze(0) for a in anchors.split([1,1], dim=-2)]
     seg_emb = embs[..., 0, :]
 
@@ -1032,7 +1032,7 @@ class LongDynamicNeRF(nn.Module):
 
     control_pts = torch.cat([starting, inner_points, end], dim=0)
     self.rigidity = rigidity = upshifted_sigmoid(self.global_rigidity(pts)/2)
-    self.dp = dp = self.spline_fn(control_pts, t.frac(), self.spline_n+1) * rigidity
+    self.dp = dp = self.spline_fn(control_pts, t.frac(), self.spline_n) * rigidity
     return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
 
 # Dynamic NeRFAE for multiple frames with changing materials
@@ -1040,6 +1040,12 @@ class DynamicNeRFAE(DynamicNeRF):
   def __init__(self, canonical: NeRFAE, spline:int=0):
     assert(isinstance(canonical, NeRFAE)), "Must use NeRFAE for DynamicNeRFAE"
     super().__init__(canonical, spline)
+    self.delta_estim = SkipConnMLP(
+      # x,y,z,t -> dx, dy, dz, rigidity
+      in_size=4, out=3+1+canonical.encoding_size,
+      num_layers = 6, hidden_size = 324,
+      init="xavier",
+    )
   def forward(self, rays_t):
     rays, t = rays_t
     pts, ts, r_o, r_d, _ = compute_pts_ts(
