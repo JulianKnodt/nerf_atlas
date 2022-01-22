@@ -293,11 +293,7 @@ class TinyNeRF(CommonNeRF):
 
 # A plain old nerf
 class PlainNeRF(CommonNeRF):
-  def __init__(
-    self,
-    out_features: int = 3,
-    **kwargs,
-  ):
+  def __init__(self, out_features: int = 3, **kwargs):
     super().__init__(
       r = lambda ls: refl.View(
         out_features=out_features,
@@ -913,6 +909,7 @@ class DynamicNeRF(nn.Module):
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
       in_size=3, out=spline_points*3+1, num_layers=6,
+      enc=FourierEncoder(input_dims=3,freqs=32),
       hidden_size=324, init="xavier",
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau

@@ -28,6 +28,7 @@ import src.cameras as cameras
 import src.hyper_config as hyper_config
 import src.renderers as renderers
 from src.lights import light_kinds
+from src.opt import UniformAdam
 from src.utils import ( save_image, save_plot, load_image, dir_to_elev_azim )
 from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer, FourierEncoder )
 
@@ -325,6 +326,11 @@ def arguments():
   ae.add_argument("--normalize-latent", help="L2 normalize latent space", action="store_true")
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
 
+  opt = a.add_argument_group("optimization parameters")
+  opt.add_argument(
+    "--opt-kind", default="adam", choices=list(opt_kinds.keys()), help="What optimizer to use for training",
+  )
+
   args = a.parse_args()
 
   # runtime checks
@@ -343,6 +349,23 @@ def arguments():
   assert(args.valid_freq > 0), "Must pass a valid frequency > 0"
   if (args.test_crop_size <= 0): args.test_crop_size = args.crop_size
   return args
+
+opt_kinds = {
+  "adam": optim.Adam,
+  "sgd": optim.SGD,
+  "adamw": optim.AdamW,
+  "uniform_adam": UniformAdam,
+}
+def load_optim(args, params):
+  cons = opt_kinds.get(args.opt_kind, None)
+  if cons is None: raise NotImplementedError(f"unknown opt kind {args.opt_kind}")
+  hyperparams = {
+    "lr": args.learning_rate,
+    # eps = 1e-7 was in the original paper.
+    "eps": 1e-7,
+  }
+  if args.opt_kind == "adam": hyperparams["weight_decay"] = args.decay
+  return cons(params, **hyperparams)
 
 # Computes the difference of the fft of two images
 def fft_loss(x, ref):
@@ -1013,8 +1036,7 @@ def main():
     parameters = chain(parameters, cam.parameters())
 
   # for some reason AdamW doesn't seem to work here
-  # eps = 1e-7 was in the original paper.
-  opt = optim.Adam(parameters, lr=args.learning_rate, weight_decay=args.decay, eps=1e-7)
+  opt = load_optim(args, parameters)
 
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.sched_min)
   if args.no_sched: sched = None

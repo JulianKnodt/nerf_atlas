@@ -86,13 +86,13 @@ food: clean
 
 dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
+	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
 	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 20 --near 2 --far 6 -lr 1e-4 --valid-freq 500 --spline 8 \
-  --sigmoid-kind fat --loss-window 2000 --loss-fns l2 fft \
+	--crop-size 20 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
+  --sigmoid-kind fat --loss-window 2000 --loss-fns fft \
   --render-over-time 8 --notraintest --test-crop-size 64 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos \
-  #--load models/dyn_${dnerf_dataset}.pt
+  --load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 256 \
 	--epochs 0 --save models/dyn_n_${dnerf_dataset}.pt --model plain --batch-size 2 \
@@ -103,11 +103,11 @@ dnerf_original: clean
   --load models/dyn_n_${dnerf_dataset}.pt
 
 dnerf_volsdf: clean
-	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 32 \
+	python3 runner.py -d data/dynamic/$(dnerf_dataset)/ --data-kind dnerf --size 128 \
 	--epochs 50_000  --save models/dvs_$(dnerf_dataset).pt --model volsdf --sdf-kind mlp \
-  --batch-size 1 --crop-size 28 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
+  --batch-size 3 --crop-size 16 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
   --refl-kind pos --sigmoid-kind fat --loss-window 1000 --dyn-model plain \
-  --sdf-eikonal 1e-5 --notraintest --render-over-time 12 \
+  --sdf-eikonal 1e-5 --notraintest --render-over-time 12 --loss-fns fft --save-freq 1000 \
   --load models/dvs_$(dnerf_dataset).pt
 
 long_dnerf: clean
@@ -391,19 +391,21 @@ project_pts: clean
 psp: clean
 	python3 scripts/rig_physics.py -d data/nerf_synthetic/lego/ --model models/rig_lego.pt
 
-# evaluates the reflectance of a rusin model
 mpi: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --epochs 30_000 --save models/lego_mpi.pt \
 	--near 2 --far 6 --batch-size 4 --crop-size 50 --model mpi -lr 1e-4 \
 	--loss-fns l2 --refl-kind pos --train-imgs 1
 
+# evaluates the reflectance of a rusin model
 eval_rusin:
 	python3 eval_rusin.py --refl-model models/nerv_hotdogs.pt
 
 fieldgan: clean
 	python3 fieldgan.py --image data/mondrian.jpg --epochs 2500
 	#python3 fieldgan.py --image data/food/images/IMG_1268.png --epochs 2500
+
+# experimental things, none of it is guaranteed to work
 
 rnn_nerf: clean
 	python3 -O rnn_runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -438,7 +440,14 @@ spline: clean
 	--near 2 --far 6 --batch-size 2 --crop-size 24 --model spline -lr 3e-4 \
 	--loss-fns l2 --valid-freq 500 --refl-kind view --sigmoid-kind upshifted \
 	--depth-images --test-crop-size 32 --notraintest \
-  #--load models/lego_spline.pt
+  --load models/lego_spline.pt
+
+uniform_adam: clean
+	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 128 --epochs 80_000 --save models/lego_uni.pt --opt-kind uniform_adam \
+	--near 2 --far 6 --batch-size 4 --crop-size 20 --model plain -lr 3e-4 \
+	--loss-fns l2 --refl-kind view --load models/lego_uni.pt --save-freq 2500
+
 
 generate_animation: clean
 	python3 scripts/2d_recon.py

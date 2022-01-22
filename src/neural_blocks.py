@@ -38,7 +38,7 @@ class FourierEncoder(nn.Module):
     self,
     input_dims: int = 3,
     # TODO rename this num freqs to be more accurate.
-    freqs: int = 16,
+    freqs: int = 128,
     sigma: int = 1 << 5,
     device="cpu",
   ):
