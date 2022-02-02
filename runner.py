@@ -327,9 +327,7 @@ def arguments():
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
 
   opt = a.add_argument_group("optimization parameters")
-  opt.add_argument(
-    "--opt-kind", default="adam", choices=list(opt_kinds.keys()), help="What optimizer to use for training",
-  )
+  opt.add_argument("--opt-kind", default="adam", choices=list(opt_kinds.keys()), help="What optimizer to use for training")
 
   args = a.parse_args()
 
@@ -395,7 +393,7 @@ if torch.cuda.is_available():
   torch.cuda.set_device(device)
 
 # DEBUG
-#torch.autograd.set_detect_anomaly(True); print("HAS DEBUG")
+# torch.autograd.set_detect_anomaly(True); print("HAS DEBUG")
 
 def render(
   model, cam, crop,

@@ -26,6 +26,12 @@ volsdf: clean
 	--depth-images --refl-kind pos --light-kind field --depth-query-normal --normals-from-depth \
 	--save models/lego_volsdf.pt --load models/lego_volsdf.pt
 
+voxel: clean
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 64 --epochs 50_000 --nosave --loss-window 1000 \
+	--near 2 --far 6 --batch-size 6 --crop-size 40 --model voxel -lr 5e-4 \
+	--loss-fns fft --opt-kind adamw
+
 volsdf_with_normal: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 192 --epochs 50_000 --crop-size 16 \

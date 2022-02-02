@@ -56,7 +56,7 @@ def alpha_from_density(
   else: sigma_a = F.relu(density)
 
   end_val = torch.full_like(ts[..., :1], 1e10)
-  dists = torch.cat([ts[..., 1:] - ts[..., :-1], end_val], dim=-1)
+  dists = torch.cat([ts[..., 1:] - ts[..., :-1], end_val], dim=-1).clamp(min=1e-5)
   while len(dists.shape) < 4: dists = dists[..., None]
   dists = dists * torch.linalg.norm(r_d, dim=-1)
   alpha = 1-torch.exp(-sigma_a * dists)
@@ -334,6 +334,96 @@ class PlainNeRF(CommonNeRF):
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
+
+def trilinear_weights(xyzs):
+  x,y,z = xyzs.split([1,1,1],dim=-1)
+  to_val = lambda vs, pos: vs if pos else (1-vs)
+  return torch.cat([
+    to_val(x, bit_i(i, 0)) * to_val(y, bit_i(i, 1)) * to_val(z, bit_i(i, 2))
+    for i in range(8)
+  ],dim=-1)
+
+def bit_i(v, bit): return (v >> bit) & 1
+
+# Voxelized NeRF without view positions
+# TODO pass an option to use spherical harmonics or not?
+class NeRFVoxel(nn.Module):
+  def __init__(
+    self,
+    out_features: int = 3,
+    resolution:int = 64,
+    alpha_init:float = 0.5,
+    rgb_init:float=0.5,
+    grid_radius:float=4,
+    **kwargs,
+  ):
+    assert(resolution > 0)
+    super().__init__()
+    self.resolution = reso = resolution
+    self.densities = nn.Parameter(torch.full([resolution]*3+[1],alpha_init))
+    self.rgb = nn.Parameter(torch.full([resolution]*3+[3],rgb_init))
+    self.grid_radius = grid_radius
+    self.voxel_len = grid_radius * 2 / resolution
+
+  @property
+  def refl(self): return refl.Reflectance(latent_size=0, out_features=3)
+  def set_refl(self, refl): return # ignore any set refl attempts
+  @property
+  def intermediate_size(self): return 0
+
+  def forward(self, rays):
+    voxel_len = self.voxel_len
+    device = rays.device
+
+    r_o, r_d = rays.split([3,3],dim=-1)
+    offset_pos = (self.grid_radius - r_o)/r_d
+    offset_neg = (-self.grid_radius - r_o)/r_d
+    offset_in = torch.minimum(offset_pos, offset_neg)
+    offset_out = torch.maximum(offset_pos, offset_neg)
+
+    start = offset_in.max(dim=-1, keepdim=True)[0]
+    stop = offset_out.min(dim=-1, keepdim=True)[0]
+
+    first_isect = r_o + start * r_d
+
+    interval = voxel_len/r_d.abs()
+    offset_bigger = ((first_isect/voxel_len + 1e-5).ceil() * voxel_len - first_isect)/r_d
+    offset_smaller = ((first_isect/voxel_len + 1e-5).floor() * voxel_len - first_isect)/r_d
+    offset = torch.maximum(offset_bigger, offset_smaller)
+    N = int(self.resolution * 3)
+    self.ts = ts = (start.min() + voxel_len + torch.linspace(0,voxel_len*N, N, device=device))\
+      .minimum(stop)\
+      .permute(3, 0, 1, 2)[..., None]
+    pts = (r_o[None] + r_d[None] * ts)
+    return self.from_pts(pts, self.ts, r_o, r_d)
+  # TODO I can use the indices here, or I can keep the alphas shaped like a grid.
+  def grid_lookup(self,x,y,z,data): return data[x,y,z]
+  def from_pts(self, pts, ts, r_o, r_d):
+    EPS = 1e-10
+    device=pts.device
+    voxel_len = self.voxel_len
+    g_rad = self.grid_radius
+    reso = self.resolution
+    convert_to_off = lambda x: (x * 2) - 1
+    offsets = 0.5 * voxel_len * torch.tensor([
+      [convert_to_off(bit_i(u, i)) for i in range(3)]
+      for u in range(8)
+    ], device=device)
+    neighbors = (offsets + pts.unsqueeze(-2)).clamp(min=-g_rad, max=g_rad)
+    neighbor_centers = ((torch.floor(neighbors/voxel_len + 1e-10) + 0.5) * voxel_len)\
+      .clamp(min=-(g_rad - voxel_len/2), max=g_rad - voxel_len/2)
+    # This is [...,0,:] since it's the top left corner
+    xyzs = (pts - neighbor_centers[...,0,:])/voxel_len
+    weights = trilinear_weights(xyzs)[..., None]
+    neighbor_ids = ((neighbor_centers/voxel_len + 1e-5).floor() + reso/2).long()\
+      .clamp(min=0, max=reso-1)
+    nx,ny,nz = [ni.squeeze(-1) for ni in neighbor_ids.split([1,1,1],dim=-1)]
+    neighbor_sigma = self.grid_lookup(nx, ny, nz, self.densities)
+    neighbor_rgb = self.grid_lookup(nx, ny, nz, self.rgb.sigmoid())
+    densities = (weights * neighbor_sigma).sum(dim=-2)
+    rgb = (weights * neighbor_rgb).sum(dim=-2)
+    self.alpha, self.weights = alpha_from_density(densities.squeeze(-1), ts.squeeze(-1), r_d)
+    return volumetric_integrate(self.weights, rgb)
 
 class CoarseFineNeRF(CommonNeRF):
   def __init__(
@@ -1209,6 +1299,7 @@ model_kinds = {
   "coarse_fine": CoarseFineNeRF,
 
   "mpi": MPI,
+  "voxel": NeRFVoxel,
   # experimental:
   "rig": RigNeRF,
   "hist": HistogramNeRF,
