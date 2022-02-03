@@ -345,6 +345,7 @@ def trilinear_weights(xyzs):
 
 def bit_i(v, bit): return (v >> bit) & 1
 
+def grid_lookup(x,y,z,data): return data[x,y,z]
 # Voxelized NeRF without view positions
 # TODO pass an option to use spherical harmonics or not?
 class NeRFVoxel(nn.Module):
@@ -352,9 +353,13 @@ class NeRFVoxel(nn.Module):
     self,
     out_features: int = 3,
     resolution:int = 64,
-    alpha_init:float = 0.5,
+    alpha_init:float = 0.1,
     rgb_init:float=0.5,
     grid_radius:float=4,
+    t_near: float = 0.2,
+    t_far: float = 2,
+    steps:int = 64,
+    sigmoid_kind="upshifted",
     **kwargs,
   ):
     assert(resolution > 0)
@@ -364,41 +369,53 @@ class NeRFVoxel(nn.Module):
     self.rgb = nn.Parameter(torch.full([resolution]*3+[3],rgb_init))
     self.grid_radius = grid_radius
     self.voxel_len = grid_radius * 2 / resolution
+    self.t_near = t_near
+    self.t_far = t_far
+    self.steps = steps
+    self.act = load_sigmoid(sigmoid_kind)
 
   @property
   def refl(self): return refl.Reflectance(latent_size=0, out_features=3)
-  def set_refl(self, refl): return # ignore any set refl attempts
+  def set_refl(self, refl): self.act = refl.act
   @property
   def intermediate_size(self): return 0
+  # TODO sparsify method which modifies density and rgb to be _more_ sparse.
+  def sparsify(self, thresh=1e-2):
+    ...
 
   def forward(self, rays):
     voxel_len = self.voxel_len
     device = rays.device
+    pts, self.ts, r_o, r_d, mids = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+    )
 
-    r_o, r_d = rays.split([3,3],dim=-1)
-    offset_pos = (self.grid_radius - r_o)/r_d
-    offset_neg = (-self.grid_radius - r_o)/r_d
-    offset_in = torch.minimum(offset_pos, offset_neg)
-    offset_out = torch.maximum(offset_pos, offset_neg)
+    # TODO fix the commented out portion below, which attempts to do ray-voxel intersection
+    #r_o, r_d = rays.split([3,3],dim=-1)
+    #offset_pos = (self.grid_radius - r_o)/r_d
+    #offset_neg = (-self.grid_radius - r_o)/r_d
+    #offset_in = torch.minimum(offset_pos, offset_neg)
+    #offset_out = torch.maximum(offset_pos, offset_neg)
 
-    start = offset_in.max(dim=-1, keepdim=True)[0]
-    stop = offset_out.min(dim=-1, keepdim=True)[0]
+    #start = offset_in.max(dim=-1, keepdim=True)[0]
+    #stop = offset_out.min(dim=-1, keepdim=True)[0]
 
-    first_isect = r_o + start * r_d
+    #first_isect = r_o + start * r_d
 
-    interval = voxel_len/r_d.abs()
-    offset_bigger = ((first_isect/voxel_len + 1e-5).ceil() * voxel_len - first_isect)/r_d
-    offset_smaller = ((first_isect/voxel_len + 1e-5).floor() * voxel_len - first_isect)/r_d
-    offset = torch.maximum(offset_bigger, offset_smaller)
-    N = int(self.resolution * 3)
-    self.ts = ts = (start.min() + voxel_len + torch.linspace(0,voxel_len*N, N, device=device))\
-      .minimum(stop)\
-      .permute(3, 0, 1, 2)[..., None]
-    pts = (r_o[None] + r_d[None] * ts)
+    #interval = voxel_len/r_d.abs()
+    #offset_bigger = ((first_isect/voxel_len + 1e-5).ceil() * voxel_len - first_isect)/r_d
+    #offset_smaller = ((first_isect/voxel_len + 1e-5).floor() * voxel_len - first_isect)/r_d
+    #offset = torch.maximum(offset_bigger, offset_smaller)
+    #N = int(self.resolution * 3)
+    #self.ts = ts = start.min() + voxel_len + torch.linspace(0,voxel_len*N, N, device=device)\
+    #  [:, None, None, None, None]\
+    #  .minimum(stop[None])\
+    #  .expand(-1, *rays.shape[:-1], 1)
+    #pts = (r_o[None] + r_d[None] * ts)
+
     return self.from_pts(pts, self.ts, r_o, r_d)
-  # TODO I can use the indices here, or I can keep the alphas shaped like a grid.
-  def grid_lookup(self,x,y,z,data): return data[x,y,z]
-  def from_pts(self, pts, ts, r_o, r_d):
+  # TODO maybe make this grid lookup sparse?
+  def grid_coords_trilin_weights(self, pts):
     EPS = 1e-10
     device=pts.device
     voxel_len = self.voxel_len
@@ -410,18 +427,21 @@ class NeRFVoxel(nn.Module):
       for u in range(8)
     ], device=device)
     neighbors = (offsets + pts.unsqueeze(-2)).clamp(min=-g_rad, max=g_rad)
-    neighbor_centers = ((torch.floor(neighbors/voxel_len + 1e-10) + 0.5) * voxel_len)\
+    neighbor_centers = ((torch.floor(neighbors/voxel_len + EPS) + 0.5) * voxel_len)\
       .clamp(min=-(g_rad - voxel_len/2), max=g_rad - voxel_len/2)
     # This is [...,0,:] since it's the top left corner
     xyzs = (pts - neighbor_centers[...,0,:])/voxel_len
     weights = trilinear_weights(xyzs)[..., None]
-    neighbor_ids = ((neighbor_centers/voxel_len + 1e-5).floor() + reso/2).long()\
+    neighbor_ids = ((neighbor_centers/voxel_len + EPS).floor() + reso/2).long()\
       .clamp(min=0, max=reso-1)
+    return neighbor_ids, weights
+  def from_pts(self, pts, ts, r_o, r_d):
+    neighbor_ids, trilin_weights = self.grid_coords_trilin_weights(pts)
     nx,ny,nz = [ni.squeeze(-1) for ni in neighbor_ids.split([1,1,1],dim=-1)]
-    neighbor_sigma = self.grid_lookup(nx, ny, nz, self.densities)
-    neighbor_rgb = self.grid_lookup(nx, ny, nz, self.rgb.sigmoid())
-    densities = (weights * neighbor_sigma).sum(dim=-2)
-    rgb = (weights * neighbor_rgb).sum(dim=-2)
+    neighbor_sigma = grid_lookup(nx, ny, nz, self.densities)
+    neighbor_rgb = grid_lookup(nx, ny, nz, self.act(self.rgb))
+    densities = (trilin_weights * neighbor_sigma).sum(dim=-2)
+    rgb = (trilin_weights * neighbor_rgb).sum(dim=-2)
     self.alpha, self.weights = alpha_from_density(densities.squeeze(-1), ts.squeeze(-1), r_d)
     return volumetric_integrate(self.weights, rgb)
 
@@ -1157,6 +1177,7 @@ class DynamicRigNeRF(nn.Module):
     )
     self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
     self.num_spline_pts = spline
+
   @property
   def nerf(self): return self.canonical
   @property
@@ -1178,6 +1199,51 @@ class DynamicRigNeRF(nn.Module):
     dp = self.spline_fn(self.ctrl_pts[:, None],t[None,:,None,None],self.num_spline_pts)
     rigs = self.canonical.points[None]
     return self.canonical.from_pts(pts, ts, r_o, r_d, (rigs+dp)[None,:,None,None])
+
+class DynamicNeRFVoxel(nn.Module):
+  def __init__(
+    self,
+    canonical: NeRFVoxel,
+    spline: int = 4,
+  ):
+    assert(isinstance(canonical, NeRFVoxel)), "Must use NeRFVoxel for underlying model"
+    assert(spline > 1), f"Must have spline strictly greater than 0, got {spline}"
+    super().__init__()
+    self.canonical = canonical
+    reso = canonical.resolution
+    # Here, we _always_ use 0 for the first point, so we only need to store N - 1 pts.
+    spline = spline-1
+    self.ctrl_pts = nn.Parameter(torch.randn([reso]*3+[3*spline]))
+    self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
+    self.spline = spline
+
+  @property
+  def nerf(self): return self.canonical
+  @property
+  def refl(self): return self.canonical.refl
+  @property
+  def sdf(self): return getattr(self.canonical, "sdf", None)
+  @property
+  def intermediate_size(self): return self.canonical.intermediate_size
+  def total_latent_size(self): return self.canonical.total_latent_size()
+  def set_refl(self, refl): self.canonical.set_refl(refl)
+
+  def forward(self, rays_t):
+    rays, t = rays_t
+    pts, ts, r_o, r_d, _ = compute_pts_ts(
+      rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
+    )
+    self.canonical.ts = self.ts = ts
+    neighbor_ids, trilin_weights = self.canonical.grid_coords_trilin_weights(pts)
+    nx,ny,nz = [ni.squeeze(-1) for ni in neighbor_ids.split([1,1,1],dim=-1)]
+    neighbor_ctrl_pts = grid_lookup(nx, ny, nz, self.ctrl_pts)\
+      .split(3, dim=-1)
+    neighbor_ctrl_pts = torch.stack(neighbor_ctrl_pts, dim=0)
+    ctrl_pts = (trilin_weights[None] * neighbor_ctrl_pts).sum(dim=-2)
+    ctrl_pts = torch.cat([torch.zeros_like(ctrl_pts[:1]), ctrl_pts], dim=0)
+    t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
+    self.dp = dp = self.spline_fn(ctrl_pts, t, self.spline+1)
+    return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
 
 # TODO fix this
 class SinglePixelNeRF(nn.Module):
@@ -1288,6 +1354,7 @@ dyn_model_kinds = {
   "ae": DynamicNeRFAE,
   "rig": DynamicRigNeRF,
   "long": LongDynamicNeRF,
+  "voxel": DynamicNeRFVoxel,
 }
 
 model_kinds = {
