@@ -355,9 +355,10 @@ class NeRFVoxel(nn.Module):
     resolution:int = 64,
     alpha_init:float = 0.1,
     rgb_init:float=0.5,
-    grid_radius:float=4,
+    grid_radius:float=1.3,
     t_near: float = 0.2,
     t_far: float = 2,
+    # For now we still raymarch, and do not perform explicit intersection
     steps:int = 64,
     sigmoid_kind="upshifted",
     **kwargs,
@@ -366,7 +367,7 @@ class NeRFVoxel(nn.Module):
     super().__init__()
     self.resolution = reso = resolution
     self.densities = nn.Parameter(torch.full([resolution]*3+[1],alpha_init))
-    self.rgb = nn.Parameter(torch.full([resolution]*3+[3],rgb_init))
+    self.rgb = nn.Parameter(torch.full([resolution]*3+[out_features],rgb_init))
     self.grid_radius = grid_radius
     self.voxel_len = grid_radius * 2 / resolution
     self.t_near = t_near
@@ -432,9 +433,12 @@ class NeRFVoxel(nn.Module):
     # This is [...,0,:] since it's the top left corner
     xyzs = (pts - neighbor_centers[...,0,:])/voxel_len
     weights = trilinear_weights(xyzs)[..., None]
-    neighbor_ids = ((neighbor_centers/voxel_len + EPS).floor() + reso/2).long()\
-      .clamp(min=0, max=reso-1)
-    return neighbor_ids, weights
+    neighbor_ids = ((neighbor_centers/voxel_len + EPS).floor() + reso/2).long()
+    weights = torch.where(
+      ((neighbor_ids < 0) | (neighbor_ids > reso-1)).any(dim=-1,keepdim=True),
+      torch.zeros_like(weights), weights,
+    )
+    return neighbor_ids.clamp(min=0, max=reso-1), weights
   def from_pts(self, pts, ts, r_o, r_d):
     neighbor_ids, trilin_weights = self.grid_coords_trilin_weights(pts)
     nx,ny,nz = [ni.squeeze(-1) for ni in neighbor_ids.split([1,1,1],dim=-1)]

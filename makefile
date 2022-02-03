@@ -34,9 +34,10 @@ voxel: clean
 
 dyn_voxel: clean
 	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf \
-	--size 64 --epochs 5_000 --nosave --loss-window 1000 --save-freq 2500 \
-	--near 2 --far 6 --batch-size 10 --crop-size 40 --model voxel --dyn-model voxel -lr 1e-2 \
-	--loss-fns l2 --notraintest --test-crop-size 64 --depth-images --flow-map --spline 4
+	--size 64 --epochs 10_000 --save models/dvoxel_${dnerf_dataset}.pt --loss-window 1000 --save-freq 2500 \
+	--near 2 --far 6 --batch-size 10 --crop-size 38 --model voxel --dyn-model voxel -lr 1e-2 \
+	--loss-fns l2 --notraintest --test-crop-size 64 --depth-images --flow-map --spline 4 \
+  --load models/dvoxel_${dnerf_dataset}.pt --render-over-time 8
 
 volsdf_with_normal: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \

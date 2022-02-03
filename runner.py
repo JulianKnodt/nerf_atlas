@@ -363,6 +363,7 @@ def load_optim(args, params):
     "eps": 1e-7,
   }
   if args.opt_kind == "adam": hyperparams["weight_decay"] = args.decay
+  if args.opt_kind == "sgd": del hyperparams["eps"]
   return cons(params, **hyperparams)
 
 # Computes the difference of the fft of two images
