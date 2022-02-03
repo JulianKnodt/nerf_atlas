@@ -38,6 +38,23 @@ using the activation function as described in MIP-NeRF~\cite{barron2021mipnerf} 
 samples for a moving object at a given view, it is more difficult to learn specular
 reflection, thus it leads to better convergence to model the diffuse color of an object. This is in line with NR-NeRF and D-NeRF, which also model the diffuse component.
 
+A diagram of the ray-bending component can be seen in Fig.~\ref{fig:arch_diagram}.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\textwidth]{spline_nerf_diagram.png}
+    \caption{
+        \textbf{Spline-based Dynamic NeRF}. Instead of using an MLP to directly predict ray-bending at a given time, we predict a set of Bezier spline control points. Then, we use the Bezier function to interpolate position based on time.
+    }
+    \label{fig:arch_diagram}
+\end{figure}
+
+\subsection*{Training}
+
+For training, we sample random crops of random frames, computing the loss defined previously and back-propagating through the whole network. We use autograd to optimize control points and the canonical NeRF jointly, but note that there are also classical approaches to solving spline points which may lead to faster optimization in the future. We use the Adam optimizer~\cite{Kingma2015AdamAM} with cosine simulated annealing~\cite{loshchilov2017sgdr} to go from $\num{2e-4}$ to $\num{5e-5}$ over the course of a day.
+
+For some scenes, we are able to have higher learning rates, but for much darker scenes it's necessary to lower the learning rate to converge.
+
 \iffalse
 \subsection*{Loss}
 
@@ -61,12 +78,6 @@ without any additional regularization terms.
 
 Our formulation is simpler compared to NR-NeRF since there is no need to regularize
 temporal consistency, making the optimization process simpler. Our training process also does not require adding in additional frames over time for short sequences, so we randomly sample from all available frames. This is contrast to D-NeRF, which requires adding frames in during training since it has to enforce that at $t=0$ the predicted movement is 0.
-
-\subsection*{Training}
-
-For training, we sample random crops of random frames, computing the loss defined previously and back-propagating through the whole network. We use autograd to optimize control points and the canonical NeRF jointly, but note that there are also classical approaches to solving spline points which may lead to faster optimization in the future. We use the Adam optimizer~\cite{Kingma2015AdamAM} with cosine simulated annealing~\cite{loshchilov2017sgdr} to go from $\num{2e-4}$ to $\num{5e-5}$ over the course of a day.
-
-For some scenes, we are able to have higher learning rates, but for much darker scenes it's necessary to lower the learning rate to converge.
 
 \subsection*{Long Duration $C^0$ Continuity}
 
@@ -117,3 +128,7 @@ One obvious question is why a more complex architecture is necessary as compared
 
 We do yet not demonstrate the effectiveness of the architecture, due to time constraints, and the author's incompetence\footnote{If this were to be published, I would demonstrate this architecture, but cannot due to time constraints.}.
 \fi
+
+\subsection{Voxel Spline-NeRF}
+
+In addition to a model that uses an MLP to predict the control points, we demonstrate that using control points is also effective for voxelized NeRF, which leads to much faster reconstruction times. Our formulation is identical
