@@ -332,6 +332,10 @@ def arguments():
   )
   meta.add_argument("--clip-gradients", type=float, default=0, help="If > 0, clip gradients")
   meta.add_argument("--versioned-save", action="store_true", help="Save with versions")
+  meta.add_argument(
+    "--higher-end-chance", type=int, default=0,
+    help="Increase chance of training on either the start or the end",
+  )
 
   ae = a.add_argument_group("auto encoder parameters")
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
@@ -514,8 +518,12 @@ def train(model, cam, labels, opt, args, sched=None):
     get_crop = lambda: (
       random.randint(0, args.render_size-cs), random.randint(0, args.render_size-cs), cs, cs,
     )
-
-  next_idxs = lambda _: random.sample(range(labels.shape[0]), batch_size)
+  train_choices = range(labels.shape[0])
+  if args.higher_end_chance > 0:
+    train_choices = list(train_choices)
+    train_choices += [0] * args.higher_end_chance
+    train_choices += [labels.shape[0]-1] * args.higher_end_chance
+  next_idxs = lambda _: random.sample(train_choices, batch_size)
   if args.serial_idxs: next_idxs = lambda i: [i%len(cam)] * batch_size
   #next_idxs = lambda i: [i%10] * batch_size # DEBUG
 
