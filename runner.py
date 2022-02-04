@@ -151,6 +151,18 @@ def arguments():
   a.add_argument(
     "--rig-points", type=int, default=128, help="Number of rigs points to use in RigNeRF"
   )
+  a.add_argument(
+    "--voxel-tv-sigma",
+    type=float, default=0, help="Weight of total variation regularization for densitiy",
+  )
+  a.add_argument(
+    "--voxel-tv-rgb",
+    type=float, default=0, help="Weight of total variation regularization for rgb",
+  )
+  a.add_argument(
+    "--voxel-tv-bezier", type=float, default=0,
+    help="Weight of total variation regularization for bezier control points",
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -627,8 +639,18 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.decay_all_learned_occ > 0:
       loss = loss + args.decay_all_learned_occ * model.occ.all_learned_occ.raw_att.neg().mean()
 
-    if args.delta_x_decay > 0:
-      loss = loss + args.delta_x_decay * model.dp.norm(dim=-1).mean()
+    if args.delta_x_decay > 0: loss = loss + args.delta_x_decay * model.dp.norm(dim=-1).mean()
+
+    # Apply voxel total variation losses
+    if args.voxel_tv_sigma > 0:
+      loss = loss + args.voxel_tv_sigma * nerf.total_variation(model.densities)
+    if args.voxel_tv_rgb > 0:
+      loss = loss + args.voxel_tv_rgb * nerf.total_variation(model.rgb)
+    if args.voxel_tv_bezier > 0:
+      loss = loss + args.voxel_tv_bezier * nerf.total_variation(model.ctrl_pts)
+
+
+    # --- Finished with applying any sort of regularization
 
     update(display)
     losses.append(l2_loss)
@@ -920,6 +942,21 @@ def set_per_run(model, args):
       else: model.refl = new_alt_opt(model.refl)
       model.refl = model.refl.to(device)
     else: print("[note]: redundant alternating optimization, ignoring")
+
+  is_voxel = isinstance(model, nerf.NeRFVoxel)
+  is_dyn_voxel = isinstance(model, nerf.DynamicNeRFVoxel)
+  if is_dyn_voxel: ...
+  elif is_voxel and args.voxel_tv_bezier > 0:
+    print("[warn]: model does not have bezier control points for static scene")
+    args.voxel_tv_bezier = 0
+  elif is_voxel: ...
+  elif args.voxel_tv_sigma > 0 or \
+    args.voxel_tv_rgb > 0 or \
+    args.voxel_tv_bezier > 0:
+    print("[warn]: model is not voxel, unsetting total variation")
+    args.voxel_tv_sigma = 0
+    args.voxel_tv_rgb = 0
+    args.voxel_tv_bezier = 0
 
   # swap which portion is being trained for the alternating optimization
   if hasattr(model, "refl"):

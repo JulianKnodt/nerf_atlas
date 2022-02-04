@@ -346,6 +346,22 @@ def trilinear_weights(xyzs):
 def bit_i(v, bit): return (v >> bit) & 1
 
 def grid_lookup(x,y,z,data): return data[x,y,z]
+
+def total_variation(grid, samples: int = 32 ** 3):
+  s0, s1, s2, _ = grid.shape
+  n_elem = s0 * s1 * s2
+  idxs = torch.randint(0, n_elem, (samples,), device=grid.device)
+  x,y,z = \
+    idxs % s0, \
+    torch.div(idxs, s0, rounding_mode='floor') % s1, \
+    torch.div(idxs, (s0 * s1), rounding_mode='floor') % s2
+  get_adj = lambda v, s: torch.where(v == s-1, v-1,v+1)
+  ax, ay, az = get_adj(x,s0), get_adj(y,s1), get_adj(z, s2)
+  e = grid[x,y,z]
+  dx, dy, dz = e - grid[ax,y,z], e-grid[x,ay,z], e - grid[x,y,az]
+  tv = (dx.square() + dy.square() + dz.square()).clamp(min=1e-10).sqrt()
+  return tv.mean()
+
 # Voxelized NeRF without view positions
 # TODO pass an option to use spherical harmonics or not?
 class NeRFVoxel(nn.Module):
@@ -1230,6 +1246,10 @@ class DynamicNeRFVoxel(nn.Module):
   @property
   def intermediate_size(self): return self.canonical.intermediate_size
   def total_latent_size(self): return self.canonical.total_latent_size()
+  @property
+  def densities(self): return self.canonical.densities
+  @property
+  def rgb(self): return self.canonical.rgb
   def set_refl(self, refl): self.canonical.set_refl(refl)
 
   def forward(self, rays_t):
