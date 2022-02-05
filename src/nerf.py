@@ -1220,7 +1220,10 @@ class DynamicRigNeRF(nn.Module):
     rigs = self.canonical.points[None]
     return self.canonical.from_pts(pts, ts, r_o, r_d, (rigs+dp)[None,:,None,None])
 
-def arc_length(ctrl_pts, samples:int=16, method:str="linspace"):
+# Computes an approximation of the arc length of a bezier spline.
+# Computing the exact length requires an integral, instead use numerical quadrature to
+# approximate. Should be used for regularization of spline length.
+def arc_len(ctrl_pts, samples:int=12, method:str="linspace"):
   device = ctrl_pts.device
   if method == "linspace":
     t = torch.linspace(0, 1, samples, device=device)

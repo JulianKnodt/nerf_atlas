@@ -151,26 +151,6 @@ def arguments():
   a.add_argument(
     "--rig-points", type=int, default=128, help="Number of rigs points to use in RigNeRF"
   )
-  a.add_argument(
-    "--voxel-tv-sigma",
-    type=float, default=0, help="Weight of total variation regularization for densitiy",
-  )
-  a.add_argument(
-    "--voxel-tv-rgb",
-    type=float, default=0, help="Weight of total variation regularization for rgb",
-  )
-  a.add_argument(
-    "--voxel-tv-bezier", type=float, default=0,
-    help="Weight of total variation regularization for bezier control points",
-  )
-  a.add_argument(
-    "--voxel-tv-rigidity", type=float, default=0,
-    help="Weight of total variation regularization for rigidity",
-  )
-  a.add_argument(
-    "--offset-decay", type=float, default=0,
-    help="Weight of total variation regularization for rigidity",
-  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -292,6 +272,29 @@ def arguments():
   vida.add_argument("--ffjord-div-decay", type=float, default=0, help="FFJORD divergence of movement field")
   vida.add_argument(
     "--delta-x-decay", type=float, default=0, help="How much decay for change in position for dyn",
+  )
+  vida.add_argument(
+    "--spline-len-decay", type=float, default=0, help="Weight for length of spline regularization"
+  )
+  vida.add_argument(
+    "--voxel-tv-sigma",
+    type=float, default=0, help="Weight of total variation regularization for densitiy",
+  )
+  vida.add_argument(
+    "--voxel-tv-rgb",
+    type=float, default=0, help="Weight of total variation regularization for rgb",
+  )
+  vida.add_argument(
+    "--voxel-tv-bezier", type=float, default=0,
+    help="Weight of total variation regularization for bezier control points",
+  )
+  vida.add_argument(
+    "--voxel-tv-rigidity", type=float, default=0,
+    help="Weight of total variation regularization for rigidity",
+  )
+  vida.add_argument(
+    "--offset-decay", type=float, default=0,
+    help="Weight of total variation regularization for rigidity",
   )
 
   rprt = a.add_argument_group("reporting parameters")
@@ -676,6 +679,9 @@ def train(model, cam, labels, opt, args, sched=None):
         .pow(2 - model.rigidity)
       reg = model.canonical.weights.detach()[None,...,None] * (norm_dp + 1e-4 * model.rigidity)
       loss = loss + args.offset_decay * reg.mean()
+    # apply regularization on spline length, to get smallest spline that fits.
+    if args.spline_len_decay > 0:
+      loss = loss + args.spline_len_decay * nerf.arc_len(model.ctrl_pts).mean()
 
 
     # --- Finished with applying any sort of regularization
