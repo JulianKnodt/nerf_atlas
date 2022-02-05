@@ -672,7 +672,7 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.voxel_tv_bezier > 0:
       loss = loss + args.voxel_tv_bezier * nerf.total_variation(model.ctrl_pts_grid)
     if args.voxel_tv_rigidity > 0:
-      loss = loss + args.voxel_tv_rigidity * nerf.total_variation(model.rigidity_grad)
+      loss = loss + args.voxel_tv_rigidity * nerf.total_variation(model.rigidity_grid)
     # apply offset loss as described in NR-NeRF
     if args.offset_decay > 0:
       norm_dp = torch.linalg.vector_norm(model.dp, dim=-1, keepdim=True)\
@@ -681,6 +681,8 @@ def train(model, cam, labels, opt, args, sched=None):
       loss = loss + args.offset_decay * reg.mean()
     # apply regularization on spline length, to get smallest spline that fits.
     if args.spline_len_decay > 0:
+      #samples = 1 << 16
+      #ctrl_pts = model.ctrl_
       loss = loss + args.spline_len_decay * nerf.arc_len(model.ctrl_pts).mean()
 
 
