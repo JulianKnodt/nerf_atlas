@@ -1223,14 +1223,16 @@ class DynamicRigNeRF(nn.Module):
 # Computes an approximation of the arc length of a bezier spline.
 # Computing the exact length requires an integral, instead use numerical quadrature to
 # approximate. Should be used for regularization of spline length.
-def arc_len(ctrl_pts, samples:int=12, method:str="linspace"):
+def arc_len(ctrl_pts, samples:int=16, method:str="linspace"):
   device = ctrl_pts.device
   if method == "linspace":
     t = torch.linspace(0, 1, samples, device=device)
     t = t[None, None, None, :, None, None, None]
     offsets = de_casteljau(ctrl_pts.unsqueeze(3), t, ctrl_pts.shape[0])
     # compute difference between adjacent pts and sum them all up.
-    return torch.linalg.vector_norm(offsets[:, 1:] - offsets[:, :-1], dim=-1).sum(dim=1)
+    return torch.linalg.vector_norm(offsets[:, :, 1:] - offsets[:, :, :-1], dim=-1)\
+      .squeeze(dim=1)\
+      .sum(dim=1)
   else:
     raise NotImplementedError(f"Unimplemented arc_length method {method}")
   # TODO compute arc length here, and use that as a form of regularization.

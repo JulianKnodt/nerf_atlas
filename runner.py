@@ -467,7 +467,7 @@ def load_loss_fn(args, model):
     def loss_fn(x, ref):
       loss = 0
       for fn in loss_fns: loss = loss + fn(x, ref)
-      return loss
+      return loss/len(loss_fns)
 
   assert(len(args.color_spaces) > 0), "must provide at least 1 color space"
   # different colors like rgb, hsv
@@ -665,14 +665,10 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.delta_x_decay > 0: loss = loss + args.delta_x_decay * model.dp.norm(dim=-1).mean()
 
     # Apply voxel total variation losses
-    if args.voxel_tv_sigma > 0:
-      loss = loss + args.voxel_tv_sigma * nerf.total_variation(model.densities)
-    if args.voxel_tv_rgb > 0:
-      loss = loss + args.voxel_tv_rgb * nerf.total_variation(model.rgb)
-    if args.voxel_tv_bezier > 0:
-      loss = loss + args.voxel_tv_bezier * nerf.total_variation(model.ctrl_pts_grid)
-    if args.voxel_tv_rigidity > 0:
-      loss = loss + args.voxel_tv_rigidity * nerf.total_variation(model.rigidity_grid)
+    if args.voxel_tv_sigma > 0: loss = loss + args.voxel_tv_sigma * nerf.total_variation(model.densities)
+    if args.voxel_tv_rgb > 0: loss = loss + args.voxel_tv_rgb * nerf.total_variation(model.rgb)
+    if args.voxel_tv_bezier > 0: loss = loss + args.voxel_tv_bezier * nerf.total_variation(model.ctrl_pts_grid)
+    if args.voxel_tv_rigidity > 0: loss = loss + args.voxel_tv_rigidity * nerf.total_variation(model.rigidity_grid)
     # apply offset loss as described in NR-NeRF
     if args.offset_decay > 0:
       norm_dp = torch.linalg.vector_norm(model.dp, dim=-1, keepdim=True)\
@@ -680,10 +676,13 @@ def train(model, cam, labels, opt, args, sched=None):
       reg = model.canonical.weights.detach()[None,...,None] * (norm_dp + 1e-4 * model.rigidity)
       loss = loss + args.offset_decay * reg.mean()
     # apply regularization on spline length, to get smallest spline that fits.
+    # only apply this to visible points though
     if args.spline_len_decay > 0:
       #samples = 1 << 16
       #ctrl_pts = model.ctrl_
-      loss = loss + args.spline_len_decay * nerf.arc_len(model.ctrl_pts).mean()
+      arc_lens = nerf.arc_len(model.ctrl_pts)
+      w = model.canonical.weights.detach().squeeze(1)
+      loss = loss + args.spline_len_decay * (w * arc_lens).mean()
 
 
     # --- Finished with applying any sort of regularization
