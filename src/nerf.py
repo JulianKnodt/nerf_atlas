@@ -1220,6 +1220,21 @@ class DynamicRigNeRF(nn.Module):
     rigs = self.canonical.points[None]
     return self.canonical.from_pts(pts, ts, r_o, r_d, (rigs+dp)[None,:,None,None])
 
+def arc_length(ctrl_pts, samples:int=16, method:str="linspace"):
+  device = ctrl_pts.device
+  if method == "linspace":
+    t = torch.linspace(0, 1, samples, device=device)
+    t = t[None, :, None, None, None].expand(ctrl_pts.shape[1], samples, *ctrl_pts.shape[3:-1], 1)
+    offsets = de_casteljau(ctrl_pts, t, ctrl_pts.shape[0])
+    # compute difference between adjacent pts and sum them all up.
+    return torch.linalg.vector_norm(offsets[:, 1:] - offsets[:, :-1], dim=-1).sum(dim=1)
+  else:
+    raise NotImplementedError(f"Unimplemented arc_length method {method}")
+  # TODO compute arc length here, and use that as a form of regularization.
+  # This should use gauss-legendre quadrature in order to compute arc length.
+  ...
+
+
 class DynamicNeRFVoxel(nn.Module):
   def __init__(
     self,
@@ -1233,7 +1248,9 @@ class DynamicNeRFVoxel(nn.Module):
     reso = canonical.resolution
     # Here, we _always_ use 0 for the first point, so we only need to store N - 1 pts.
     spline = spline-1
-    self.ctrl_pts = nn.Parameter(torch.randn([reso]*3+[3*spline]))
+    self.ctrl_pts_grid = nn.Parameter(torch.randn([reso]*3+[3*spline]))
+    self.rigidity_grid = nn.Parameter(torch.randn([reso]*3+[1]))
+
     self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
     self.spline = spline
 
@@ -1254,20 +1271,26 @@ class DynamicNeRFVoxel(nn.Module):
 
   def forward(self, rays_t):
     rays, t = rays_t
-    pts, ts, r_o, r_d, _ = compute_pts_ts(
+    self.pts, ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
+      perturb = 1 if self.training else 0,
     )
+    self.pts = self.pts.requires_grad_() if self.training else self.pts
     self.canonical.ts = self.ts = ts
-    neighbor_ids, trilin_weights = self.canonical.grid_coords_trilin_weights(pts)
+
+    neighbor_ids, trilin_weights = self.canonical.grid_coords_trilin_weights(self.pts)
     nx,ny,nz = [ni.squeeze(-1) for ni in neighbor_ids.split([1,1,1],dim=-1)]
-    neighbor_ctrl_pts = grid_lookup(nx, ny, nz, self.ctrl_pts)\
+    neighbor_ctrl_pts = grid_lookup(nx, ny, nz, self.ctrl_pts_grid)\
       .split(3, dim=-1)
     neighbor_ctrl_pts = torch.stack(neighbor_ctrl_pts, dim=0)
     ctrl_pts = (trilin_weights[None] * neighbor_ctrl_pts).sum(dim=-2)
-    ctrl_pts = torch.cat([torch.zeros_like(ctrl_pts[:1]), ctrl_pts], dim=0)
-    t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
+    self.ctrl_pts = ctrl_pts = torch.cat([torch.zeros_like(ctrl_pts[:1]), ctrl_pts], dim=0)
+    t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1)
     self.dp = dp = self.spline_fn(ctrl_pts, t, self.spline+1)
-    return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
+    self.rigidity = (trilin_weights * grid_lookup(nx,ny,nz,self.rigidity_grid.sigmoid().squeeze(0)))\
+      .sum(dim=-2)
+    self.rigid_dp = dp * self.rigidity
+    return self.canonical.from_pts(self.pts + self.rigid_dp, self.ts, r_o, r_d)
 
 # TODO fix this
 class SinglePixelNeRF(nn.Module):

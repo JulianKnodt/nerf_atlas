@@ -163,6 +163,14 @@ def arguments():
     "--voxel-tv-bezier", type=float, default=0,
     help="Weight of total variation regularization for bezier control points",
   )
+  a.add_argument(
+    "--voxel-tv-rigidity", type=float, default=0,
+    help="Weight of total variation regularization for rigidity",
+  )
+  a.add_argument(
+    "--offset-decay", type=float, default=0,
+    help="Weight of total variation regularization for rigidity",
+  )
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(
@@ -280,11 +288,10 @@ def arguments():
   vida.add_argument(
     "--segments", type=int, default=10, help="Decompose the input sequence into some # of frames",
   )
+  vida.add_argument("--dyn-diverge-decay", type=float, default=0, help="Decay divergence of movement field")
+  vida.add_argument("--ffjord-div-decay", type=float, default=0, help="FFJORD divergence of movement field")
   vida.add_argument(
-    "--dyn-diverge-decay", type=float, default=0, help="Decay divergence of movement field."
-  )
-  vida.add_argument(
-    "--delta-x-decay", type=float, default=0, help="How much decay for change in position for dyn.",
+    "--delta-x-decay", type=float, default=0, help="How much decay for change in position for dyn",
   )
 
   rprt = a.add_argument_group("reporting parameters")
@@ -576,7 +583,12 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.sdf_eikonal > 0: loss = loss + args.sdf_eikonal * utils.eikonal_loss(n)
     # E[div(change in x)] = 0, enforcing the change in motion does not compress space.
     if args.dyn_diverge_decay > 0:
+      # TODO maybe this is wrong? Unsure
       loss=loss+args.dyn_diverge_decay*utils.divergence(model.pts, model.dp).mean()
+    # approximation of divergence using ffjord algorithm as in NR-NeRF
+    if args.ffjord_div_decay:
+      div_approx = utils.div_approx(model.pts, model.rigid_dp).abs().square()
+      loss = loss+args.ffjord_div_decay * (model.canonical.alpha.detach() * div_approx).mean()
 
     # automatically apply eikonal loss for DynamicNeRF
     if args.sdf_eikonal > 0 and isinstance(model, nerf.DynamicNeRF):
@@ -655,7 +667,15 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.voxel_tv_rgb > 0:
       loss = loss + args.voxel_tv_rgb * nerf.total_variation(model.rgb)
     if args.voxel_tv_bezier > 0:
-      loss = loss + args.voxel_tv_bezier * nerf.total_variation(model.ctrl_pts)
+      loss = loss + args.voxel_tv_bezier * nerf.total_variation(model.ctrl_pts_grid)
+    if args.voxel_tv_rigidity > 0:
+      loss = loss + args.voxel_tv_rigidity * nerf.total_variation(model.rigidity_grad)
+    # apply offset loss as described in NR-NeRF
+    if args.offset_decay > 0:
+      norm_dp = torch.linalg.vector_norm(model.dp, dim=-1, keepdim=True)\
+        .pow(2 - model.rigidity)
+      reg = model.canonical.weights.detach()[None,...,None] * (norm_dp + 1e-4 * model.rigidity)
+      loss = loss + args.offset_decay * reg.mean()
 
 
     # --- Finished with applying any sort of regularization
@@ -954,9 +974,10 @@ def set_per_run(model, args):
   is_voxel = isinstance(model, nerf.NeRFVoxel)
   is_dyn_voxel = isinstance(model, nerf.DynamicNeRFVoxel)
   if is_dyn_voxel: ...
-  elif is_voxel and args.voxel_tv_bezier > 0:
-    print("[warn]: model does not have bezier control points for static scene")
+  elif is_voxel and (args.voxel_tv_bezier > 0 or args.voxel_tv_rigidity > 0):
+    print("[warn]: model does not have bezier control points or rigidity for static scene")
     args.voxel_tv_bezier = 0
+    args.voxel_tv_rigidity = 0
   elif is_voxel: ...
   elif args.voxel_tv_sigma > 0 or \
     args.voxel_tv_rgb > 0 or \
@@ -965,6 +986,7 @@ def set_per_run(model, args):
     args.voxel_tv_sigma = 0
     args.voxel_tv_rgb = 0
     args.voxel_tv_bezier = 0
+    args.voxel_tv_rigidity = 0
 
   # swap which portion is being trained for the alternating optimization
   if hasattr(model, "refl"):

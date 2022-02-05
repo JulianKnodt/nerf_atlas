@@ -414,6 +414,21 @@ def divergence(x, field):
   assert(x.shape[-1] == 3)
   return autograd(x, field).sum(dim=-1, keepdim=True)
 
+# approximate divergence using ffjord, taken from NR-NeRF taken from elsewhere.
+def div_approx(x, fn_x):
+  assert(fn_x.shape[-1] == 3), "Can only take divergence of vector field"
+  assert(x.shape[-1] == 3), "Can only take divergence of vector field"
+  e = torch.randn_like(fn_x)
+  e_dydx, = torch.autograd.grad(
+    inputs=x,
+    outputs=fn_x,
+    grad_outputs=e,
+    retain_graph=True,
+    only_inputs=True,
+  )
+  return (e_dydx * e).sum(dim=-1)
+
+
 # sigmoids which shrink or expand the total range to prevent gradient vanishing,
 # or prevent it from representing full density items.
 # fat sigmoid has no vanishing gradient, but thin sigmoid leads to better outlines.
