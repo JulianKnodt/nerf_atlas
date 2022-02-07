@@ -442,6 +442,8 @@ def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 def leaky_softplus(v, alpha=0.01):
   return torch.where(v >= 0, F.softplus(v-3), alpha * v + 0.0485873515737)
 
+def upshifted_relu(v, eps=1e-2): return F.relu(v) + eps
+
 # list of available sigmoids
 sigmoid_kinds = {
   "normal": torch.sigmoid,
@@ -453,8 +455,10 @@ sigmoid_kinds = {
   "fat": fat_sigmoid,
   "softmax": nn.Softmax(dim=-1),
   "leaky_relu": F.leaky_relu,
+  "relu": F.relu,
   "sin": torch.sin,
   "upshifted_softplus": upshifted_softplus,
+  "upshifted_relu": upshifted_relu,
 }
 def load_sigmoid(kind="thin"):
   sigmoid = sigmoid_kinds.get(kind, None)

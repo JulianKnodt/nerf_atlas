@@ -378,6 +378,8 @@ opt_kinds = {
   "adam": optim.Adam,
   "sgd": optim.SGD,
   "adamw": optim.AdamW,
+  "rmsprop": optim.RMSprop,
+
   "uniform_adam": UniformAdam,
 }
 def load_optim(args, params):
@@ -673,7 +675,7 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.offset_decay > 0:
       norm_dp = torch.linalg.vector_norm(model.dp, dim=-1, keepdim=True)\
         .pow(2 - model.rigidity)
-      reg = model.canonical.weights.detach()[None,...,None] * (norm_dp + 1e-4 * model.rigidity)
+      reg = model.canonical.weights.detach()[None,...,None] * (norm_dp + 3e-3 * model.rigidity)
       loss = loss + args.offset_decay * reg.mean()
     # apply regularization on spline length, to get smallest spline that fits.
     # only apply this to visible points though
@@ -687,6 +689,8 @@ def train(model, cam, labels, opt, args, sched=None):
 
     # --- Finished with applying any sort of regularization
 
+    # TODO possible add updating the display with the total loss w/ regularization
+    # it would make it easier to know if the regularization is working.
     update(display)
     losses.append(l2_loss)
 

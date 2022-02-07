@@ -345,6 +345,7 @@ def trilinear_weights(xyzs):
 
 def bit_i(v, bit): return (v >> bit) & 1
 
+# TODO maybe convert this into something sparse?
 def grid_lookup(x,y,z,data): return data[x,y,z]
 
 def total_variation(grid, samples: int = 32 ** 3):
@@ -362,7 +363,6 @@ def total_variation(grid, samples: int = 32 ** 3):
   tv = (dx.square() + dy.square() + dz.square()).clamp(min=1e-10).sqrt()
   return tv.mean()
 
-# Voxelized NeRF without view positions
 # TODO pass an option to use spherical harmonics or not?
 class NeRFVoxel(nn.Module):
   def __init__(
@@ -374,7 +374,8 @@ class NeRFVoxel(nn.Module):
     grid_radius:float=1.3,
     t_near: float = 0.2,
     t_far: float = 2,
-    # For now we still raymarch, and do not perform explicit intersection
+    # For now we still raymarch, and do not perform explicit intersection.
+    # This is convenient for dyn voxels.
     steps:int = 64,
     sigmoid_kind="upshifted",
     **kwargs,
@@ -396,6 +397,7 @@ class NeRFVoxel(nn.Module):
   def set_refl(self, refl): self.act = refl.act
   @property
   def intermediate_size(self): return 0
+  def set_sigmoid(self, kind): self.act = load_sigmoid(kind)
   # TODO sparsify method which modifies density and rgb to be _more_ sparse.
   def sparsify(self, thresh=1e-2):
     ...
@@ -1251,13 +1253,14 @@ class DynamicNeRFVoxel(nn.Module):
     super().__init__()
     self.canonical = canonical
     reso = canonical.resolution
-    # Here, we _always_ use 0 for the first point, so we only need to store N - 1 pts.
-    spline = spline-1
+    spline = spline
+    # While it may be possible to always use 0 for the first point, somehow this leads
+    # to worse convergence? No idea why since the formulation is the same.
     self.ctrl_pts_grid = nn.Parameter(torch.randn([reso]*3+[3*spline]))
-    self.rigidity_grid = nn.Parameter(torch.randn([reso]*3+[1]))
-
+    self.rigidity_grid = nn.Parameter(torch.zeros_like([reso]*3+[1]))
     self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
-    self.spline = spline
+    # check which items are seen in training, and can be used to zero out items later.
+    #self.seen = nn.Parameter(torch.zeros_like(self.rigidity_grad, dtype=torch.bool))
 
   @property
   def nerf(self): return self.canonical
@@ -1289,12 +1292,15 @@ class DynamicNeRFVoxel(nn.Module):
       .split(3, dim=-1)
     neighbor_ctrl_pts = torch.stack(neighbor_ctrl_pts, dim=0)
     ctrl_pts = (trilin_weights[None] * neighbor_ctrl_pts).sum(dim=-2)
-    self.ctrl_pts = ctrl_pts = torch.cat([torch.zeros_like(ctrl_pts[:1]), ctrl_pts], dim=0)
-    t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1)
-    self.dp = dp = self.spline_fn(ctrl_pts, t, self.spline+1)
+    init_pt = ctrl_pts[:1]
+    self.ctrl_pts = ctrl_pts = ctrl_pts - init_pt
+    # if self.training: self.seen[nx,ny,nz] = True # Assign all seen points to be true in training.
+    # Clamp to almost 1, better performance than just using 1.
+    t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1).clamp(max=0.999)
+    self.dp = dp = self.spline_fn(ctrl_pts-init_pt, t, self.spline)
     self.rigidity = (trilin_weights * grid_lookup(nx,ny,nz,self.rigidity_grid.sigmoid().squeeze(0)))\
       .sum(dim=-2)
-    self.rigid_dp = dp * self.rigidity
+    self.rigid_dp = dp * self.rigidity + init_pt[0]
     return self.canonical.from_pts(self.pts + self.rigid_dp, self.ts, r_o, r_d)
 
 # TODO fix this
