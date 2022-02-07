@@ -348,6 +348,11 @@ def bit_i(v, bit): return (v >> bit) & 1
 # TODO maybe convert this into something sparse?
 def grid_lookup(x,y,z,data): return data[x,y,z]
 
+# upsamples a grid, at a given resolution.
+def upsample_grid(grid, reso:int=512):
+  out = F.interpolate(grid.permute(3,0,1,2)[None],size=reso, mode="trilinear")
+  return out.squeeze(0).permute(1,2,3,0)
+
 def total_variation(grid, samples: int = 32 ** 3):
   s0, s1, s2, _ = grid.shape
   n_elem = s0 * s1 * s2
@@ -371,7 +376,7 @@ class NeRFVoxel(nn.Module):
     resolution:int = 64,
     alpha_init:float = 0.1,
     rgb_init:float=0.5,
-    grid_radius:float=1.3,
+    grid_radius:float=1.1,
     t_near: float = 0.2,
     t_far: float = 2,
     # For now we still raymarch, and do not perform explicit intersection.
@@ -400,7 +405,14 @@ class NeRFVoxel(nn.Module):
   def set_sigmoid(self, kind): self.act = load_sigmoid(kind)
   # TODO sparsify method which modifies density and rgb to be _more_ sparse.
   def sparsify(self, thresh=1e-2):
+    raise NotImplementedError("Implement sparsity on density, to make tensor sparse.")
     ...
+  def upsample(self, reso:int=512):
+    with torch.no_grad():
+      self.rgb = nn.Parameter(upsample_grid(self.rgb, reso))
+      self.densities = nn.Parameter(upsample_grid(self.densities, reso))
+    self.resolution = reso
+    self.voxel_len = self.grid_radius * 2 / reso
 
   def forward(self, rays):
     voxel_len = self.voxel_len
@@ -1253,11 +1265,11 @@ class DynamicNeRFVoxel(nn.Module):
     super().__init__()
     self.canonical = canonical
     reso = canonical.resolution
-    spline = spline
+    self.spline = spline
     # While it may be possible to always use 0 for the first point, somehow this leads
     # to worse convergence? No idea why since the formulation is the same.
     self.ctrl_pts_grid = nn.Parameter(torch.randn([reso]*3+[3*spline]))
-    self.rigidity_grid = nn.Parameter(torch.zeros_like([reso]*3+[1]))
+    self.rigidity_grid = nn.Parameter(torch.zeros([reso]*3+[1]))
     self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
     # check which items are seen in training, and can be used to zero out items later.
     #self.seen = nn.Parameter(torch.zeros_like(self.rigidity_grad, dtype=torch.bool))

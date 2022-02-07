@@ -36,7 +36,7 @@ dyn_voxel: clean
 	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf \
 	--size 256 --epochs 5_000 --save models/dvoxel_${dnerf_dataset}.pt --loss-window 1000 --save-freq 2500 \
 	--near 2 --far 6 --batch-size 1 --crop-size 64 --model voxel --dyn-model voxel -lr 5e-4 \
-	--loss-fns l2 fft --test-crop-size 96 --depth-images --flow-map --spline 4 --steps 80 \
+	--loss-fns l2 --test-crop-size 96 --depth-images --flow-map --spline 4 --steps 80 \
   --voxel-tv-sigma 1e-3 --voxel-tv-rgb 1e-5 --voxel-tv-bezier 1e-3 --voxel-tv-rigidity 1e-3 \
   --spline-len-decay 1e-3 --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted \
