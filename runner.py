@@ -325,16 +325,20 @@ def arguments():
     "--param-file", type=str, default=None, help="Path to JSON file to use for hyper-parameters",
   )
   rprt.add_argument("--skip-loss", type=int, default=0, help="Number of epochs to skip reporting loss for")
-  rprt.add_argument("--msssim-loss", action="store_true", help="Report ms-ssim loss during testing")
-  rprt.add_argument("--depth-images", action="store_true", help="Whether to render depth images")
-  rprt.add_argument("--normals-from-depth", action="store_true", help="Render extra normal images from depth")
-  rprt.add_argument("--depth-query-normal", action="store_true", help="Render extra normal images from depth")
-  rprt.add_argument("--not-magma", action="store_true", help="Do not use magma for depth maps (instead use default)")
-  rprt.add_argument("--gamma-correct", action="store_true", help="Gamma correct final images")
+  rprt.add_argument("--msssim-loss", action=ST, help="Report ms-ssim loss during testing")
+  rprt.add_argument("--depth-images", action=ST, help="Whether to render depth images")
+  rprt.add_argument("--normals-from-depth", action=ST, help="Render extra normal images from depth")
+  rprt.add_argument("--depth-query-normal", action=ST, help="Render extra normal images from depth")
+  rprt.add_argument("--not-magma", action=ST, help="Do not use magma for depth maps (instead use default)")
+  rprt.add_argument("--gamma-correct", action=ST, help="Gamma correct final images")
   rprt.add_argument("--render-frame", type=int, default=-1, help="Render 1 frame only, < 0 means none.")
-  rprt.add_argument("--exp-bg", action="store_true", help="Use mask of labels while rendering. For vis only.")
+  rprt.add_argument("--exp-bg", action=ST, help="Use mask of labels while rendering. For vis only.")
   rprt.add_argument("--flow-map", action=ST, help="Render a flow map for a dynamic nerf scene")
   rprt.add_argument("--rigidity-map", action=ST, help="Render a flow map for a dynamic nerf scene")
+  rprt.add_argument(
+    "--display-regularization", action=ST,
+    help="Display regularization in addition to reconstruction loss",
+  )
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -696,8 +700,8 @@ def train(model, cam, labels, opt, args, sched=None):
 
     # --- Finished with applying any sort of regularization
 
-    # TODO possible add updating the display with the total loss w/ regularization
-    # it would make it easier to know if the regularization is working.
+    if args.display_regularization: display["reg"] = f"{loss.item():.03f}"
+
     update(display)
     losses.append(l2_loss)
 
