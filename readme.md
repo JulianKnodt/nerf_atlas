@@ -106,6 +106,11 @@ Training/Efficiency:
 Note: NeRF is stupid slow. Writing out one of these extensions takes about half an hour,
 training it takes about a day, and my GPU is much smaller than any used in the papers.
 
+Voxel Implementation:
+
+There is a relatively simple voxel implementation, both for static and dynamic scenes. This is
+actively being worked on and extended so that it will be more efficient.
+
 **Datasets Supported**:
 
 - NeRF Synthetic (`--data-kind original`)

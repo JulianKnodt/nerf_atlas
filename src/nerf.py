@@ -355,18 +355,23 @@ def upsample_grid(grid, reso:int=512):
 
 def total_variation(grid, samples: int = 32 ** 3):
   s0, s1, s2, _ = grid.shape
+  x,y,z = random_sample_grid(grid, samples)
+  get_adj = lambda v, s: torch.where(v == s-1, v-1,v+1)
+  e = grid[x,y,z]
+  ax, ay, az = get_adj(x,s0), get_adj(y,s1), get_adj(z, s2)
+  dx, dy, dz = e - grid[ax,y,z], e-grid[x,ay,z], e - grid[x,y,az]
+  tv = (dx.square() + dy.square() + dz.square()).clamp(min=1e-10).sqrt()
+  return tv.mean()
+
+def random_sample_grid(grid, samples: int=32**3):
+  s0, s1, s2, _ = grid.shape
   n_elem = s0 * s1 * s2
   idxs = torch.randint(0, n_elem, (samples,), device=grid.device)
   x,y,z = \
     idxs % s0, \
     torch.div(idxs, s0, rounding_mode='floor') % s1, \
     torch.div(idxs, (s0 * s1), rounding_mode='floor') % s2
-  get_adj = lambda v, s: torch.where(v == s-1, v-1,v+1)
-  ax, ay, az = get_adj(x,s0), get_adj(y,s1), get_adj(z, s2)
-  e = grid[x,y,z]
-  dx, dy, dz = e - grid[ax,y,z], e-grid[x,ay,z], e - grid[x,y,az]
-  tv = (dx.square() + dy.square() + dz.square()).clamp(min=1e-10).sqrt()
-  return tv.mean()
+  return x,y,z
 
 # TODO pass an option to use spherical harmonics or not?
 class NeRFVoxel(nn.Module):
@@ -375,8 +380,7 @@ class NeRFVoxel(nn.Module):
     out_features: int = 3,
     resolution:int = 64,
     alpha_init:float = 0.1,
-    rgb_init:float=0.5,
-    grid_radius:float=1.1,
+    grid_radius:float=1.5,
     t_near: float = 0.2,
     t_far: float = 2,
     # For now we still raymarch, and do not perform explicit intersection.
@@ -389,7 +393,7 @@ class NeRFVoxel(nn.Module):
     super().__init__()
     self.resolution = reso = resolution
     self.densities = nn.Parameter(torch.full([resolution]*3+[1],alpha_init))
-    self.rgb = nn.Parameter(torch.full([resolution]*3+[out_features],rgb_init))
+    self.rgb = nn.Parameter(torch.rand([resolution]*3+[out_features]))
     self.grid_radius = grid_radius
     self.voxel_len = grid_radius * 2 / resolution
     self.t_near = t_near
@@ -1043,8 +1047,7 @@ class DynamicNeRF(nn.Module):
   def set_delta_estim(self):
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz, rigidity
-      in_size=4, out=3+1,
-      num_layers = 6, hidden_size = 324,
+      in_size=4, out=3+1, num_layers = 6, hidden_size = 324,
       init="xavier",
     )
     self.time_estim = self.direct_predict
@@ -1053,7 +1056,6 @@ class DynamicNeRF(nn.Module):
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
       in_size=3, out=spline_points*3+1, num_layers=6,
-      enc=FourierEncoder(input_dims=3,freqs=32),
       hidden_size=324, init="xavier",
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
@@ -1063,17 +1065,21 @@ class DynamicNeRF(nn.Module):
   def direct_predict(self, x, t):
     enc = getattr(self.canonical, "encoding_size", 0)
     dp, rigidity, encoding = self.delta_estim(torch.cat([x, t], dim=-1)).split([3, 1, enc], dim=-1)
-    self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
-    self.dp = dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
-    return torch.cat([dp * rigidity, encoding], dim=-1)
+    self.rigidity = rigidity.sigmoid()
+    self.dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
+    self.rigid_dp = self.dp * self.rigidity
+    return torch.cat([self.rigid_dp, encoding], dim=-1)
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
     rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)
-    self.rigidity = rigidity = upshifted_sigmoid(rigidity/2)
+    self.rigidity = rigidity.sigmoid()
     ps = torch.stack(ps.split([3] * self.spline_n, dim=-1), dim=0)
-    init_ps = ps[None, 0]
-    self.dp = dp = self.spline_fn(ps - init_ps, t, self.spline_n)
-    return dp * rigidity + init_ps.squeeze(0)
+    # keep the first point non-rigid, this allows for learning a canonical configuration
+    # but gives more degrees of freedom to t=0.
+    init_ps = ps[:1]
+    self.dp = self.spline_fn(ps - init_ps, t, self.spline_n)
+    self.rigid_dp = self.dp * self.rigidity + init_ps[0]
+    return self.rigid_dp
 
   @property
   def nerf(self): return self.canonical
@@ -1268,7 +1274,7 @@ class DynamicNeRFVoxel(nn.Module):
     self.spline = spline
     # While it may be possible to always use 0 for the first point, somehow this leads
     # to worse convergence? No idea why since the formulation is the same.
-    self.ctrl_pts_grid = nn.Parameter(torch.randn([reso]*3+[3*spline]))
+    self.ctrl_pts_grid = nn.Parameter(torch.randn([reso]*3+[3*spline])*0.3)
     self.rigidity_grid = nn.Parameter(torch.zeros([reso]*3+[1]))
     self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
     # check which items are seen in training, and can be used to zero out items later.

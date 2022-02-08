@@ -277,6 +277,10 @@ def arguments():
     "--spline-len-decay", type=float, default=0, help="Weight for length of spline regularization"
   )
   vida.add_argument(
+    "--random-spline-len-decay", type=float, default=0,
+    help="Decay for length, randomly sampling a chunk of the grid instead of visible portions",
+  )
+  vida.add_argument(
     "--voxel-tv-sigma",
     type=float, default=0, help="Weight of total variation regularization for densitiy",
   )
@@ -680,11 +684,14 @@ def train(model, cam, labels, opt, args, sched=None):
     # apply regularization on spline length, to get smallest spline that fits.
     # only apply this to visible points though
     if args.spline_len_decay > 0:
-      #samples = 1 << 16
-      #ctrl_pts = model.ctrl_
       arc_lens = nerf.arc_len(model.ctrl_pts)
       w = model.canonical.weights.detach().squeeze(1)
       loss = loss + args.spline_len_decay * (w * arc_lens).mean()
+    if args.random_spline_len_decay > 0:
+      x,y,z = nerf.random_sample_grid(model.ctrl_pts_grid, samples=16**3)
+      data = torch.stack(model.ctrl_pts_grid[x,y,z].split(3, dim=-1), dim=0)\
+        [:, :, None, None, None, :]
+      loss = loss + args.random_spline_len_decay * nerf.arc_len(data).mean()
 
 
     # --- Finished with applying any sort of regularization
