@@ -333,7 +333,7 @@ def arguments():
   rprt.add_argument("--depth-images", action=ST, help="Whether to render depth images")
   rprt.add_argument("--normals-from-depth", action=ST, help="Render extra normal images from depth")
   rprt.add_argument("--depth-query-normal", action=ST, help="Render extra normal images from depth")
-  rprt.add_argument("--not-magma", action=ST, help="Do not use magma for depth maps (instead use default)")
+  rprt.add_argument("--plt-cmap-kind", type=str, choices=plt.colormaps(), default="magma")
   rprt.add_argument("--gamma-correct", action=ST, help="Gamma correct final images")
   rprt.add_argument("--render-frame", type=int, default=-1, help="Render 1 frame only, < 0 means none.")
   rprt.add_argument("--exp-bg", action=ST, help="Use mask of labels while rendering. For vis only.")
@@ -380,7 +380,7 @@ def arguments():
     args.render_size = args.size
     args.feature_space = 3
 
-  if not args.not_magma: plt.magma()
+  plt.set_cmap(args.plt_cmap_kind)
 
   assert(args.valid_freq > 0), "Must pass a valid frequency > 0"
   if (args.test_crop_size <= 0): args.test_crop_size = args.crop_size
