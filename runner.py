@@ -277,8 +277,12 @@ def arguments():
     "--spline-len-decay", type=float, default=0, help="Weight for length of spline regularization"
   )
   vida.add_argument(
-    "--random-spline-len-decay", type=float, default=0,
+    "--voxel-random-spline-len-decay", type=float, default=0,
     help="Decay for length, randomly sampling a chunk of the grid instead of visible portions",
+  )
+  vida.add_argument(
+    "--random-spline-len-decay", type=float, default=0,
+    help="Decay for length, randomly sampling a bezier spline",
   )
   vida.add_argument(
     "--voxel-tv-sigma",
@@ -691,11 +695,18 @@ def train(model, cam, labels, opt, args, sched=None):
       arc_lens = nerf.arc_len(model.ctrl_pts)
       w = model.canonical.weights.detach().squeeze(1)
       loss = loss + args.spline_len_decay * (w * arc_lens).mean()
-    if args.random_spline_len_decay > 0:
+    # TODO is there any way to unify these two? Maybe provide a method to get a random sample on
+    # the class?
+    if args.voxel_random_spline_len_decay > 0:
       x,y,z = nerf.random_sample_grid(model.ctrl_pts_grid, samples=16**3)
       data = torch.stack(model.ctrl_pts_grid[x,y,z].split(3, dim=-1), dim=0)\
         [:, :, None, None, None, :]
       loss = loss + args.random_spline_len_decay * nerf.arc_len(data).mean()
+    if args.random_spline_len_decay > 0:
+      if pts is None: pts = 5*(torch.randn(((1<<13) * 5)//4 , 3, device=device, requires_grad=True))
+      pts = torch.stack(model.delta_estim(pts)[..., 1:].split(3,dim=-1), dim=0)\
+        [:, :, None, None, None, :]
+      loss = loss + args.random_spline_len_decay * nerf.arc_len(pts).mean()
 
 
     # --- Finished with applying any sort of regularization
@@ -879,9 +890,11 @@ def test(model, cam, labels, args, training: bool = True):
 \tmax {max(ls):.03f}
 \tvar {np.var(ls):.03f}"""
   if args.msssim_loss:
-    with torch.no_grad():
-      msssim = utils.msssim_loss(gots, labels)
-      summary_string += f"\nms-ssim {msssim:.03f}"
+    try:
+      with torch.no_grad():
+        msssim = utils.msssim_loss(gots, labels)
+        summary_string += f"\nms-ssim {msssim:.03f}"
+    except Exception as e: print(f"msssim failed: {e}")
   print(summary_string)
   with open(os.path.join(args.outdir, "results.txt"), 'w') as f:
     f.write(summary_string)

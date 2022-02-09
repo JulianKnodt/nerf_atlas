@@ -1093,14 +1093,15 @@ class DynamicNeRF(nn.Module):
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def forward(self, rays_t):
     rays, t = rays_t
-    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
+    self.pts, self.ts, r_o, r_d, _ = compute_pts_ts(
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
+    self.pts = self.pts.requires_grad_() if self.training else self.pts
     self.canonical.ts = self.ts
-    t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
-    dp = self.time_estim(pts, t)
-    return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
+    t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1)
+    dp = self.time_estim(self.pts, t)
+    return self.canonical.from_pts(self.pts + dp, self.ts, r_o, r_d)
 
 # Long Dynamic NeRF for computing arbitrary continuous sequences.
 class LongDynamicNeRF(nn.Module):
