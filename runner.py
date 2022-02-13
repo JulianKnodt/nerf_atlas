@@ -343,6 +343,10 @@ def arguments():
     "--display-regularization", action=ST,
     help="Display regularization in addition to reconstruction loss",
   )
+  rprt.add_argument(
+    "--y-scale", choices=["linear", "log", "symlog", "logit"], type=str,
+    default="linear", help="Scale kind for y-axis",
+  )
 
   meta = a.add_argument_group("meta runner parameters")
   meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
@@ -466,6 +470,7 @@ def save_losses(args, losses):
   losses = np.convolve(losses, np.ones(window)/window, mode='valid')
   losses = losses[args.skip_loss:]
   plt.plot(range(len(losses)), losses)
+  plt.yscale(args.y_scale)
   plt.savefig(os.path.join(outdir, "training_loss.png"), bbox_inches='tight')
   plt.close()
 
@@ -484,11 +489,12 @@ def load_loss_fn(args, model):
       return loss/len(loss_fns)
 
   assert(len(args.color_spaces) > 0), "must provide at least 1 color space"
+  num_color_spaces = len(args.color_spaces)
   # different colors like rgb, hsv
-  if len(args.color_spaces) == 1 and args.color_spaces[0] == "rgb":
+  if num_color_spaces == 1 and args.color_spaces[0] == "rgb":
     # do nothing since this is the default return value
     ...
-  elif len(args.color_spaces) == 1:
+  elif num_color_spaces == 1:
     cfn = color_fns[args.color_spaces[0]]
     prev_loss_fn = loss_fn
     loss_fn = lambda x, ref: prev_loss_fn(cfn(x), cfn(ref))
@@ -498,14 +504,14 @@ def load_loss_fn(args, model):
     def loss_fn(x, ref):
       loss = prev_loss_fn(x, ref)
       for cfn in cfns: loss = loss + prev_loss_fn(cfn(x), cfn(ref))
-      return loss
+      return loss/num_color_spaces
   else:
     prev_loss_fn = loss_fn
     cfns = [color_fns[cs] for cs in args.color_spaces]
     def loss_fn(x, ref):
       loss = 0
       for cfn in cfns: loss = loss + prev_loss_fn(cfn(x), cfn(ref))
-      return loss
+      return loss/num_color_spaces
 
 
   if args.tone_map: loss_fn = utils.tone_map(loss_fn)
