@@ -113,6 +113,9 @@ def arguments():
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action=ST,
   )
   a.add_argument(
+    "--gamma-correct-loss", type=float, default=1., help="Gamma correct by x in training",
+  )
+  a.add_argument(
     "--has-multi-light", help="For NeRV point if there is a multi point light dataset", action=ST,
   )
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
@@ -515,6 +518,9 @@ def load_loss_fn(args, model):
 
 
   if args.tone_map: loss_fn = utils.tone_map(loss_fn)
+  if args.gamma_correct_loss != 1.:
+    loss_fn = utils.gamma_correct_loss(loss_fn, args.gamma_correct_loss)
+
   if args.volsdf_alternate:
     return nerf.alternating_volsdf_loss(model, loss_fn, sdf.masked_loss(loss_fn))
   if args.model == "sdf": loss_fn = sdf.masked_loss(loss_fn)
@@ -742,9 +748,7 @@ def train(model, cam, labels, opt, args, sched=None):
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
 
         if args.depth_images and hasattr(model, "nerf"):
-          raw_depth = nerf.volumetric_integrate(
-            model.nerf.weights, model.nerf.ts[:, None, None, None, None]
-          )
+          raw_depth = nerf.volumetric_integrate(model.nerf.weights, model.nerf.ts[:, None, None, None, None])
           depth = (raw_depth[0]-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
           if args.normals_from_depth:
@@ -753,6 +757,7 @@ def train(model, cam, labels, opt, args, sched=None):
         if args.flow_map and hasattr(model, "dp"):
           flow_map = nerf.volumetric_integrate(model.nerf.weights, model.dp)[0]
           flow_map /= flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
+          flow_map = flow_map.abs().pow(1/3).copysign(flow_map)
           items.append(flow_map.add(1).div(2))
         if args.rigidity_map and hasattr(model, "rigidity"):
           rigidity_map = nerf.volumetric_integrate(model.nerf.weights, model.rigidity)[0]
@@ -856,8 +861,9 @@ def test(model, cam, labels, args, training: bool = True):
           depth = (depth-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
         if args.flow_map and hasattr(model, "dp"):
-          max_flow = flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
-          items.append((flow_map/max_flow).add(1).div(2))
+          flow_map /= flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
+          flow_map = flow_map.abs().pow(1/3).copysign(flow_map)
+          items.append(flow_map.add(1).div(2))
         if args.rigidity_map and hasattr(model, "rigidity"): items.append(rigidity_map)
         if hasattr(model, "displace"): items.append(proximity_map)
         if args.draw_colormap:

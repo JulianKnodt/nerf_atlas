@@ -183,6 +183,10 @@ def tone_map(loss_fn):
   def tone_mapped_loss(got, ref): return loss_fn(got/(1+got), ref/(1+ref))
   return tone_mapped_loss
 
+def gamma_correct_loss(prev_loss_fn, coeff:float):
+  if coeff == 0.5: return lambda x, ref: prev_loss_fn(x.clamp(min=1e-10).sqrt(), ref.sqrt())
+  else: return lambda x, ref: prev_loss_fn(x.clamp(min=1e-10).pow(coeff), ref.pow(coeff))
+
 def count_parameters(params): return sum(p.numel() for p in params)
 
 def load_image(src, resize=None):
@@ -436,7 +440,10 @@ def fat_sigmoid(v, eps: float = 1e-2): return v.sigmoid() * (1+2*eps) - eps
 def thin_sigmoid(v, eps: float = 1e-2): return fat_sigmoid(v, -eps) + eps
 def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
   return ((v/period).sin()+1)/2 * (1+2*eps) - eps
-def upshifted_sigmoid(v, eps=1e-2): return v.sigmoid() * (1-eps) + eps
+
+# upshifted has a small epsilon increase, because it should be harder to represent completely
+# black colors if there's no background. Still has properties of fat sigmoid at 1.
+def upshifted_sigmoid(v, eps=1e-3): return v.sigmoid() + eps
 def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 # a leaky softplus implementation
 def leaky_softplus(v, alpha=0.01):
@@ -464,3 +471,4 @@ def load_sigmoid(kind="thin"):
   sigmoid = sigmoid_kinds.get(kind, None)
   if sigmoid is None: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
   return sigmoid
+

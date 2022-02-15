@@ -304,8 +304,8 @@ class PlainNeRF(CommonNeRF):
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + self.intermediate_size, latent_size=self.total_latent_size(),
-      enc=FourierEncoder(input_dims=3),
-      num_layers = 6, hidden_size = 128, init="xavier",
+      enc=FourierEncoder(input_dims=3), activation=torch.sin,
+      num_layers = 5, hidden_size = 128, init="siren",
     )
 
   def forward(self, rays):

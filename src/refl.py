@@ -119,7 +119,11 @@ class Reflectance(nn.Module):
   def can_use_normal(self): return False
   @property
   def can_use_light(self): return False
-
+  @property
+  def brdf_num_params(self):
+    raise NotImplementedError(f"{type(self)} does not have fixed number of params")
+  @staticmethod
+  def process_brdf(params): raise NotImplementedError(f"{type(self)} does not support brdf usage")
   # TODO allow any arbitrary reflectance model to predict spherical harmonic parameters then use
   # this.
   def sph_ham(sh_coeffs, view):
@@ -228,6 +232,8 @@ class Positional(Reflectance):
       enc=FourierEncoder(input_dims=3),
       num_layers=5, hidden_size=512, init="xavier",
     )
+  @property
+  def num_parameters(self): return 3
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))
 
@@ -283,11 +289,13 @@ class FourierBasis(Reflectance):
       enc=FourierEncoder(input_dims=in_size),
       num_layers=6, hidden_size=128, init="xavier",
     )
-    # this model does not use an activation function
+    # this model does not use an activation function(?)
   @property
   def can_use_normal(self): return True
   @property
   def can_use_light(self): return True
+  @property
+  def num_parameters(self): return self.order * self.out_features
 
   def forward(self, x, view, normal, light, latent=None):
     frame = coordinate_system(normal)
