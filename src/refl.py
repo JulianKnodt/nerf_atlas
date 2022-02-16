@@ -119,11 +119,12 @@ class Reflectance(nn.Module):
   def can_use_normal(self): return False
   @property
   def can_use_light(self): return False
-  @property
-  def brdf_num_params(self):
-    raise NotImplementedError(f"{type(self)} does not have fixed number of params")
-  @staticmethod
-  def process_brdf(params): raise NotImplementedError(f"{type(self)} does not support brdf usage")
+
+  # in order to use the reflectance model for voxels, convert it into a special form.
+  # Implementors should return a tuple of number of parameters, and a function which
+  # takes a Tensor[..., num_params] --> RGB.
+  def to_voxel(self): raise NotImplementedError(f"{type(self)} does not have a voxel repr")
+
   # TODO allow any arbitrary reflectance model to predict spherical harmonic parameters then use
   # this.
   def sph_ham(sh_coeffs, view):
@@ -196,8 +197,7 @@ class View(Reflectance):
     in_size = view_dims+3
     self.mlp = SkipConnMLP(
       in_size=in_size, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=in_size),
-      num_layers=4, hidden_size=256, init="xavier",
+      num_layers=4, hidden_size=256, init="siren", activation=torch.sin
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)
@@ -229,11 +229,11 @@ class Positional(Reflectance):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
       in_size=3, out=self.out_features, latent_size=self.latent_size,
-      enc=FourierEncoder(input_dims=3),
-      num_layers=5, hidden_size=512, init="xavier",
+      num_layers=5, hidden_size=256, init="siren", activation=torch.sin,
     )
-  @property
-  def num_parameters(self): return 3
+  # Each voxel just requires the out_features which is usually RGB,
+  # and does not need to do any special modifications.
+  def to_voxel(self): return self.out_features, lambda params, view: params
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))
 
@@ -664,6 +664,15 @@ class SphericalHarmonic(Reflectance):
       in_size=in_size, out=self.out_features*((order+1)*(order+1)), latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
       num_layers=5, hidden_size=128, init="xavier",
+    )
+  def to_voxel(self):
+    order = self.order
+    feats = self.out_features
+    num_params = feats * (order+1) * (order+1)
+    # Hopefully this allows the base class to be garbage collected.
+    return num_params, lambda params, view: eval_sh(order,
+      params.reshape(params.shape[:-1] + [feats,-1]),
+      F.normalize(view, dim=-1),
     )
   def forward(self, x, view, normal=None, light=None, latent=None):
     v = self.view_enc(view)

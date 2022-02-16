@@ -373,7 +373,6 @@ def random_sample_grid(grid, samples: int=32**3):
     torch.div(idxs, (s0 * s1), rounding_mode='floor') % s2
   return x,y,z
 
-# TODO pass an option to use spherical harmonics or not?
 class NeRFVoxel(nn.Module):
   def __init__(
     self,
@@ -393,7 +392,11 @@ class NeRFVoxel(nn.Module):
     super().__init__()
     self.resolution = reso = resolution
     self.densities = nn.Parameter(torch.full([resolution]*3+[1],alpha_init))
+
+    # assume positional refl.
     self.rgb = nn.Parameter(torch.rand([resolution]*3+[out_features]))
+    self.brdf = lambda params, view: params
+
     self.grid_radius = grid_radius
     self.voxel_len = grid_radius * 2 / resolution
     self.t_near = t_near
@@ -403,7 +406,10 @@ class NeRFVoxel(nn.Module):
 
   @property
   def refl(self): return refl.Reflectance(latent_size=0, out_features=3)
-  def set_refl(self, refl): self.act = refl.act
+  def set_refl(self, refl):
+    num_params, self.brdf = refl.to_voxel()
+    prev_device = self.rgb.device
+    self.rgb = nn.Parameter(torch.rand(*self.rgb.shape[:-1], num_params, device=prev_device))
   @property
   def intermediate_size(self): return 0
   def set_sigmoid(self, kind): self.act = load_sigmoid(kind)
@@ -479,7 +485,7 @@ class NeRFVoxel(nn.Module):
     neighbor_sigma = grid_lookup(nx, ny, nz, self.densities)
     neighbor_rgb = grid_lookup(nx, ny, nz, self.act(self.rgb))
     densities = (trilin_weights * neighbor_sigma).sum(dim=-2)
-    rgb = (trilin_weights * neighbor_rgb).sum(dim=-2)
+    rgb = self.brdf(params=(trilin_weights * neighbor_rgb).sum(dim=-2), view=r_d)
     self.alpha, self.weights = alpha_from_density(densities.squeeze(-1), ts.squeeze(-1), r_d)
     return volumetric_integrate(self.weights, rgb)
 
