@@ -180,6 +180,9 @@ def arguments():
     "--refl-bidirectional", action=ST,
     help="Allow normals to be flipped for the reflectance (just Diffuse for now)",
   )
+  refla.add_argument(
+    "--view-variance-decay", type=float, default=0, help="Regularize reflectance across view directions",
+  )
 
   rdra = a.add_argument_group("integrator")
   rdra.add_argument(
@@ -602,10 +605,11 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.latent_l2_weight > 0: loss = loss + model.nerf.latent_l2_loss * latent_l2_weight
 
     pts = None
+    get_pts = lambda: 5*(torch.randn(((1<<13) * 5)//4 , 3, device=device))
     # prepare one set of points for either smoothing normals or eikonal.
     if args.sdf_eikonal > 0 or args.smooth_normals > 0:
       # NOTE the number of points just fits in memory, can modify it at will
-      pts = 5*(torch.randn(((1<<13) * 5)//4 , 3, device=device))
+      pts = get_pts()
       n = model.sdf.normals(pts)
 
     # E[d sdf(x)/dx] = 1, enforces that the SDF is valid.
@@ -618,6 +622,11 @@ def train(model, cam, labels, opt, args, sched=None):
     if args.ffjord_div_decay:
       div_approx = utils.div_approx(model.pts, model.rigid_dp).abs().square()
       loss = loss+args.ffjord_div_decay * (model.canonical.alpha.detach() * div_approx).mean()
+    if args.view_variance_decay > 0:
+      pts = pts if pts is not None else get_pts()
+      views = torch.randn(2, *pts.shape, device=device)
+      refl = model.refl(pts[None].repeat_interleave(2,dim=0), views)
+      loss = loss + args.view_variance_decay * F.mse_loss(refl[0], refl[1])
 
     # automatically apply eikonal loss for DynamicNeRF
     if args.sdf_eikonal > 0 and isinstance(model, nerf.DynamicNeRF):
@@ -1026,9 +1035,7 @@ def set_per_run(model, args):
     args.voxel_tv_bezier = 0
     args.voxel_tv_rigidity = 0
   elif is_voxel: ...
-  elif args.voxel_tv_sigma > 0 or \
-    args.voxel_tv_rgb > 0 or \
-    args.voxel_tv_bezier > 0:
+  elif args.voxel_tv_sigma > 0 or args.voxel_tv_rgb > 0 or args.voxel_tv_bezier > 0:
     print("[warn]: model is not voxel, unsetting total variation")
     args.voxel_tv_sigma = 0
     args.voxel_tv_rgb = 0
@@ -1040,6 +1047,10 @@ def set_per_run(model, args):
     if isinstance(model.refl, refl.AlternatingOptimization): model.refl.toggle(args.alt_train == "analytic")
     elif isinstance(model.refl, refl.LightAndRefl) and isinstance(model.refl.refl, refl.AlternatingOptimization):
       model.refl.refl.toggle(args.alt_train == "analytic")
+  if hasattr(model, "refl") and isinstance(model.refl, refl.Positional):
+    if args.view_variance_decay > 0:
+      print("[warn]: view variance decay unset, positional refl does not use view")
+    args.view_variance_decay = 0
 
 
 
