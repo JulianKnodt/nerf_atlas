@@ -237,6 +237,36 @@ class Positional(Reflectance):
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))
 
+class PosGammaCorrectView(Reflectance):
+  def __init__(self, space=None, view="elaz", intermediate_size=64, **kwargs):
+    super().__init__(**kwargs)
+    view_size, self.view_enc = enc_norm_dir(view)
+    self.im = intermediate_size
+    self.pos = SkipConnMLP(
+      in_size=3, out=self.out_features+self.im, latent_size=self.latent_size,
+      num_layers=4, hidden_size=256, init="siren", activation=torch.sin,
+    )
+    self.view = SkipConnMLP(
+      # linear shading, combined with specular highlight
+      in_size=3+view_size, out=1+1, latent_size=self.latent_size + self.im,
+      num_layers=3, hidden_size=256, init="siren", activation=torch.sin,
+    )
+  # Each voxel just requires the out_features which is usually RGB,
+  # and does not need to do any special modifications.
+  def to_voxel(self): return self.out_features, lambda params, view: params
+  def forward(self, x, view, normal=None, light=None, latent=None):
+    pos, intermediate = self.act(self.pos(x, latent))\
+      .split([self.out_features, self.im], dim=-1)
+    linear, gamma = self.view(
+      torch.cat([x, view], dim=-1),
+      torch.cat([latent, intermediate], dim=-1),
+    ).sigmoid().split([1,1], dim=-1)
+    # constrain linear coefficient to 0.5-1.
+    linear = (linear/2) + 0.5
+    # We constrain gamma to the range 0.5 to 1.5, but could be larger.
+    return linear * pos.pow(1.5 - gamma)
+
+
 class Diffuse(Reflectance):
   def __init__(
     self,
@@ -687,11 +717,12 @@ class SphericalHarmonic(Reflectance):
 refl_kinds = {
   "pos": Positional,
   "view":  View,
+  "pos-gamma-correct-view": PosGammaCorrectView,
   "view-light": ViewLight,
   "basic": Basic,
   "diffuse": Diffuse,
   "rusin": Rusin,
-  "rusin_helmholtz": RusinHelmholtz,
+  "rusin-helmholtz": RusinHelmholtz,
   # classical models with some order mechanism
   "sph-har": SphericalHarmonic,
   "fourier": FourierBasis,

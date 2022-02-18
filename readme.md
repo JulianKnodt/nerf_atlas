@@ -192,11 +192,9 @@ optional arguments:
   -d DATA, --data DATA  path to data (default: None)
   --data-kind {original,single_video,dnerf,dtu,pixel-single,nerv_point,shiny}
                         Kind of data to load (default: original)
-  --derive-kind         Attempt to derive the kind if a single file is given
-                        (default: True)
+  --derive-kind         Attempt to derive the kind if a single file is given (default: True)
   --outdir OUTDIR       path to output directory (default: outputs/)
-  --timed-outdir        Create new output directory with date and time of run
-                        (default: False)
+  --timed-outdir        Create new output dir with date+time of run (default: False)
   --size SIZE           post-upsampling size (default: 32)
   --render-size RENDER_SIZE
                         pre-upsampling size (default: 16)
@@ -204,155 +202,175 @@ optional arguments:
   --batch-size BATCH_SIZE
                         # views for each training batch (default: 8)
   --neural-upsample     add neural upsampling (default: False)
-  --crop                train with cropping (default: False)
   --crop-size CROP_SIZE
                         what size to use while cropping (default: 16)
+  --test-crop-size TEST_CROP_SIZE
+                        what size to use while cropping at test time (default: 0)
   --steps STEPS         Number of depth steps (default: 64)
   --mip {cone,cylinder}
                         Use MipNeRF with different sampling (default: None)
-  --sigmoid-kind {normal,thin,tanh,fat,cyclic,upshifted,softmax,leaky_relu,sin,upshifted_softplus}
-                        What sigmoid to use, curr keeps old (default: thin)
-  --backing-sdf         Use a backing SDF (default: False)
+  --sigmoid-kind {normal,thin,tanh,cyclic,upshifted,fat,softmax,leaky_relu,relu,sin,upshifted_softplus,upshifted_relu}
+                        What activation to use with the reflectance model. (default: upshifted)
   --feature-space FEATURE_SPACE
-                        when using neural upsampling, what is the feature
-                        space size (default: 32)
-  --model {tiny,plain,ae,volsdf,sdf}
-                        which model do we want to use (default: plain)
-  --bg {black,white,mlp,noise}
-                        What kind of background to use for NeRF (default:
-                        black)
+                        The feature space size when neural upsampling. (default: 32)
+  --model {tiny,plain,ae,volsdf,coarse_fine,mpi,voxel,rig,hist,spline,sdf}
+                        which model to use? (default: plain)
+  --dyn-model {plain,ae,rig,long,voxel}
+                        Which dynamic model to use? (default: None)
+  --bg {black,white,mlp,random}
+                        What background to use for NeRF. (default: black)
   -lr LEARNING_RATE, --learning-rate LEARNING_RATE
                         learning rate (default: 0.0005)
   --seed SEED           Random seed to use, -1 is no seed (default: 1337)
   --decay DECAY         Weight decay value (default: 0)
   --notest              Do not run test set (default: False)
   --data-parallel       Use data parallel for the model (default: False)
-  --omit-bg             Omit black bg with some probability (default: False)
-  --train-parts {all,refl,occ,[TODO]Camera} [{all,refl,occ,[TODO]Camera} ...]
-                        Which parts of the model should be trained (default:
-                        ['all'])
-  --loss-fns {l1,l2,rmse} [{l1,l2,rmse} ...]
+  --omit-bg             Omit black bg with some probability. Only used for faster training (default: False)
+  --train-parts {all,refl,occ,path-tf,camera} [{all,refl,occ,path-tf,camera} ...]
+                        Which parts of the model should be trained (default: ['all'])
+  --loss-fns {l2,l1,rmse,fft,ssim} [{l2,l1,rmse,fft,ssim} ...]
                         Loss functions to use (default: ['l2'])
   --color-spaces {rgb,hsv,luminance,xyz} [{rgb,hsv,luminance,xyz} ...]
                         Color spaces to compare on (default: ['rgb'])
-  --tone-map            Add tone mapping (1/(1+x)) before loss function
-                        (default: False)
-  --nerv-multi-point    Use NeRV multi point light dataset for testing
-                        (default: False)
+  --tone-map            Add tone mapping (1/(1+x)) before loss function (default: False)
+  --gamma-correct-loss GAMMA_CORRECT_LOSS
+                        Gamma correct by x in training (default: 1.0)
+  --has-multi-light     For NeRV point if there is a multi point light dataset (default: False)
   --style-img STYLE_IMG
                         Image to use for style transfer (default: None)
   --no-sched            Do not use a scheduler (default: False)
+  --sched-min SCHED_MIN
+                        Minimum value for the scheduled learning rate. (default: 5e-05)
   --serial-idxs         Train on images in serial (default: False)
-  --mpi                 [WIP] Use multi-plain imaging (default: False)
-  --replace [{refl,occ,bg,sigmoid,light} [{refl,occ,bg,sigmoid,light} ...]]
-                        Modules to replace on this run, if any. Take caution
-                        for overwriting existing parts. (default: [])
+  --replace [{refl,occ,bg,sigmoid,light,time_delta,al_occ} [{refl,occ,bg,sigmoid,light,time_delta,al_occ} ...]]
+                        Modules to replace on this run, if any. Take caution for overwriting existing parts. (default: [])
+  --all-learned-occ-kind {pos,pos-elaz}
+                        What parameters the Learned Ambient Occlusion should take (default: pos)
   --volsdf-direct-to-path
-                        Convert an existing direct volsdf model to a path
-                        tracing model (default: False)
-  --volsdf-alternate    Use alternating volume rendering/SDF training volsdf
-                        (default: False)
+                        Convert an existing direct volsdf model to a path tracing model (default: False)
+  --volsdf-alternate    Use alternating volume rendering/SDF training volsdf (default: False)
   --latent-size LATENT_SIZE
-                        Latent-size to use in shape models. If not supported
-                        by the shape model, it will be ignored. (default: 32)
+                        Latent-size to use in shape models. If not supported by the shape model, it will be ignored. (default: 32)
   --refl-order REFL_ORDER
-                        Order for classical Spherical Harmonics & Fourier
-                        Basis BSDFs/Reflectance models (default: 2)
-  --inc-fourier-freqs   Multiplicatively increase the fourier frequency
-                        standard deviation on each run (default: False)
+                        Order for classical Spherical Harmonics & Fourier Basis BSDFs/Reflectance models (default: 2)
+  --inc-fourier-freqs   Multiplicatively increase the fourier frequency standard deviation on each run (default: False)
+  --rig-points RIG_POINTS
+                        Number of rigs points to use in RigNeRF (default: 128)
 
 reflectance:
-  --refl-kind {pos,view,basic,diffuse,rusin,sph-har,fourier,weighted}
-                        What kind of reflectance model to use (default:
-                        ['view'])
-  --weighted-subrefl-kinds {pos,view,basic,diffuse,rusin,sph-har,fourier} [{pos,view,basic,diffuse,rusin,sph-har,fourier} ...]
-                        What subreflectances should be used with --refl-kind
-                        weighted. They will not take a spacial component, and
-                        only rely on view direction, normal, and light
-                        direction. (default: ['rusin', 'rusin', 'rusin',
-                        'rusin'])
+  --refl-kind {pos,view,pos-gamma-correct-view,view-light,basic,diffuse,rusin,rusin-helmholtz,sph-har,fourier,weighted}
+                        What kind of reflectance model to use (default: view)
+  --weighted-subrefl-kinds {pos,view,pos-gamma-correct-view,view-light,basic,diffuse,rusin,rusin-helmholtz,sph-har,fourier} [{pos,view,pos-gamma-correct-view,view-light,basic,diffuse,rusin,rusin-helmholtz,sph-har,fourier} ...]
+                        What subreflectances should be used with --refl-kind weighted. They will not take a spacial component, and only rely on view direction, normal, and light direction. (default: [])
   --normal-kind {None,elaz,raw}
-                        How to include normals in reflectance model. Not all
-                        surface models support normals (default: None)
+                        How to include normals in reflectance model. Not all surface models support normals (default: None)
   --space-kind {identity,surface,none}
-                        Space to encode texture: surface builds a map from 3D
-                        (identity) to 2D (default: identity)
+                        Space to encode texture: surface builds a map from 3D (identity) to 2D (default: identity)
   --alt-train {analytic,learned}
-                        Whether to train the analytic or the learned model in
-                        this session (default: learned)
-  --refl-bidirectional  Allow normals to be flipped for the reflectance (just
-                        Diffuse for now) (default: False)
+                        Whether to train the analytic or the learned model, set per run. (default: learned)
+  --refl-bidirectional  Allow normals to be flipped for the reflectance (just Diffuse for now) (default: False)
+  --view-variance-decay VIEW_VARIANCE_DECAY
+                        Regularize reflectance across view directions (default: 0)
 
 integrator:
   --integrator-kind {None,direct,path}
-                        Integrator to use for surface rendering (default:
-                        None)
-  --occ-kind {None,hard,learned,all-learned}
-                        Occlusion method for shadows to use in integration
-                        (default: None)
+                        Integrator to use for surface rendering (default: None)
+  --occ-kind {None,hard,learned,learned-const,all-learned,joint-all-const}
+                        Occlusion method for shadows to use in integration. (default: None)
   --smooth-occ SMOOTH_OCC
-                        Weight to smooth occlusion/shadows by. (default: 0)
+                        Weight to smooth occlusion by. (default: 0)
+  --decay-all-learned-occ DECAY_ALL_LEARNED_OCC
+                        Weight to decay all learned occ by, attempting to minimize it (default: 0)
+  --all-learned-to-joint
+                        Convert a fully learned occlusion model into one with an additional raycasting check (default: False)
 
 light:
   --light-kind {field,point,dataset,None}
-                        Kind of light to use while rendering. Dataset
-                        indicates light is in dataset (default: None)
+                        Kind of light to use while rendering. Dataset indicates light is in dataset (default: None)
   --light-intensity LIGHT_INTENSITY
-                        Intensity of light to use with loaded dataset
-                        (default: 100)
+                        Intensity of light to use with loaded dataset (default: 100)
+  --point-light-position POINT_LIGHT_POSITION [POINT_LIGHT_POSITION ...]
+                        Position of point light (default: [0, 0, -3])
 
 sdf:
   --sdf-eikonal SDF_EIKONAL
                         Weight of SDF eikonal loss (default: 0)
+  --surface-eikonal SURFACE_EIKONAL
+                        Weight of SDF eikonal loss on surface (default: 0)
   --smooth-normals SMOOTH_NORMALS
                         Amount to attempt to smooth normals (default: 0)
   --smooth-surface SMOOTH_SURFACE
-                        Amount to attempt to smooth surface normals (default:
-                        0)
+                        Amount to attempt to smooth surface normals (default: 0)
   --smooth-eps SMOOTH_EPS
-                        size of random uniform perturbation for smooth normals
-                        regularization (default: 0.001)
-  --smooth-eps-rng      smooth by a random amount instead of smoothing by a
-                        fixed distance (default: False)
+                        size of random uniform perturbation for smooth normals regularization (default: 0.001)
+  --smooth-eps-rng      Smooth by random amount instead of smoothing by a fixed distance (default: False)
   --smooth-n-ord {1,2} [{1,2} ...]
-                        Order of vector to use when smoothing normals
-                        (default: [2])
-  --sdf-kind {spheres,siren,local,mlp,triangles}
+                        Order of vector to use when smoothing normals (default: [2])
+  --sdf-kind {mlp,siren,local,curl-mlp,spheres,triangles}
                         Which SDF model to use (default: mlp)
   --sphere-init         Initialize SDF to a sphere (default: False)
   --bound-sphere-rad BOUND_SPHERE_RAD
-                        Intersect the learned SDF with a bounding sphere at
-                        the origin, < 0 is no sphere (default: -1)
+                        Intersect the learned SDF with a bounding sphere at the origin, < 0 is no sphere (default: -1)
   --sdf-isect-kind {sphere,secant,bisect}
-                        Marching kind to use when computing SDF intersection.
-                        (default: bisect)
+                        Marching kind to use when computing SDF intersection. (default: bisect)
   --volsdf-scale-decay VOLSDF_SCALE_DECAY
                         Decay weight for volsdf scale (default: 0)
 
 dnerf:
-  --dnerfae             Use DNeRFAE on top of DNeRF (default: False)
-  --dnerf-tf-smooth-weight DNERF_TF_SMOOTH_WEIGHT
-                        L2 smooth dnerf tf (default: 0)
+  --spline SPLINE       Use spline estimator w/ given number of poitns for dynamic nerf delta prediction (default: 0)
   --time-gamma          Apply a gamma based on time (default: False)
-  --gru-flow            Use GRU for Δx (default: False)
   --with-canon WITH_CANON
                         Preload a canonical NeRF (default: None)
   --fix-canon           Do not train canonical NeRF (default: False)
+  --render-over-time RENDER_OVER_TIME
+                        Fix camera to i, and render over a time frame. < 0 is no camera (default: -1)
 
 camera parameters:
   --near NEAR           near plane for camera (default: 2)
   --far FAR             far plane for camera (default: 6)
+  --cam-save-load CAM_SAVE_LOAD
+                        Location to save/load camera to (default: None)
+
+Video parameters:
+  --start-sec START_SEC
+                        Start load time of video (default: 0)
+  --end-sec END_SEC     Start load time of video (default: None)
+  --video-frames VIDEO_FRAMES
+                        Use N frames of video. (default: 200)
+  --segments SEGMENTS   Decompose the input sequence into some # of frames (default: 10)
+  --dyn-diverge-decay DYN_DIVERGE_DECAY
+                        Decay divergence of movement field (default: 0)
+  --ffjord-div-decay FFJORD_DIV_DECAY
+                        FFJORD divergence of movement field (default: 0)
+  --delta-x-decay DELTA_X_DECAY
+                        How much decay for change in position for dyn (default: 0)
+  --spline-len-decay SPLINE_LEN_DECAY
+                        Weight for length of spline regularization (default: 0)
+  --voxel-random-spline-len-decay VOXEL_RANDOM_SPLINE_LEN_DECAY
+                        Decay for length, randomly sampling a chunk of the grid instead of visible portions (default: 0)
+  --random-spline-len-decay RANDOM_SPLINE_LEN_DECAY
+                        Decay for length, randomly sampling a bezier spline (default: 0)
+  --voxel-tv-sigma VOXEL_TV_SIGMA
+                        Weight of total variation regularization for densitiy (default: 0)
+  --voxel-tv-rgb VOXEL_TV_RGB
+                        Weight of total variation regularization for rgb (default: 0)
+  --voxel-tv-bezier VOXEL_TV_BEZIER
+                        Weight of total variation regularization for bezier control points (default: 0)
+  --voxel-tv-rigidity VOXEL_TV_RIGIDITY
+                        Weight of total variation regularization for rigidity (default: 0)
+  --offset-decay OFFSET_DECAY
+                        Weight of total variation regularization for rigidity (default: 0)
 
 reporting parameters:
   --name NAME           Display name for convenience in log file (default: )
   -q, --quiet           Silence tqdm (default: False)
   --save SAVE           Where to save the model (default: models/model.pt)
+  --save-load-opt       Save opt as well as model (default: False)
   --log LOG             Where to save log of arguments (default: log.json)
   --save-freq SAVE_FREQ
                         # of epochs between saves (default: 5000)
   --valid-freq VALID_FREQ
-                        how often validation images are generated (default:
-                        500)
+                        how often validation images are generated (default: 500)
   --display-smoothness  Display smoothness regularization (default: False)
   --nosave              do not save (default: False)
   --load LOAD           model to load from (default: None)
@@ -360,20 +378,26 @@ reporting parameters:
                         # epochs to smooth loss over (default: 250)
   --notraintest         Do not test on training set (default: False)
   --duration-sec DURATION_SEC
-                        Max number of seconds to run this for, s <= 0 implies
-                        None (default: 0)
+                        Max number of seconds to run this for, s <= 0 implies None (default: 0)
   --param-file PARAM_FILE
-                        Path to JSON file to use for hyper-parameters
-                        (default: None)
+                        Path to JSON file to use for hyper-parameters (default: None)
   --skip-loss SKIP_LOSS
-                        Number of epochs to skip reporting loss for (default:
-                        0)
+                        Number of epochs to skip reporting loss for (default: 0)
   --msssim-loss         Report ms-ssim loss during testing (default: False)
   --depth-images        Whether to render depth images (default: False)
   --normals-from-depth  Render extra normal images from depth (default: False)
   --depth-query-normal  Render extra normal images from depth (default: False)
-  --not-magma           Do not use magma for depth maps (instead use default)
-                        (default: False)
+  --plt-cmap-kind       <OMITTED, TOO LONG>
+  --gamma-correct       Gamma correct final images (default: False)
+  --render-frame RENDER_FRAME
+                        Render 1 frame only, < 0 means none. (default: -1)
+  --exp-bg              Use mask of labels while rendering. For vis only. (default: False)
+  --flow-map            Render a flow map for a dynamic nerf scene (default: False)
+  --rigidity-map        Render a flow map for a dynamic nerf scene (default: False)
+  --display-regularization
+                        Display regularization in addition to reconstruction loss (default: False)
+  --y-scale {linear,log,symlog,logit}
+                        Scale kind for y-axis (default: linear)
 
 meta runner parameters:
   --torchjit            Use torch jit for model (default: False)
@@ -381,10 +405,12 @@ meta runner parameters:
                         # training examples (default: -1)
   --draw-colormap       Draw a colormap for each view (default: False)
   --convert-analytic-to-alt
-                        Combine a model with an analytic BRDF with a learned
-                        BRDF for alternating optimization (default: False)
+                        Combine a model with an analytic BRDF with a learned BRDF for alternating optimization (default: False)
   --clip-gradients CLIP_GRADIENTS
                         If > 0, clip gradients (default: 0)
+  --versioned-save      Save with versions (default: False)
+  --higher-end-chance HIGHER_END_CHANCE
+                        Increase chance of training on either the start or the end (default: 0)
 
 auto encoder parameters:
   --latent-l2-weight LATENT_L2_WEIGHT
@@ -392,6 +418,11 @@ auto encoder parameters:
   --normalize-latent    L2 normalize latent space (default: False)
   --encoding-size ENCODING_SIZE
                         Intermediate encoding size for AE (default: 32)
+
+optimization parameters:
+  --opt-kind {adam,sgd,adamw,rmsprop,uniform_adam}
+                        What optimizer to use for training (default: adam)
+
 ```
 
 # Fun example

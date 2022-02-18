@@ -111,7 +111,7 @@ dnerf: clean
   --flow-map --dyn-model plain --rigidity-map --refl-kind view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted --random-spline-len-decay 1e-5 \
-  --plt-cmap-kind Spectral --save-load-opt --view-variance-decay 1e-3 \
+  --plt-cmap-kind Spectral --save-load-opt --view-variance-decay 1e-2 \
   --load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
