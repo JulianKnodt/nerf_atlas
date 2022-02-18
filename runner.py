@@ -51,9 +51,7 @@ def arguments():
   )
 
   a.add_argument("--outdir", help="path to output directory", type=str, default="outputs/")
-  a.add_argument(
-    "--timed-outdir", help="Create new output directory with date and time of run", action="store_true"
-  )
+  a.add_argument("--timed-outdir", help="Create new output dir with date+time of run", action=ST)
 
   # various size arguments
   a.add_argument("--size", help="post-upsampling size", type=int, default=32)
@@ -135,7 +133,7 @@ def arguments():
   )
 
   a.add_argument(
-    "--volsdf-direct-to-path", action="store_true",
+    "--volsdf-direct-to-path", action=ST,
     help="Convert an existing direct volsdf model to a path tracing model",
   )
   a.add_argument(
@@ -149,7 +147,7 @@ def arguments():
     "--refl-order", default=2, type=int, help="Order for classical Spherical Harmonics & Fourier Basis BSDFs/Reflectance models",
   )
   a.add_argument(
-    "--inc-fourier-freqs", action="store_true", help="Multiplicatively increase the fourier frequency standard deviation on each run",
+    "--inc-fourier-freqs", action=ST, help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
   a.add_argument(
     "--rig-points", type=int, default=128, help="Number of rigs points to use in RigNeRF"
@@ -179,7 +177,7 @@ def arguments():
     help="Whether to train the analytic or the learned model, set per run.",
   )
   refla.add_argument(
-    "--refl-bidirectional", action="store_true",
+    "--refl-bidirectional", action=ST,
     help="Allow normals to be flipped for the reflectance (just Diffuse for now)",
   )
 
@@ -199,7 +197,7 @@ def arguments():
     help="Weight to decay all learned occ by, attempting to minimize it",
   )
   rdra.add_argument(
-    "--all-learned-to-joint", action="store_true",
+    "--all-learned-to-joint", action=ST,
     help="Convert a fully learned occlusion model into one with an additional raycasting check"
   )
 
@@ -310,20 +308,20 @@ def arguments():
 
   rprt = a.add_argument_group("reporting parameters")
   rprt.add_argument("--name", help="Display name for convenience in log file", type=str, default="")
-  rprt.add_argument("-q", "--quiet", help="Silence tqdm", action="store_true")
+  rprt.add_argument("-q", "--quiet", help="Silence tqdm", action=ST)
   rprt.add_argument("--save", help="Where to save the model", type=str, default="models/model.pt")
+  rprt.add_argument("--save-load-opt", help="Save opt as well as model", action=ST)
+
   rprt.add_argument("--log", help="Where to save log of arguments", type=str, default="log.json")
   rprt.add_argument("--save-freq", help="# of epochs between saves", type=int, default=5000)
   rprt.add_argument(
     "--valid-freq", help="how often validation images are generated", type=int, default=500,
   )
-  rprt.add_argument(
-    "--display-smoothness", action="store_true", help="Display smoothness regularization",
-  )
-  rprt.add_argument("--nosave", help="do not save", action="store_true")
+  rprt.add_argument("--display-smoothness", action=ST, help="Display smoothness regularization")
+  rprt.add_argument("--nosave", help="do not save", action=ST)
   rprt.add_argument("--load", help="model to load from", type=str)
   rprt.add_argument("--loss-window", help="# epochs to smooth loss over", type=int, default=250)
-  rprt.add_argument("--notraintest", help="Do not test on training set", action="store_true")
+  rprt.add_argument("--notraintest", help="Do not test on training set", action=ST)
   rprt.add_argument(
     "--duration-sec", help="Max number of seconds to run this for, s <= 0 implies None",
     type=float, default=0,
@@ -352,23 +350,25 @@ def arguments():
   )
 
   meta = a.add_argument_group("meta runner parameters")
-  meta.add_argument("--torchjit", help="Use torch jit for model", action="store_true")
+  # TODO when using torch jit has problems saving?
+  meta.add_argument("--torchjit", help="Use torch jit for model", action=ST)
   meta.add_argument("--train-imgs", help="# training examples", type=int, default=-1)
-  meta.add_argument("--draw-colormap", help="Draw a colormap for each view", action="store_true")
+  meta.add_argument("--draw-colormap", help="Draw a colormap for each view", action=ST)
   meta.add_argument(
-    "--convert-analytic-to-alt", action="store_true",
+    "--convert-analytic-to-alt", action=ST,
     help="Combine a model with an analytic BRDF with a learned BRDF for alternating optimization",
   )
   meta.add_argument("--clip-gradients", type=float, default=0, help="If > 0, clip gradients")
-  meta.add_argument("--versioned-save", action="store_true", help="Save with versions")
+  meta.add_argument("--versioned-save", action=ST, help="Save with versions")
   meta.add_argument(
     "--higher-end-chance", type=int, default=0,
     help="Increase chance of training on either the start or the end",
   )
 
   ae = a.add_argument_group("auto encoder parameters")
+  # TODO are these two items still used?
   ae.add_argument("--latent-l2-weight", help="L2 regularize latent codes", type=float, default=0)
-  ae.add_argument("--normalize-latent", help="L2 normalize latent space", action="store_true")
+  ae.add_argument("--normalize-latent", help="L2 normalize latent space", action=ST)
   ae.add_argument("--encoding-size",help="Intermediate encoding size for AE",type=int,default=32)
 
   opt = a.add_argument_group("optimization parameters")
@@ -766,10 +766,10 @@ def train(model, cam, labels, opt, args, sched=None):
 
     if i % args.save_freq == 0 and i != 0:
       version = (i // args.save_freq) if args.versioned_save else None
-      save(model, cam, args, version)
+      save(model, cam, args, opt, version)
       save_losses(args, losses)
   # final save does not have a version and will write to original file
-  save(model, cam, args)
+  save(model, cam, opt, args)
   save_losses(args, losses)
 
 def test(model, cam, labels, args, training: bool = True):
@@ -1086,10 +1086,11 @@ def load_model(args, light, is_dyn=False):
   if args.torchjit: model = torch.jit.script(model)
   return model
 
-def save(model, cam, args, version=None):
+def save(model, cam, args, opt, version=None):
   if args.nosave: return
   save = args.save if version is None else f"{args.save}_{version}.pt"
   print(f"Saved to {save}")
+  if args.save_load_opt: setattr(model, "opt", opt)
   if args.torchjit: raise NotImplementedError()
   else: torch.save(model, save)
 
@@ -1148,8 +1149,12 @@ def main():
   if "camera" in args.train_parts:
     parameters = chain(parameters, cam.parameters())
 
-  # for some reason AdamW doesn't seem to work here
+  # for some reason AdamW doesn't seem to work for this? Not sure why
   opt = load_optim(args, parameters)
+  if args.save_load_opt:
+    saved_opt = getattr(model, "opt", None)
+    # Do not log if does not exist, commonly will not.
+    if saved_opt is not None: opt = saved_opt
 
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.sched_min)
   if args.no_sched: sched = None
