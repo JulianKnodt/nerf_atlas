@@ -105,13 +105,13 @@ dnerf_dataset = bouncingballs
 dnerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
 	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
-	--crop-size 28 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 6 \
+	--crop-size 24 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 fft \
   --test-crop-size 64 --depth-images --save-freq 2500 \
-  --flow-map --dyn-model plain --rigidity-map --refl-kind view \
+  --flow-map --dyn-model plain --rigidity-map --refl-kind pos-gamma-correct-view --replace refl \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted --random-spline-len-decay 1e-5 \
-  --plt-cmap-kind Spectral --save-load-opt --view-variance-decay 1e-2 \
+  --plt-cmap-kind Spectral \
   --load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \

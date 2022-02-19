@@ -351,6 +351,7 @@ def arguments():
     "--y-scale", choices=["linear", "log", "symlog", "logit"], type=str,
     default="linear", help="Scale kind for y-axis",
   )
+  # TODO add ability to show all decay factors and how they change over time.
 
   meta = a.add_argument_group("meta runner parameters")
   # TODO when using torch jit has problems saving?
@@ -778,7 +779,7 @@ def train(model, cam, labels, opt, args, sched=None):
       save(model, cam, args, opt, version)
       save_losses(args, losses)
   # final save does not have a version and will write to original file
-  save(model, cam, opt, args)
+  save(model, cam, args, opt)
   save_losses(args, losses)
 
 def test(model, cam, labels, args, training: bool = True):

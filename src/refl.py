@@ -136,7 +136,7 @@ class Reflectance(nn.Module):
       F.normalize(view, dim=-1),
     )
 
-def ident(x): return x
+def ident(x): return F.normalize(x, dim=-1)
 def empty(_): return None
 # encode a direction either directly as a vector, as a theta & phi, or as nothing.
 def enc_norm_dir(kind=None):
@@ -238,18 +238,18 @@ class Positional(Reflectance):
     return self.act(self.mlp(x, latent))
 
 class PosGammaCorrectView(Reflectance):
-  def __init__(self, space=None, view="elaz", intermediate_size=64, **kwargs):
+  def __init__(self, space=None, view="raw", intermediate_size=64, **kwargs):
     super().__init__(**kwargs)
     view_size, self.view_enc = enc_norm_dir(view)
     self.im = intermediate_size
     self.pos = SkipConnMLP(
       in_size=3, out=self.out_features+self.im, latent_size=self.latent_size,
-      num_layers=4, hidden_size=256, init="siren", activation=torch.sin,
+      num_layers=3, hidden_size=256, init="siren", activation=torch.sin,
     )
     self.view = SkipConnMLP(
       # linear shading, combined with specular highlight
-      in_size=3+view_size, out=1+1, latent_size=self.latent_size + self.im,
-      num_layers=3, hidden_size=256, init="siren", activation=torch.sin,
+      in_size=3+view_size, out=1, latent_size=self.latent_size + self.im,
+      num_layers=3, hidden_size=128, init="siren", activation=torch.sin,
     )
   # Each voxel just requires the out_features which is usually RGB,
   # and does not need to do any special modifications.
@@ -257,14 +257,12 @@ class PosGammaCorrectView(Reflectance):
   def forward(self, x, view, normal=None, light=None, latent=None):
     pos, intermediate = self.act(self.pos(x, latent))\
       .split([self.out_features, self.im], dim=-1)
-    linear, gamma = self.view(
-      torch.cat([x, view], dim=-1),
-      torch.cat([latent, intermediate], dim=-1),
-    ).sigmoid().split([1,1], dim=-1)
+    view_latent = intermediate if latent is None else torch.cat([latent, intermediate], dim=-1)
+    linear = self.view(torch.cat([x, self.view_enc(view)], dim=-1), view_latent).sigmoid()
     # constrain linear coefficient to 0.5-1.
     linear = (linear/2) + 0.5
     # We constrain gamma to the range 0.5 to 1.5, but could be larger.
-    return linear * pos.pow(1.5 - gamma)
+    return linear * pos
 
 
 class Diffuse(Reflectance):

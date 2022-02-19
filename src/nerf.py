@@ -129,7 +129,7 @@ def load_nerf(args):
     kwargs["points"] = args.rig_points
   model = cons(**kwargs)
   if args.model == "ae" and args.latent_l2_weight > 0: model.set_regularize_latent()
-
+  if args.bendy: model = BendyNeRF(model)
   return model
 
 class CommonNeRF(nn.Module):
@@ -603,6 +603,36 @@ class HistogramNeRF(CommonNeRF):
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
+
+# This is a wrapper around a NeRF, which makes it bendy!
+class BendyNeRF(nn.Module):
+  def __init__(self, canonical: CommonNeRF):
+    assert(isinstance(canonical, CommonNeRF)), "Must pass an instance of CommonNeRF"
+    self.bend = SkipConnMLP(in_size=3, out=3, num_layers=5,hidden_size=128, init="zero")
+    self.canon = canonical
+
+  @property
+  def refl(self): return self.canonical.refl
+  def set_refl(self, refl): self.nerf.set_refl(refl)
+  @property
+  def nerf(self): return self.canonical.nerf
+
+  def forward(self, rays):
+    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
+      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+    )
+    # TODO which dimension was step dimension?
+    print(pts.shape)
+    exit()
+
+    # Need to cumulatively sum twice in order to actually bend rays
+    # TODO need to apply some sort of reasonable activation to the bend
+    bending = self.bend(pts).cumsum(dim=0).cumsum(dim=0)
+    new_pts = pts + bending
+    # TODO recompute r_d from bending, along step dimension
+    r_d = torch.cat([r_d, pts[:-1] - pts[1:]], dim=0)
+    exit()
+    return self.canonical.from_pts(pts, self.ts, r_o, r_d)
 
 class SplineNeRF(CommonNeRF):
   def __init__(self, out_features: int = 3, **kwargs):
@@ -1453,7 +1483,6 @@ model_kinds = {
   # experimental:
   "rig": RigNeRF,
   "hist": HistogramNeRF,
-  "spline": SplineNeRF,
 }
 
 # TODO test this and actually make it correct.
