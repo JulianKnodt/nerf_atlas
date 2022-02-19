@@ -110,6 +110,7 @@ def arguments():
   a.add_argument(
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action=ST,
   )
+  a.add_argument("--bendy", help="Allow bendy rays!", action=ST)
   a.add_argument(
     "--gamma-correct-loss", type=float, default=1., help="Gamma correct by x in training",
   )

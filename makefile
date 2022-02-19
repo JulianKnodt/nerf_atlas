@@ -355,6 +355,12 @@ test_original: clean
 	--size 64 --epochs 0 --near 2 --far 6 --batch-size 5 \
   --crop-size 26 --load models/lego.pt
 
+bendy: clean
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 64 --epochs 80_000 --save models/lego.pt --bendy \
+	--near 2 --far 6 --batch-size 4 --crop-size 20 --model plain -lr 5e-4 \
+	--loss-fns l2 --refl-kind pos #--load models/lego.pt #--omit-bg
+
 ae: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --epochs 80_000 --save models/lego_ae.pt \

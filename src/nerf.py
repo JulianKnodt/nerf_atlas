@@ -23,8 +23,7 @@ def cumuprod_exclusive(t):
   cp[0, ...] = 1.0
   return cp
 
-#@torch.jit.script # cannot jit script cause of tensordot :)
-def compute_pts_ts(
+def compute_ts(
   rays, near, far, steps, lindisp=False, perturb: float = 0,
 ):
   r_o, r_d = rays.split([3,3], dim=-1)
@@ -42,6 +41,13 @@ def compute_pts_ts(
     upper = torch.cat([ts[:1], mids])
     rand = torch.rand_like(lower) * perturb
     ts = lower + (upper - lower) * rand
+  return r_o, r_d, ts, mids
+
+#@torch.jit.script # cannot jit script cause of tensordot :)
+def compute_pts_ts(
+  rays, near, far, steps, lindisp=False, perturb: float = 0,
+):
+  r_o, r_d, ts, mids = compute_ts(rays, near, far, steps, lindisp, perturb)
   pts = r_o.unsqueeze(0) + torch.tensordot(ts, r_d, dims = 0)
   return pts, ts, r_o, r_d, mids
 
@@ -608,7 +614,7 @@ class HistogramNeRF(CommonNeRF):
 class BendyNeRF(nn.Module):
   def __init__(self, canonical: CommonNeRF):
     assert(isinstance(canonical, CommonNeRF)), "Must pass an instance of CommonNeRF"
-    self.bend = SkipConnMLP(in_size=3, out=3, num_layers=5,hidden_size=128, init="zero")
+    self.bend = SkipConnMLP(in_size=3, out=4, num_layers=5,hidden_size=128, init="zero")
     self.canon = canonical
 
   @property
@@ -617,22 +623,34 @@ class BendyNeRF(nn.Module):
   @property
   def nerf(self): return self.canonical.nerf
 
+  def march(self, curr_pt, curr_rd, ts):
+    bend_quat = F.normalize(self.bend(curr_pt), dim=-1)
+    # TODO apply bend to curr_rd
+    new_rd = utils.quaternion_rot(bend_rot, curr_rd)
+    new_pt = curr_pt + ts * new_rd
+    return new_pt, new_rd
+
   def forward(self, rays):
-    pts, self.ts, r_o, r_d, _ = compute_pts_ts(
+    r_o, r_d, ts, _ = compute_ts
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
+    self.canon.ts = self.ts = ts
+    print(r_o.shape, ts.shape)
     # TODO which dimension was step dimension?
-    print(pts.shape)
     exit()
+    curr_pt = r_o + r_d * self.near
+    curr_rd = r_d
+    pts = [curr_pt]
+    r_ds = [curr_r_d]
+    # This may be costly?
+    for t in ts.split(dim=0):
+      curr_pt, curr_rd = self.march(curr_pt, curr_rd)
+      pts.append(curr_pt)
+      r_ds.append(curr_rd)
+    pts = torch.stack(pts, dim=0)
+    r_ds = torch.stack(r_ds, dim=0)
 
-    # Need to cumulatively sum twice in order to actually bend rays
-    # TODO need to apply some sort of reasonable activation to the bend
-    bending = self.bend(pts).cumsum(dim=0).cumsum(dim=0)
-    new_pts = pts + bending
-    # TODO recompute r_d from bending, along step dimension
-    r_d = torch.cat([r_d, pts[:-1] - pts[1:]], dim=0)
-    exit()
-    return self.canonical.from_pts(pts, self.ts, r_o, r_d)
+    return self.canon.from_pts(pts, ts, r_o, r_ds)
 
 class SplineNeRF(CommonNeRF):
   def __init__(self, out_features: int = 3, **kwargs):

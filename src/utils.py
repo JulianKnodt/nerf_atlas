@@ -165,6 +165,21 @@ def rotate_vector(v, axis, c, s):
          + axis * (v * axis).sum(dim=-1, keepdim=True) * (1-c) \
          + torch.cross(axis, v, dim=-1) * s
 
+def quat_multiply(a, b):
+  aw, ax, ay, az = a.split([1,1,1,1], dim=-1)
+  bw, bx, by, bz = b.split([1,1,1,1], dim=-1)
+
+  ow = aw * bw + ax * bx - ay * by - az * bz
+  ox = aw * bx + ax * bw + ay * bz - az * by
+  oy = aw * by - ax * bz + ay * bw + az * bx
+  oz = aw * bz + ax * by - ay * bx + az * bw
+
+  return torch.stack([ow, ox, oy, oz], dim=-1)
+
+def quaternion_rot(rot, v):
+  v = torch.cat([torch.zeros(*v.shape[:-1], 1, device=v.device), v], dim=-1)
+  return quat_multiply(quat_multiply(rot, v), rot)[..., 1:]
+
 def mse2psnr(x): return -10 * torch.log10(x)
 
 def ssim_loss(xs, refs):
