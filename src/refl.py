@@ -241,6 +241,7 @@ class Positional(Reflectance):
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))
 
+
 class PosLinearView(Reflectance):
   def __init__(self, space=None, view="raw", intermediate_size=64, **kwargs):
     super().__init__(**kwargs)
@@ -257,21 +258,23 @@ class PosLinearView(Reflectance):
     )
   # Each voxel just requires the out_features which is usually RGB,
   # and does not need to do any special modifications.
+  def pos_linear_voxel_forward(self, params, view):
+    raw_rgb, sh_coeffs = params.split([self.out_features, self.num_sh_coeffs], dim=-1)
+    linear_scale = eval_sh(
+      self.order,
+      sh_coeffs.reshape(*sh_coeffs.shape[:-1], 1, -1),
+      F.normalize(view,dim=-1)
+    ).sigmoid()
+    return self.act(raw_rgb) * ((linear_scale/2)+0.5)
   def to_voxel(self):
-    out_feats = self.out_features
-    order = 4 # TODO where to pass this into this function?
-    num_sh_coeffs = (order+1) * (order+1)
-    act = self.act
-    def voxel_forward(params, view):
-      raw_rgb, sh_coeffs = params.split([out_feats, num_sh_coeffs], dim=-1)
-      linear_scale = eval_sh(
-        order,
-        sh_coeffs.reshape(*sh_coeffs.shape[:-1], 1, -1),
-        F.normalize(view,dim=-1)
-      ).sigmoid()
-      scale = (linear_scale/2) + 0.5
-      return act(raw_rgb) * scale
-    return out_feats+num_sh_coeffs, voxel_forward
+    # explicitly delete the MLPs to save memory
+    del self.pos
+    del self.view
+
+    self.order = order = 4 # TODO where to pass this into this function?
+    self.num_sh_coeffs = (order+1) * (order+1)
+    return self.out_features+self.num_sh_coeffs, self.pos_linear_voxel_forward
+
   def forward(self, x, view, normal=None, light=None, latent=None):
     pos, intermediate = self.act(self.pos(x, latent))\
       .split([self.out_features, self.im], dim=-1)

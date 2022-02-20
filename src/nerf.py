@@ -401,14 +401,15 @@ class NeRFVoxel(nn.Module):
 
     # assume positional refl.
     self.rgb = nn.Parameter(torch.rand([resolution]*3+[out_features]))
-    self.brdf = lambda params, view: params
+    # TODO actually assign a refl, and then can update that.
+    # Can also make this a subclass of CommonNeRF then.
+    self.brdf = lambda params, view: self.act(params)
 
     self.grid_radius = grid_radius
     self.voxel_len = grid_radius * 2 / resolution
     self.t_near = t_near
     self.t_far = t_far
     self.steps = steps
-    self.act = load_sigmoid(sigmoid_kind)
 
   @property
   def refl(self): return refl.Reflectance(latent_size=0, out_features=3)
@@ -416,6 +417,7 @@ class NeRFVoxel(nn.Module):
     num_params, self.brdf = refl.to_voxel()
     prev_device = self.rgb.device
     self.rgb = nn.Parameter(torch.rand(*self.rgb.shape[:-1], num_params, device=prev_device))
+
   @property
   def intermediate_size(self): return 0
   def set_sigmoid(self, kind): self.act = load_sigmoid(kind)
@@ -489,11 +491,11 @@ class NeRFVoxel(nn.Module):
     neighbor_ids, trilin_weights = self.grid_coords_trilin_weights(pts)
     nx,ny,nz = [ni.squeeze(-1) for ni in neighbor_ids.split([1,1,1],dim=-1)]
     neighbor_sigma = grid_lookup(nx, ny, nz, self.densities)
-    neighbor_rgb = grid_lookup(nx, ny, nz, self.act(self.rgb))
+    neighbor_params = grid_lookup(nx, ny, nz, self.rgb)
     densities = (trilin_weights * neighbor_sigma).sum(dim=-2)
-    rgb = self.brdf(params=(trilin_weights * neighbor_rgb).sum(dim=-2), view=r_d)
+    rgb = self.brdf(params=(trilin_weights * neighbor_params).sum(dim=-2), view=r_d)
     self.alpha, self.weights = alpha_from_density(densities.squeeze(-1), ts.squeeze(-1), r_d)
-    return volumetric_integrate(self.weights, rgb)
+    return volumetric_integrate(self.weights, rgb) # TODO sky model here
 
 class CoarseFineNeRF(CommonNeRF):
   def __init__(
