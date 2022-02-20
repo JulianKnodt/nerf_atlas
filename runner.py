@@ -946,7 +946,7 @@ def render_over_time(args, model, cam):
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args):
   if args.epochs == 0: return
-  if isinstance(model, nerf.CommonNeRF): model.steps = args.steps
+  model.nerf.steps = args.steps
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
   ls = model.intermediate_size # How many extra values the density model outputs

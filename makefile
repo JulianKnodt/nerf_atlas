@@ -34,13 +34,13 @@ voxel: clean
 
 dyn_voxel: clean
 	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf \
-	--size 256 --epochs 100_000 --save models/dvoxel_${dnerf_dataset}.pt --loss-window 1000 --save-freq 2500 \
-	--near 2 --far 6 --batch-size 4 --crop-size 32 --model voxel --dyn-model voxel -lr 2e-3 \
-	--loss-fns l2 l1 --test-crop-size 96 --depth-images --flow-map --spline 4 --steps 80 \
+	--size 64 --epochs 100_000 --save models/dvoxel_${dnerf_dataset}.pt --loss-window 1000 --save-freq 2500 \
+	--near 2 --far 6 --batch-size 2 --crop-size 42 --model voxel --dyn-model voxel -lr 1e-2 \
+	--loss-fns l2 --test-crop-size 96 --depth-images --flow-map --spline 4 --steps 80 \
   --voxel-tv-sigma 1e-2 --voxel-tv-rgb 1e-4 --voxel-tv-bezier 1e-2 --voxel-tv-rigidity 1e-2 \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind fat --voxel-random-spline-len-decay 1e-5 \
-  --notraintest --seed -1 --gamma-correct-loss 0.5 --refl-kind pos \
+  --notraintest --seed -1 --gamma-correct-loss 0.5 --refl-kind pos-linear-view \
   --rigidity-map --load models/dvoxel_${dnerf_dataset}.pt
 
 volsdf_with_normal: clean
@@ -103,15 +103,15 @@ food: clean
 
 dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
-	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 1 \
-	--crop-size 24 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 6 \
-  --loss-window 2000 --loss-fns l2 fft \
-  --test-crop-size 64 --depth-images --save-freq 2500 \
-  --flow-map --dyn-model plain --rigidity-map --refl-kind pos-gamma-correct-view --replace refl \
+	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 256 \
+	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 20 --near 2 --far 6 -lr 2e-4 --valid-freq 500 --spline 6 \
+  --loss-window 2000 --loss-fns l2 \
+  --test-crop-size 48 --depth-images --save-freq 2500 \
+  --flow-map --dyn-model plain --rigidity-map --refl-kind pos-gamma-correct-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted --random-spline-len-decay 1e-5 \
-  --plt-cmap-kind Spectral \
+  --plt-cmap-kind Spectral --notraintest \
   --load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \

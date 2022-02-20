@@ -631,7 +631,7 @@ class BendyNeRF(nn.Module):
     return new_pt, new_rd
 
   def forward(self, rays):
-    r_o, r_d, ts, _ = compute_ts
+    r_o, r_d, ts, _ = compute_ts(
       rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
     )
     self.canon.ts = self.ts = ts
