@@ -115,6 +115,10 @@ def arguments():
     "--gamma-correct-loss", type=float, default=1., help="Gamma correct by x in training",
   )
   a.add_argument(
+    "--autogamma-correct-loss", action=ST,
+    help="Automatically infer a weight for gamma correction",
+  )
+  a.add_argument(
     "--has-multi-light", help="For NeRV point if there is a multi point light dataset", action=ST,
   )
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
@@ -944,8 +948,12 @@ def render_over_time(args, model, cam):
       save_image(os.path.join(args.outdir, f"time_{i:03}.png"), got)
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
-def set_per_run(model, args):
+def set_per_run(model, args, labels):
   if args.epochs == 0: return
+
+  if type(labels) is tuple:
+    times = labels[-1]
+    labels = labels[0]
   model.nerf.steps = args.steps
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
@@ -1053,6 +1061,18 @@ def set_per_run(model, args):
     if args.view_variance_decay > 0:
       print("[warn]: view variance decay unset, positional refl does not use view")
     args.view_variance_decay = 0
+  if args.autogamma_correct_loss:
+    # based on https://github.com/darrynten/imagick-scripts/blob/master/bin/autogamma
+    midrange = 0.5
+    weight = (math.log(midrange)/labels.mean().log()).clamp(min=0).item()
+    # aggresively adjust to 0.5, to specialize sqrt call in gamma exponent.
+    # Also too much gamma correction seems to be prohibitive.
+    if weight < 0.55: weight = 0.5
+    if weight >= 0.9:
+      print(f"[note]: autogamma correct would darken/hardly change image ({weight}), ignoring.")
+    else:
+      args.gamma_correct_loss = weight
+      print(f"[note]: autogamma correction weight is: {weight}")
 
 
 
@@ -1142,7 +1162,7 @@ def main():
     else: labels = labels[:args.train_imgs, ...]
     cam = cam[:args.train_imgs, ...]
 
-  set_per_run(model, args)
+  set_per_run(model, args, labels)
   light = light if light is not None else getattr(model.refl, "light", None)
 
   # TODO move this method to another function

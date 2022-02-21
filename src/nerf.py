@@ -1133,7 +1133,7 @@ class DynamicNeRF(nn.Module):
     # keep the first point non-rigid, this allows for learning a canonical configuration
     # but gives more degrees of freedom to t=0.
     init_ps = ps[:1]
-    self.dp = self.spline_fn(ps - init_ps, t, self.spline_n)
+    self.dp = self.spline_fn(ps - init_ps, t.clamp(min=1e-4, max=1-1e-4), self.spline_n)
     self.rigid_dp = self.dp * self.rigidity + init_ps[0]
     return self.rigid_dp
 
