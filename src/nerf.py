@@ -1110,8 +1110,8 @@ class DynamicNeRF(nn.Module):
   def set_delta_estim(self):
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz, rigidity
-      in_size=4, out=3+1, num_layers = 6, hidden_size = 324,
-      init="xavier",
+      in_size=4, out=3+1, num_layers = 5, hidden_size = 256,
+      init="siren", activation=torch.sin,
     )
     self.time_estim = self.direct_predict
   def set_spline_estim(self, spline_points):
@@ -1119,7 +1119,7 @@ class DynamicNeRF(nn.Module):
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
       in_size=3, out=spline_points*3+1, num_layers=5,
-      hidden_size=324, init="siren", activation=torch.sin,
+      hidden_size=256, init="siren", activation=torch.sin,
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
     self.spline_n = spline_points
@@ -1140,9 +1140,9 @@ class DynamicNeRF(nn.Module):
     # keep the first point non-rigid, this allows for learning a canonical configuration
     # but gives more degrees of freedom to t=0.
     init_ps = ps[:1]
-    self.dp = self.spline_fn(ps - init_ps, t.clamp(min=1e-4, max=1-1e-4), self.spline_n)
-    self.rigid_dp = self.dp * self.rigidity + init_ps[0]
-    return self.rigid_dp
+    self.dp = self.spline_fn(ps - init_ps, t, self.spline_n)
+    self.rigid_dp = self.dp * self.rigidity
+    return self.rigid_dp + init_ps[0]
 
   @property
   def nerf(self): return self.canonical
@@ -1384,8 +1384,8 @@ class DynamicNeRFVoxel(nn.Module):
     self.dp = dp = self.spline_fn(ctrl_pts-init_pt, t, self.spline)
     self.rigidity = (trilin_weights * grid_lookup(nx,ny,nz,self.rigidity_grid.sigmoid().squeeze(0)))\
       .sum(dim=-2)
-    self.rigid_dp = dp * self.rigidity + init_pt[0]
-    return self.canonical.from_pts(self.pts + self.rigid_dp, self.ts, r_o, r_d)
+    self.rigid_dp = dp * self.rigidity
+    return self.canonical.from_pts(self.pts + self.rigid_dp + init_pt[0], self.ts, r_o, r_d)
 
 # TODO fix this
 class SinglePixelNeRF(nn.Module):

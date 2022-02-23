@@ -101,11 +101,11 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = mutant
+dnerf_dataset = trex
 dnerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
-	--epochs 200_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 16 --near 2 --far 6 -lr 1e-4 --valid-freq 500 --spline 6 \
+	--epochs 100_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 18 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 \
   --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \

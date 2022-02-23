@@ -129,7 +129,7 @@ def arguments():
   a.add_argument("--serial-idxs", help="Train on images in serial", action=ST)
   # TODO really fix MPIs
   a.add_argument(
-    "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "time_delta", "al_occ"],
+    "--replace", nargs="*", choices=["refl", "occ", "bg", "sigmoid", "light", "dyn", "al_occ"],
     default=[], type=str, help="Modules to replace on this run, if any. Take caution for overwriting existing parts.",
   )
   a.add_argument(
@@ -770,10 +770,10 @@ def train(model, cam, labels, opt, args, sched=None):
           if args.normals_from_depth:
             depth_normal = (50*utils.depth_to_normals(depth)+1)/2
             items.append(depth_normal.clamp(min=0, max=1))
-        if args.flow_map and hasattr(model, "dp"):
-          flow_map = nerf.volumetric_integrate(model.nerf.weights, model.dp)[0]
-          flow_map /= flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
-          flow_map = flow_map.abs().pow(1/3).copysign(flow_map)
+        if args.flow_map and hasattr(model, "rigid_dp"):
+          flow_map = nerf.volumetric_integrate(model.nerf.weights, model.rigid_dp)[0]
+          flow_map /= flow_map.norm(dim=-1).max()
+          flow_map = flow_map.abs().sqrt().copysign(flow_map)
           items.append(flow_map.add(1).div(2))
         if args.rigidity_map and hasattr(model, "rigidity"):
           rigidity_map = nerf.volumetric_integrate(model.nerf.weights, model.rigidity)[0]
@@ -790,7 +790,6 @@ def train(model, cam, labels, opt, args, sched=None):
 
 def test(model, cam, labels, args, training: bool = True):
   times = None
-  model = model.eval()
   if type(labels) == tuple:
     times = labels[-1]
     labels = labels[0]
@@ -847,8 +846,9 @@ def test(model, cam, labels, args, training: bool = True):
                 normals[c0:c0+cs, c1:c1+cs, :] = (render_n[0]+1)/2
             elif hasattr(model, "n") and hasattr(model, "sdf"):
               ...
-            if args.flow_map and hasattr(model, "dp"):
-              flow_map[c0:c0+cs,c1:c1+cs] = nerf.volumetric_integrate(model.nerf.weights, model.dp)
+            if args.flow_map and hasattr(model, "rigid_dp"):
+              flow_map[c0:c0+cs,c1:c1+cs] = \
+                nerf.volumetric_integrate(model.nerf.weights, model.rigid_dp)
             if args.rigidity_map and hasattr(model, "rigidity"):
               rigidity_map[c0:c0+cs,c1:c1+cs] = \
                 nerf.volumetric_integrate(model.nerf.weights, model.rigidity)
@@ -876,9 +876,9 @@ def test(model, cam, labels, args, training: bool = True):
         if hasattr(model, "nerf") and args.depth_images:
           depth = (depth-args.near)/(args.far - args.near)
           items.append(depth.clamp(min=0, max=1))
-        if args.flow_map and hasattr(model, "dp"):
-          flow_map /= flow_map.norm(keepdim=True, dim=-1).clamp(min=1)
-          flow_map = flow_map.abs().pow(1/3).copysign(flow_map)
+        if args.flow_map and hasattr(model, "rigid_dp"):
+          flow_map /= flow_map.norm(keepdim=True, dim=-1).max()
+          flow_map = flow_map.abs().sqrt().copysign(flow_map)
           items.append(flow_map.add(1).div(2))
         if args.rigidity_map and hasattr(model, "rigidity"): items.append(rigidity_map)
         if hasattr(model, "displace"): items.append(proximity_map)
@@ -984,11 +984,11 @@ def set_per_run(model, args, labels):
       model.refl.light = lights.load(args).expand(args.num_labels).to(device)
     else: raise NotImplementedError("TODO convert to light and reflectance")
 
-  if "time_delta" in args.replace:
+  if "dyn" in args.replace:
     if isinstance(model, nerf.DynamicNeRF):
       model.set_spline_estim(args.spline) if args.spline > 0 else model.set_delta_estim()
       model = model.to(device)
-    else: print("[warn]: Model is not an instance of dynamic nerf, ignoring `--replace time_delta.`")
+    else: print("[warn]: Model is not an instance of dynamic nerf, ignoring `--replace dyn.`")
 
   # converts from a volsdf with direct integration to one with indirect lighting
   if args.volsdf_direct_to_path:
@@ -1200,6 +1200,7 @@ def main():
 
   if test_light is not None: model.refl.light = test_light
   if args.test_white_bg: model.set_bg("white")
+  model = model.eval()
 
   if not args.notest: test(model, test_cam, test_labels, args, training=False)
   if args.render_over_time >= 0: render_over_time(args, model, test_cam)
