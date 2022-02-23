@@ -1111,7 +1111,8 @@ class DynamicNeRF(nn.Module):
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz, rigidity
       in_size=4, out=3+1, num_layers = 5, hidden_size = 256,
-      init="siren", activation=torch.sin,
+      activation=FourierEncoder(input_dims=4),
+      init="xavier",
     )
     self.time_estim = self.direct_predict
   def set_spline_estim(self, spline_points):
@@ -1119,7 +1120,8 @@ class DynamicNeRF(nn.Module):
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
       in_size=3, out=spline_points*3+1, num_layers=5,
-      hidden_size=256, init="siren", activation=torch.sin,
+      activation=FourierEncoder(input_dims=3),
+      hidden_size=256, init="xavier",
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
     self.spline_n = spline_points
