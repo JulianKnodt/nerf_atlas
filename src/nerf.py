@@ -91,12 +91,12 @@ def sparse_volumetric_integrate(weights, other, eps:float=1e-3):
 
 # bg functions, need to be here for pickling
 def black(_elaz_r_d, _weights): return 0
-def white(_, weights): 1-weights.sum(dim=0).unsqueeze(-1)
-# having a random color will probably help prevent any background
+# need to omit last one, since it will always be black
+def white(_, weights): return 1-weights[:-1].sum(dim=0).unsqueeze(-1)
+# having a random color will probably help prevent any background (i.e. the last term should
+# always be black.
 def random_color(_elaz_r_d, weights):
-  # TODO need to think this through more
-  # This will make it so that there never is a background.
-  summed = (1-weights.sum(dim=0).unsqueeze(-1))
+  summed = (1-weights[:-1].sum(dim=0).unsqueeze(-1))
   return torch.rand_like(summed) * summed
 sky_kinds = {
   "black": black,
@@ -410,6 +410,7 @@ class NeRFVoxel(nn.Module):
     self.t_near = t_near
     self.t_far = t_far
     self.steps = steps
+    self.set_bg("black")
 
   @property
   def refl(self): return refl.Reflectance(latent_size=0, out_features=3)
@@ -422,6 +423,12 @@ class NeRFVoxel(nn.Module):
   def intermediate_size(self): return 0
   def set_sigmoid(self, kind): self.act = load_sigmoid(kind)
   # TODO sparsify method which modifies density and rgb to be _more_ sparse.
+  def set_bg(self, bg="black"):
+    sky_color_fn = sky_kinds.get(bg, None)
+    if sky_color_fn is None: raise NotImplementedError(bg)
+    self.sky_color = sky_color_fn
+
+    if bg == "mlp": raise NotImplementedError("TODO")
   def sparsify(self, thresh=1e-2):
     raise NotImplementedError("Implement sparsity on density, to make tensor sparse.")
     ...
@@ -495,7 +502,7 @@ class NeRFVoxel(nn.Module):
     densities = (trilin_weights * neighbor_sigma).sum(dim=-2)
     rgb = self.brdf(params=(trilin_weights * neighbor_params).sum(dim=-2), view=r_d)
     self.alpha, self.weights = alpha_from_density(densities.squeeze(-1), ts.squeeze(-1), r_d)
-    return volumetric_integrate(self.weights, rgb) # TODO sky model here
+    return volumetric_integrate(self.weights, rgb) + self.sky_color(r_d, weights)
 
 class CoarseFineNeRF(CommonNeRF):
   def __init__(
@@ -1111,8 +1118,8 @@ class DynamicNeRF(nn.Module):
     assert(spline_points > 1), "Must pass N > 1 spline"
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
-      in_size=3, out=spline_points*3+1, num_layers=6,
-      hidden_size=324, init="xavier",
+      in_size=3, out=spline_points*3+1, num_layers=5,
+      hidden_size=324, init="siren", activation=torch.sin,
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
     self.spline_n = spline_points
@@ -1147,6 +1154,7 @@ class DynamicNeRF(nn.Module):
   def intermediate_size(self): return self.canonical.intermediate_size
   def total_latent_size(self): return self.canonical.total_latent_size()
   def set_refl(self, refl): self.canonical.set_refl(refl)
+  def set_bg(self, bg): self.canonical.set_bg(bg)
   def forward(self, rays_t):
     rays, t = rays_t
     self.pts, self.ts, r_o, r_d, _ = compute_pts_ts(
@@ -1351,6 +1359,7 @@ class DynamicNeRFVoxel(nn.Module):
   @property
   def rgb(self): return self.canonical.rgb
   def set_refl(self, refl): self.canonical.set_refl(refl)
+  def set_bg(self, bg): self.canonical.set_bg(bg)
 
   def forward(self, rays_t):
     rays, t = rays_t

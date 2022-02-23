@@ -101,17 +101,17 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = hellwarrior
+dnerf_dataset = mutant
 dnerf: clean
-	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
-	--epochs 20_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 20 --near 2 --far 6 -lr 1e-4 --valid-freq 500 --spline 6 \
+	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
+	--epochs 200_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 16 --near 2 --far 6 -lr 1e-4 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 \
   --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted --random-spline-len-decay 1e-5 \
-  --notraintest --autogamma-correct-loss \
+  --notraintest --test-white-bg \
   --load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \

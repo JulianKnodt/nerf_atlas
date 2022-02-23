@@ -344,8 +344,9 @@ def arguments():
   rprt.add_argument("--depth-query-normal", action=ST, help="Render extra normal images from depth")
   rprt.add_argument("--plt-cmap-kind", type=str, choices=plt.colormaps(), default="magma")
   rprt.add_argument("--gamma-correct", action=ST, help="Gamma correct final images")
-  rprt.add_argument("--render-frame", type=int, default=-1, help="Render 1 frame only, < 0 means none.")
-  rprt.add_argument("--exp-bg", action=ST, help="Use mask of labels while rendering. For vis only.")
+  rprt.add_argument("--render-frame", type=int, default=-1, help="Render 1 frame only, < 0 means none")
+  rprt.add_argument("--exp-bg", action=ST, help="Use mask of labels while rendering. For vis only")
+  rprt.add_argument("--test-white-bg", action=ST, help="Use white background while testing")
   rprt.add_argument("--flow-map", action=ST, help="Render a flow map for a dynamic nerf scene")
   rprt.add_argument("--rigidity-map", action=ST, help="Render a flow map for a dynamic nerf scene")
   rprt.add_argument(
@@ -1196,9 +1197,11 @@ def main():
   if not args.notraintest: test(model, cam, labels, args, training=True)
 
   test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
-  if test_light is not None: model.refl.light = test_light
-  if not args.notest: test(model, test_cam, test_labels, args, training=False)
 
+  if test_light is not None: model.refl.light = test_light
+  if args.test_white_bg: model.set_bg("white")
+
+  if not args.notest: test(model, test_cam, test_labels, args, training=False)
   if args.render_over_time >= 0: render_over_time(args, model, test_cam)
 
 if __name__ == "__main__": main()
