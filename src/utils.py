@@ -159,6 +159,7 @@ def save_plot(name, expected, *got):
 
 # https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
 # c = cosine of theta, s = sine of theta
+# Note, assumes that v and axis are sufficiently different
 #@torch.jit.script
 def rotate_vector(v, axis, c, s):
   return v * c \
@@ -353,6 +354,30 @@ def skew_symmetric_matrix(v):
       z, O,-x,
      -y, x, O
    ], dim=-1).reshape((*v.shape[:-1],3,3))
+
+# https://github.com/mitsuba-renderer/mitsuba2/blob/main/include/mitsuba/core/vector.h#L116
+# had to be significantly modified in order to add numerical stability while back-propagating.
+# returns a frame to be used for normalization
+#@torch.jit.script
+def coordinate_system(n):
+  n = F.normalize(n, eps=1e-6, dim=-1)
+  x, y, z = n.split(1, dim=-1)
+  sign = torch.where(z >= 0, 1., -1.)
+  s_z = sign + z
+  a = -torch.where(
+    s_z.abs() < 1e-6,
+    torch.copysign(torch.tensor(1e-6, device=z.device), s_z),
+    s_z,
+  ).reciprocal()
+  b = x * y * a
+
+  s = torch.cat([
+    (x * x * a * sign) + 1, b * sign, x * -sign,
+  ], dim=-1)
+  s = F.normalize(s, eps=1e-6, dim=-1)
+  t = F.normalize(s.cross(n, dim=-1), eps=1e-6, dim=-1)
+  s = F.normalize(n.cross(t, dim=-1), eps=1e-6, dim=-1)
+  return torch.stack([s, t, n], dim=-1)
 
 # Converts rectangular coordinates into spherical coordinates, [el, az, rad]
 @torch.jit.script

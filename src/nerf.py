@@ -324,11 +324,9 @@ class PlainNeRF(CommonNeRF):
 
   # returns the density, normals, and intermediate values of this NeRF
   def normals(self, pts):
-    pts = pts.requires_grad_()
     with torch.enable_grad():
+      pts = pts if pts.requires_grad else pts.requires_grad_()
       density, intermediate = self.first(pts).split([1, self.intermediate_size], dim=-1)
-      density = density.squeeze(-1)
-      assert(density.isfinite().all())
       normals = autograd(pts, density)
     return density, normals, intermediate
 
@@ -655,25 +653,28 @@ class BendyNeRF(nn.Module):
 
   def march(self, pts, r_d, ts, prev_density=None):
     density, n, intermediate = self.canon.normals(pts)
-    torch.cuda.synchronize()
-    #curr_density = self.bend(torch.cat([density[...,None],intermediate], dim=-1)).sigmoid()*5 + 1
+    n = F.normalize(n, dim=-1)
+    r_d = F.normalize(r_d, dim=-1)
+    curr_density = self.bend(torch.cat([density, intermediate], dim=-1)).sigmoid()*5 + 1
     if prev_density != None:
-      # TODO something here is numerically unstable.
-      #rel_ior = curr_density/prev_density # cannot be negative, since sotfplus
-      #torch.cuda.synchronize()
-      #plane_normal = F.normalize(torch.cross(r_d, n, dim=-1), dim=-1)
-      #sin_old = torch.linalg.norm(plane_normal, dim=-1, keepdim=True)
-      #sin_new = sin_old * rel_ior
-      #parity = (sin_new + 1).div(2).floor().int().remainder(2) == 0
-      #sin_theta = torch.fmod(sin_new+1, 2).sub(1)
-      sin_theta = 0.0
+      cos_old = (r_d * n).sum(dim=-1, keepdim=True)
+      # unsure why n must be detached, but propagating any gradient through it seems to break
+      # something.
+      ortho = torch.cross(r_d, n.detach(), dim=-1)
+      ortho = F.normalize(ortho, dim=-1)
 
-      cos_theta = (1-sin_theta*sin_theta).clamp(min=1e-6).sqrt()
-      new_rd = utils.rotate_vector(r_d, plane_normal, cos_theta, sin_theta)
+      rel_ior = curr_density/prev_density # cannot be negative, since sotfplus
+      sin_old = (1 - cos_old * cos_old).clamp(min=1e-5).sqrt()
+      sin_new = sin_old * rel_ior
+      parity = (sin_new + 1).div(2).floor().int().remainder(2) == 0
+      sin_theta = torch.fmod(sin_new+1,2).sub(1).detach()
+
+      cos_theta = (1-sin_theta*sin_theta).clamp(min=1e-5).sqrt()
+      new_rd = utils.rotate_vector(r_d, ortho, cos_theta, sin_theta)
       new_rd = F.normalize(new_rd, dim=-1)
     else: new_rd = r_d
     new_pt = pts + new_rd * ts
-    return new_pt, new_rd, None #curr_density
+    return new_pt, new_rd, curr_density
 
   def forward(self, rays):
     r_o, r_d, ts, _ = compute_ts(

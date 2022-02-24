@@ -6,7 +6,10 @@ import math
 from typing import Optional
 
 from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
-from .utils import ( autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, load_sigmoid )
+from .utils import (
+  coordinate_system,
+  autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, load_sigmoid
+)
 import src.lights as lights
 from .spherical_harmonics import eval_sh
 
@@ -653,30 +656,6 @@ def rusin_params(wo, wi):
   #phi_d = torch.remainder(phi_d, math.pi)
 
   return torch.stack([phi_d, cos_theta_h, cos_theta_d], dim=-1)
-
-# https://github.com/mitsuba-renderer/mitsuba2/blob/main/include/mitsuba/core/vector.h#L116
-# had to be significantly modified in order to add numerical stability while back-propagating.
-# returns a frame to be used for normalization
-#@torch.jit.script
-def coordinate_system(n):
-  n = F.normalize(n, eps=1e-6, dim=-1)
-  x, y, z = n.split(1, dim=-1)
-  sign = torch.where(z >= 0, 1., -1.)
-  s_z = sign + z
-  a = -torch.where(
-    s_z.abs() < 1e-6,
-    torch.copysign(torch.tensor(1e-6, device=z.device), s_z),
-    s_z,
-  ).reciprocal()
-  b = x * y * a
-
-  s = torch.cat([
-    (x * x * a * sign) + 1, b * sign, x * -sign,
-  ], dim=-1)
-  s = F.normalize(s, eps=1e-6, dim=-1)
-  t = F.normalize(s.cross(n, dim=-1), eps=1e-6, dim=-1)
-  s = F.normalize(n.cross(t, dim=-1), eps=1e-6, dim=-1)
-  return torch.stack([s, t, n], dim=-1)
 
 # https://www.pbr-book.org/3ed-2018/Geometry_and_Transformations/Vectors
 def coordinate_system2(n):
