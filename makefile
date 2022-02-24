@@ -101,10 +101,10 @@ food: clean
 	--crop-size 24 --near 2 --far 6 -lr 5e-4 --no-sched --valid-freq 499 \
 
 
-dnerf_dataset = trex
+dnerf_dataset = hook
 dnerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
-	--epochs 0 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--epochs 500_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
 	--crop-size 18 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 \
   --test-crop-size 48 --depth-images --save-freq 2500 \
@@ -358,7 +358,7 @@ test_original: clean
 bendy: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --epochs 80_000 --save models/lego.pt --bendy \
-	--near 2 --far 6 --batch-size 4 --crop-size 20 --model plain -lr 5e-4 \
+	--near 2 --far 6 --batch-size 1 --crop-size 8 --model plain -lr 1e-8 --clip-gradients 1 \
 	--loss-fns l2 --refl-kind pos #--load models/lego.pt #--omit-bg
 
 ae: clean

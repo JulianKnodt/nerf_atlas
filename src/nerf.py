@@ -7,6 +7,7 @@ import math
 from .neural_blocks import (
   SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder, EncodedGRU,
 )
+import src.utils as utils
 from .utils import (
   dir_to_elev_azim, autograd, laplace_cdf, load_sigmoid,
   sample_random_hemisphere, sample_random_sphere, upshifted_sigmoid,
@@ -157,7 +158,7 @@ class CommonNeRF(nn.Module):
     per_pixel_latent_size: int = 0,
     per_point_latent_size: int = 0,
 
-    intermediate_size: int = 0,
+    intermediate_size: int = 32,
 
     sigmoid_kind: str = "thin",
     bg: str = "black",
@@ -320,6 +321,16 @@ class PlainNeRF(CommonNeRF):
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
 
+  # returns the density, normals, and intermediate values of this NeRF
+  def normals(self, pts):
+    pts = pts.requires_grad_()
+    with torch.enable_grad():
+      density, intermediate = self.first(pts).split([1, self.intermediate_size], dim=-1)
+      density = density.squeeze(-1)
+      assert(density.isfinite().all())
+      normals = autograd(pts, density)
+    return density, normals, intermediate
+
   def from_pts(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
 
@@ -335,7 +346,8 @@ class PlainNeRF(CommonNeRF):
 
     intermediate = first_out[..., 1:]
 
-    view = r_d[None, ...].expand_as(pts)
+    while len(r_d.shape) < len(pts.shape): r_d = r_d.unsqueeze(0)
+    view = r_d.expand_as(pts)
     rgb = self.refl(x=pts, view=view, latent=torch.cat([latent, intermediate], dim=-1))
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
@@ -622,44 +634,68 @@ class HistogramNeRF(CommonNeRF):
 # This is a wrapper around a NeRF, which makes it bendy!
 class BendyNeRF(nn.Module):
   def __init__(self, canonical: CommonNeRF):
+    super().__init__()
     assert(isinstance(canonical, CommonNeRF)), "Must pass an instance of CommonNeRF"
-    self.bend = SkipConnMLP(in_size=3, out=4, num_layers=5,hidden_size=128, init="zero")
+    # if only taking in a density, but probably need to take in more
+    input_dims = canonical.intermediate_size + 1
+    self.bend = SkipConnMLP(
+      in_size = input_dims,
+      out=1, num_layers=5, hidden_size=128, init="xavier"
+    )
     self.canon = canonical
 
   @property
-  def refl(self): return self.canonical.refl
+  def refl(self): return self.canon.refl
   def set_refl(self, refl): self.nerf.set_refl(refl)
   @property
-  def nerf(self): return self.canonical.nerf
+  def nerf(self): return self.canon.nerf
+  @property
+  def intermediate_size(self): return self.canon.intermediate_size
 
-  def march(self, curr_pt, curr_rd, ts):
-    bend_quat = F.normalize(self.bend(curr_pt), dim=-1)
-    # TODO apply bend to curr_rd
-    new_rd = utils.quaternion_rot(bend_rot, curr_rd)
-    new_pt = curr_pt + ts * new_rd
-    return new_pt, new_rd
+  def march(self, pts, r_d, ts, prev_density=None):
+    density, n, intermediate = self.canon.normals(pts)
+    torch.cuda.synchronize()
+    #curr_density = self.bend(torch.cat([density[...,None],intermediate], dim=-1)).sigmoid()*5 + 1
+    if prev_density != None:
+      # TODO something here is numerically unstable.
+      #rel_ior = curr_density/prev_density # cannot be negative, since sotfplus
+      #torch.cuda.synchronize()
+      #plane_normal = F.normalize(torch.cross(r_d, n, dim=-1), dim=-1)
+      #sin_old = torch.linalg.norm(plane_normal, dim=-1, keepdim=True)
+      #sin_new = sin_old * rel_ior
+      #parity = (sin_new + 1).div(2).floor().int().remainder(2) == 0
+      #sin_theta = torch.fmod(sin_new+1, 2).sub(1)
+      sin_theta = 0.0
+
+      cos_theta = (1-sin_theta*sin_theta).clamp(min=1e-6).sqrt()
+      new_rd = utils.rotate_vector(r_d, plane_normal, cos_theta, sin_theta)
+      new_rd = F.normalize(new_rd, dim=-1)
+    else: new_rd = r_d
+    new_pt = pts + new_rd * ts
+    return new_pt, new_rd, None #curr_density
 
   def forward(self, rays):
     r_o, r_d, ts, _ = compute_ts(
-      rays, self.t_near, self.t_far, self.steps, perturb = 1 if self.training else 0,
+      rays, self.canon.t_near, self.canon.t_far, self.canon.steps, perturb = 1 if self.training else 0,
     )
     self.canon.ts = self.ts = ts
-    print(r_o.shape, ts.shape)
-    # TODO which dimension was step dimension?
-    exit()
-    curr_pt = r_o + r_d * self.near
+    curr_pt = r_o + r_d * self.canon.t_near
     curr_rd = r_d
-    pts = [curr_pt]
-    r_ds = [curr_r_d]
-    # This may be costly?
-    for t in ts.split(dim=0):
-      curr_pt, curr_rd = self.march(curr_pt, curr_rd)
+    pts = []
+    r_ds = []
+    curr_density = None
+    # This is extremely costly since we need to compute a new direction for
+    for t in ts.split(1, dim=0):
+      curr_pt, curr_rd, curr_density = self.march(curr_pt, curr_rd, t, curr_density)
       pts.append(curr_pt)
       r_ds.append(curr_rd)
     pts = torch.stack(pts, dim=0)
     r_ds = torch.stack(r_ds, dim=0)
-
-    return self.canon.from_pts(pts, ts, r_o, r_ds)
+    assert(r_ds.isfinite().all())
+    assert(pts.isfinite().all())
+    out = self.canon.from_pts(pts, ts, r_o, r_ds)
+    assert(out.isfinite().all())
+    return out
 
 class SplineNeRF(CommonNeRF):
   def __init__(self, out_features: int = 3, **kwargs):
@@ -1111,7 +1147,7 @@ class DynamicNeRF(nn.Module):
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz, rigidity
       in_size=4, out=3+1, num_layers = 5, hidden_size = 256,
-      activation=FourierEncoder(input_dims=4),
+      enc=FourierEncoder(input_dims=4),
       init="xavier",
     )
     self.time_estim = self.direct_predict
@@ -1120,7 +1156,7 @@ class DynamicNeRF(nn.Module):
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
       in_size=3, out=spline_points*3+1, num_layers=5,
-      activation=FourierEncoder(input_dims=3),
+      enc=FourierEncoder(input_dims=3),
       hidden_size=256, init="xavier",
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau

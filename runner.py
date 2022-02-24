@@ -451,7 +451,7 @@ if torch.cuda.is_available():
   torch.cuda.set_device(device)
 
 # DEBUG
-# torch.autograd.set_detect_anomaly(True); print("HAS DEBUG")
+#torch.autograd.set_detect_anomaly(True); print("HAS DEBUG")
 
 def render(
   model, cam, crop,
