@@ -144,9 +144,13 @@ def arguments():
   a.add_argument(
     "--volsdf-alternate", help="Use alternating volume rendering/SDF training volsdf", action=ST,
   )
+  # TODO unify this with the flag below, since they do the same thing.
   a.add_argument(
     "--latent-size",type=int, default=32,
-    help="Latent-size to use in shape models. If not supported by the shape model, it will be ignored.",
+    help="Latent-size to use in shape models. If not supported by the shape model, it will be ignored",
+  )
+  a.add_argument(
+    "--shape-to-refl-size", type=int, default=64, help="Size of vector passed from density to reflectance model",
   )
   a.add_argument(
     "--refl-order", default=2, type=int, help="Order for classical Spherical Harmonics & Fourier Basis BSDFs/Reflectance models",
@@ -154,9 +158,7 @@ def arguments():
   a.add_argument(
     "--inc-fourier-freqs", action=ST, help="Multiplicatively increase the fourier frequency standard deviation on each run",
   )
-  a.add_argument(
-    "--rig-points", type=int, default=128, help="Number of rigs points to use in RigNeRF"
-  )
+  a.add_argument("--rig-points", type=int, default=128, help="Number of rigs points to use in RigNeRF")
 
   refla = a.add_argument_group("reflectance")
   refla.add_argument(

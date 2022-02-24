@@ -120,6 +120,7 @@ def load_nerf(args):
     "per_pixel_latent_size": per_pixel_latent_size,
     "per_point_latent_size": 0,
     "instance_latent_size": 0,
+    "intermediate_size": args.shape_to_refl_size,
     "sigmoid_kind": args.sigmoid_kind,
     "bg": args.bg,
   }
