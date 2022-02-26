@@ -848,7 +848,7 @@ class VolSDF(CommonNeRF):
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
         f"Must have light w/ volsdf integration {type(self.sdf.refl)}"
-      self.occ = load_occlusion_kind({}, occ_kind, self.sdf.latent_size)
+      self.occ = load_occlusion_kind({}, occ_kind, self.sdf.intermediate_size)
 
       if integrator_kind == "direct": self.secondary = self.direct
       elif integrator_kind == "path": self.convert_to_path()
@@ -863,7 +863,7 @@ class VolSDF(CommonNeRF):
     self.transfer_fn = SkipConnMLP(
       in_size=6, out=1, enc=FourierEncoder(input_dims=6),
       # multiply by two here ince it's the pair of latent values at sets of point
-      latent_size = self.sdf.latent_size * 2,
+      latent_size = self.sdf.intermediate_size * 2,
       hidden_size=512,
     )
     return True
@@ -931,7 +931,7 @@ class VolSDF(CommonNeRF):
     return self.from_pts(pts, self.ts, r_o, r_d)
 
   @property
-  def intermediate_size(self): return self.sdf.latent_size
+  def intermediate_size(self): return self.sdf.intermediate_size
 
   def set_refl(self, refl): self.sdf.refl = refl
 
@@ -1182,7 +1182,8 @@ class DynamicNeRF(nn.Module):
     init_ps = ps[:1]
     self.dp = self.spline_fn(ps - init_ps, t, self.spline_n)
     self.rigid_dp = self.dp * self.rigidity
-    return self.rigid_dp + init_ps[0]
+    self.init_p = init_ps.squeeze(0)
+    return self.rigid_dp + self.init_p
 
   @property
   def nerf(self): return self.canonical

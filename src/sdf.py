@@ -16,13 +16,13 @@ def load(args, with_integrator:bool):
   cons = sdf_kinds.get(args.sdf_kind, None)
   if cons is None: raise NotImplementedError(f"Unknown SDF kind: {args.sdf_kind}")
 
-  model = cons(latent_size=args.latent_size)
+  model = cons(intermediate_size=args.shape_to_refl_size)
 
   if args.sphere_init: model.set_to_sphere()
 
   if args.bound_sphere_rad > 0: model = UnitSphere(inner=model,rad=args.bound_sphere_rad)
   # refl inst may also have a nested light
-  refl_inst = refl.load(args, args.refl_kind, args.space_kind, model.latent_size)
+  refl_inst = refl.load(args, args.refl_kind, args.space_kind, model.intermediate_size)
   isect = march.load_intersection_kind(args.sdf_isect_kind)
 
   sdf = SDF(model, refl_inst, isect=isect, t_near=args.near, t_far=args.far)
@@ -34,10 +34,10 @@ def load(args, with_integrator:bool):
 class SDFModel(nn.Module):
   def __init__(
     self,
-    latent_size: int = 32,
+    intermediate_size: int = 32,
   ):
     super().__init__()
-    self.latent_size = latent_size
+    self.intermediate_size = intermediate_size
   def forward(self, _pts): raise NotImplementedError()
 
   def normals(self, pts, values = None):
@@ -68,7 +68,7 @@ class UnitSphere(SDFModel):
     inner: SDFModel,
     rad:float=3,
   ):
-    super().__init__(latent_size=inner.latent_size)
+    super().__init__(intermediate_size=inner.intermediate_size)
     self.inner = inner
     self.rad = rad
 
@@ -103,7 +103,7 @@ class SDF(nn.Module):
   def sdf(self): return self
 
   @property
-  def latent_size(self): return self.underlying.latent_size
+  def intermediate_size(self): return self.underlying.intermediate_size
 
   def normals(self, pts, values = None): return self.underlying.normals(pts, values)
   def from_pts(self, pts):
@@ -137,7 +137,7 @@ class SDF(nn.Module):
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       iters=128 if self.training else 192,
     )
-    latent = None if self.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
+    latent = None if self.intermediate_size == 0 else self.underlying(pts[hit])[..., 1:]
     out = torch.zeros_like(r_d)
     n = None
     if self.refl.can_use_normal:
@@ -160,7 +160,7 @@ class SDF(nn.Module):
       self.underlying, r_o, r_d, near=self.near, far=self.far,
       iters=128 if self.training else 192,
     )
-    latent = None if self.underlying.latent_size == 0 else self.underlying(pts[hit])[..., 1:]
+    latent = None if self.underlying.intermediate_size == 0 else self.underlying(pts[hit])[..., 1:]
     out = torch.zeros_like(r_d)
     out[hit] = self.normals(pts[hit])
     return out
@@ -179,7 +179,7 @@ class SmoothedSpheres(SDFModel):
   ):
     super().__init__(**kwargs)
     # has no latent size
-    self.latent_size = 0
+    self.intermediate_size = 0
 
     self.centers = nn.Parameter(0.3 * torch.rand(n,3, requires_grad=True) - 0.15)
     self.radii = nn.Parameter(0.2 * torch.rand(n, requires_grad=True) - 0.1)
@@ -218,7 +218,7 @@ class Triangles(SDFModel):
   ):
     super().__init__(**kwargs)
     # has no latent size
-    self.latent_size = 0
+    self.intermediate_size = 0
 
     # each triangle requires 3 points
     self.points = nn.Parameter(0.3 * torch.rand(n,3,3, requires_grad=True) - 0.15)
@@ -251,7 +251,7 @@ class MLP(SDFModel):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
-      in_size=3, out=1+self.latent_size,
+      in_size=3, out=1+self.intermediate_size,
       enc=FourierEncoder(input_dims=3, sigma=1<<4),
       num_layers=6, hidden_size=256, init="xavier",
     )
@@ -265,13 +265,13 @@ class CurlMLP(SDFModel):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
-      in_size=3, out=1+self.latent_size, enc=FourierEncoder(input_dims=3, sigma=1<<5),
+      in_size=3, out=1+self.intermediate_size, enc=FourierEncoder(input_dims=3, sigma=1<<5),
       num_layers=6, hidden_size=256, init="xavier",
     )
   def forward(self, x):
     with torch.enable_grad():
       x = x if x.requires_grad else x.requires_grad_()
-      field, latent = self.mlp(x).split([1, self.latent_size], dim=-1)
+      field, latent = self.mlp(x).split([1, self.intermediate_size], dim=-1)
       field = torch.linalg.norm(autograd(x, field), dim=-1, keepdim=True) * field.tanh()
       return torch.cat([field, latent], dim=-1)
 
@@ -280,7 +280,7 @@ class SIREN(SDFModel):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.siren = SkipConnMLP(
-      in_size=3, out=1+self.latent_size, enc=None,
+      in_size=3, out=1+self.intermediate_size, enc=None,
       num_layers=5, hidden_size=256,
       activation=torch.sin,
       # Do not have skip conns
@@ -300,9 +300,9 @@ class Local(SDFModel):
   ):
     super().__init__(**kwargs)
     self.part_sz = partition_sz
-    self.latent = SkipConnMLP(in_size=3,out=self.latent_size,skip=4)
+    self.latent = SkipConnMLP(in_size=3,out=self.intermediate_size,skip=4)
     self.tform = SkipConnMLP(
-      in_size=3, out=1+self.latent_size, latent_size=self.latent_size,
+      in_size=3, out=1+self.intermediate_size, latent_size=self.intermediate_size,
       enc=NNEncoder(input_dims=3),
     )
   def forward(self, x):

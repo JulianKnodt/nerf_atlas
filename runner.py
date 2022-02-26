@@ -287,6 +287,7 @@ def arguments():
   vida.add_argument(
     "--spline-len-decay", type=float, default=0, help="Weight for length of spline regularization"
   )
+  vida.add_argument("--spline-pt0-decay", type=float, default=0, help="Add regularization to first point of spline")
   vida.add_argument(
     "--voxel-random-spline-len-decay", type=float, default=0,
     help="Decay for length, randomly sampling a chunk of the grid instead of visible portions",
@@ -637,13 +638,6 @@ def train(model, cam, labels, opt, args, sched=None):
       refl = model.refl(pts[None].repeat_interleave(2,dim=0), views)
       loss = loss + args.view_variance_decay * F.mse_loss(refl[0], refl[1])
 
-    # automatically apply eikonal loss for DynamicNeRF
-    if args.sdf_eikonal > 0 and isinstance(model, nerf.DynamicNeRF):
-      t = torch.rand(*pts.shape[:-1], 1, device=device)
-      dp = model.time_estim(pts, t)
-      n_dyn = model.sdf.normals(pts + dp)
-      loss = loss + args.sdf_eikonal * utils.eikonal_loss(n_dyn)
-
     if args.volsdf_scale_decay > 0: loss = loss + args.volsdf_scale_decay * model.scale_post_act
 
 
@@ -725,6 +719,8 @@ def train(model, cam, labels, opt, args, sched=None):
       arc_lens = nerf.arc_len(model.ctrl_pts)
       w = model.canonical.weights.detach().squeeze(1)
       loss = loss + args.spline_len_decay * (w * arc_lens).mean()
+    if args.spline_pt0_decay > 0 and hasattr(model, "init_p"):
+      loss = loss + args.spline_pt0_decay * torch.linalg.norm(model.init_p, dim=-1).mean()
     # TODO is there any way to unify these two? Maybe provide a method to get a random sample on
     # the class?
     if args.voxel_random_spline_len_decay > 0:
@@ -737,6 +733,13 @@ def train(model, cam, labels, opt, args, sched=None):
       pts = torch.stack(model.delta_estim(pts)[..., 1:].split(3,dim=-1), dim=0)\
         [:, :, None, None, None, :]
       loss = loss + args.random_spline_len_decay * nerf.arc_len(pts).mean()
+
+    # apply eikonal loss for rendered DynamicNeRF
+    if args.sdf_eikonal > 0 and isinstance(model, nerf.DynamicNeRF):
+      t = torch.rand(*pts.shape[:-1], 1, device=device)
+      dp = model.time_estim(pts, t)
+      n_dyn = model.sdf.normals(pts + dp)
+      loss = loss + args.sdf_eikonal * utils.eikonal_loss(n_dyn)
 
 
     # --- Finished with applying any sort of regularization
