@@ -103,7 +103,7 @@ food: clean
 
 dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
+	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
 	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
 	--crop-size 18 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 \
@@ -111,7 +111,7 @@ dnerf: clean
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted --random-spline-len-decay 1e-5 \
-  --notraintest --spline-pt0-decay 1e-3 \
+  --notraintest \
   --load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \

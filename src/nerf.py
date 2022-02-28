@@ -1133,7 +1133,7 @@ def cubic_bezier(coeffs, t, N: int):
   assert(N == 4), f"Must be cubic, got {N}"
   m1t = 1 - t
   m1t_sq, t_sq = m1t * m1t, t * t
-  k = torch.stack([m1t_sq * m1t, m1t_sq * t, t_sq * m1t, t_sq * t], dim=0)
+  k = torch.stack([m1t_sq * m1t, 3 * m1t_sq * t, 3 * t_sq * m1t, t_sq * t], dim=0)
   return (k * coeffs).sum(dim=0)
 
 # Dynamic NeRF for multiple frams
@@ -1148,18 +1148,14 @@ class DynamicNeRF(nn.Module):
   def set_delta_estim(self):
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz, rigidity
-      in_size=4, out=3+1, num_layers = 5, hidden_size = 256,
-      enc=FourierEncoder(input_dims=4),
-      init="xavier",
+      in_size=4, out=3+1, num_layers = 5, hidden_size = 256, init="xavier",
     )
     self.time_estim = self.direct_predict
   def set_spline_estim(self, spline_points):
     assert(spline_points > 1), "Must pass N > 1 spline"
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
-      in_size=3, out=spline_points*3+1, num_layers=5,
-      enc=FourierEncoder(input_dims=3),
-      hidden_size=256, init="xavier",
+      in_size=3, out=(spline_points-1)*3+1, num_layers=5, hidden_size=256, init="xavier",
     )
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
     self.spline_n = spline_points
@@ -1174,16 +1170,17 @@ class DynamicNeRF(nn.Module):
     return torch.cat([self.rigid_dp, encoding], dim=-1)
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
-    rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)
+    rigidity, ps = self.delta_estim(x).split([1, 3 * (self.spline_n-1)], dim=-1)
     self.rigidity = rigidity.sigmoid()
-    ps = torch.stack(ps.split([3] * self.spline_n, dim=-1), dim=0)
-    # keep the first point non-rigid, this allows for learning a canonical configuration
+    ps = torch.stack([
+        torch.zeros_like(ps[..., :3]),
+        *ps.split([3] * (self.spline_n-1), dim=-1)
+    ], dim=0)
+    # keep the first point rigid, this allows for learning a canonical configuration
     # but gives more degrees of freedom to t=0.
-    init_ps = ps[:1]
-    self.dp = self.spline_fn(ps - init_ps, t, self.spline_n)
+    self.dp = self.spline_fn(ps, t, self.spline_n)
     self.rigid_dp = self.dp * self.rigidity
-    self.init_p = init_ps.squeeze(0)
-    return self.rigid_dp + self.init_p
+    return self.rigid_dp
 
   @property
   def nerf(self): return self.canonical
