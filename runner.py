@@ -29,7 +29,7 @@ import src.hyper_config as hyper_config
 import src.renderers as renderers
 from src.lights import light_kinds
 from src.opt import UniformAdam
-from src.utils import ( save_image, save_plot, load_image, dir_to_elev_azim )
+from src.utils import ( save_image, save_plot, load_image, dir_to_elev_azim, git_hash )
 from src.neural_blocks import ( Upsampler, SpatialEncoder, StyleTransfer, FourierEncoder )
 
 import os
@@ -548,6 +548,7 @@ def sqr(x): return x * x
 # train the model with a given camera and some labels (imgs or imgs+times)
 # light is a per instance light.
 def train(model, cam, labels, opt, args, sched=None):
+  print(f"[info]: git commit {git_hash()}")
   if args.epochs == 0: return
 
   loss_fn = load_loss_fn(args, model)
@@ -917,7 +918,7 @@ def test(model, cam, labels, args, training: bool = True):
     render_test_set(model, multi_cams, multi_labels, offset=100)
     labels =  torch.cat([labels, multi_labels], dim=0)
 
-  summary_string = f"""[Summary ({"training" if training else "test"})]:
+  summary_string = f"""[Summary ({"training" if training else "test"}) @ {git_hash()}]:
 \tmean {np.mean(ls):.03f}
 \tmin {min(ls):.03f}
 \tmax {max(ls):.03f}

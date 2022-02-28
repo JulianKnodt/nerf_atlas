@@ -512,3 +512,6 @@ def load_sigmoid(kind="thin"):
   if sigmoid is None: raise NotImplementedError(f"Unknown sigmoid kind({kind})")
   return sigmoid
 
+def git_hash():
+  import subprocess
+  return subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
