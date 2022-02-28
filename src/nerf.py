@@ -1377,7 +1377,7 @@ class DynamicNeRFVoxel(nn.Module):
     self.spline = spline
     # While it may be possible to always use 0 for the first point, somehow this leads
     # to worse convergence? No idea why since the formulation is the same.
-    self.ctrl_pts_grid = nn.Parameter(torch.randn([reso]*3+[3*spline])*0.3)
+    self.ctrl_pts_grid = nn.Parameter(torch.randn([reso]*3+[3*(spline-1)])*0.3)
     self.rigidity_grid = nn.Parameter(torch.zeros([reso]*3+[1]))
     self.spline_fn = cubic_bezier if spline == 4 else de_casteljau
     # check which items are seen in training, and can be used to zero out items later.
@@ -1414,16 +1414,14 @@ class DynamicNeRFVoxel(nn.Module):
       .split(3, dim=-1)
     neighbor_ctrl_pts = torch.stack(neighbor_ctrl_pts, dim=0)
     ctrl_pts = (trilin_weights[None] * neighbor_ctrl_pts).sum(dim=-2)
-    init_pt = ctrl_pts[:1]
-    self.ctrl_pts = ctrl_pts = ctrl_pts - init_pt
+    self.ctrl_pts = ctrl_pts = torch.cat([torch.zeros_like(ctrl_pts[:1]), ctrl_pts], dim=0)
     # if self.training: self.seen[nx,ny,nz] = True # Assign all seen points to be true in training.
-    # Clamp to almost 1, better performance than just using 1.
-    t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1).clamp(max=0.999)
-    self.dp = dp = self.spline_fn(ctrl_pts-init_pt, t, self.spline)
+    t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1)
+    self.dp = dp = self.spline_fn(ctrl_pts, t, self.spline)
     self.rigidity = (trilin_weights * grid_lookup(nx,ny,nz,self.rigidity_grid.sigmoid().squeeze(0)))\
       .sum(dim=-2)
     self.rigid_dp = dp * self.rigidity
-    return self.canonical.from_pts(self.pts + self.rigid_dp + init_pt[0], self.ts, r_o, r_d)
+    return self.canonical.from_pts(self.pts + self.rigid_dp, self.ts, r_o, r_d)
 
 # TODO fix this
 class SinglePixelNeRF(nn.Module):
