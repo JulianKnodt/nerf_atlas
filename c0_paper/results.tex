@@ -1,17 +1,19 @@
 \section*{Results}
 
 In order to demonstrate that our method works, we run it on D-NeRF's synthetic
-dataset which contains 8 different rendered scenes. These scenes have ground truth camera positions and viewing directions, as well as timestamps. They capture physically plausible movement, so there are no discontinuities or jumps between frames..
+dataset which contains 8 different rendered scenes. These scenes have ground truth camera positions and viewing directions, as well as timestamps. They capture physically plausible movement, so there are no discontinuities or jumps between frames.
+
+While we do not demonstrate our method on any real datasets, our approach does not have any limitations that would prevent it from doing so as compared to D-NeRF. Given that a real dataset would have to strictly abide by physics, the bias introduced by enforcing continuity should force our model closer to correctness than D-NeRF.
 
 \subsection*{Quantitative Results}
 
-The Bezier spline design is able to slightly outperform D-NeRF on their synthetic dataset. This is likely because D-NeRF can predict non-realistic movement, such as jumping from frame-to-frame, or suddenly accelerating. In practice, D-NeRF learns fairly smooth movement, but quantitatively looks different from our methods movement, which is likely due to variations in velocity and acceleration. Using Bezier spline, we enforce that movement is fluid, and thus can better reproduce missing frames. This leads to a small improvement in PSNR, because the dataset contains relatively simple movement, but we expect that in longer sequences or data with large gaps this difference would be more visible.
+The Spline-NeRF is able to perform on par with D-NeRF on their synthetic dataset, and slightly outperforms it in some cases. This is likely because D-NeRF can predict non-realistic movement, such as jumping from frame-to-frame, or suddenly accelerating. In practice, D-NeRF learns fairly smooth movement, but quantitatively looks different from our methods movement, which is likely due to variations in velocity and acceleration of the learned approach. By using Bezier splines, we enforce that movement is fluid and can better reproduce missing frames. This leads to a small improvement in PSNR, because the dataset contains simple movement, but we expect that in longer sequences or data with large gaps this difference would be more visible.
 
 \subsection*{Qualitative Results}
 
-The difference between our work and D-NeRF can be observed in the difference of flow between scenes. It's clear from Fig.~\ref{fig:dnerf_cmp} that our method more accurately captures squashing and stretching of movement, as the top of the ball is not moving but the bottom of the ball is falling. In contrast, D-NeRF contains approximately equal flow for the entire ball.
+The difference between our work and D-NeRF can be observed in the difference of flow between scenes. It can be observed from Fig.~\ref{fig:dnerf_cmp} that our method more accurately captures squashing and stretching of movement, as the top of the ball is not moving but the bottom of the ball is falling. In contrast, D-NeRF contains approximately equal flow for the entire ball.
 
-The difference between the two is also more clearly seen in videos of reconstruction. $C^0$-NeRF visibly has the effect of 'tweening between views, slowing into stops, while D-NeRF has more less smooth starts and stops. While it's difficult to characterize the plausibility of this movement, future work can measure smoothness of velocity and acceleration and use that as a way to differentiate between the approaches.
+The difference between the two is also more clearly seen in videos of reconstruction. Spline-NeRF visibly has the effect of tweening between views, slowing into stops, while D-NeRF has more less smooth starts and stops.
 
 \begin{table*}[t]
     \centering
@@ -19,31 +21,33 @@ The difference between the two is also more clearly seen in videos of reconstruc
     \hline
     \textbf{PSNR$^\uparrow$ $|$ MS-SSIM$^\uparrow$} & \multicolumn{2}{c|}{Bouncing Balls} & \multicolumn{2}{c|}{Hellwarrior} & \multicolumn{2}{c|}{Hook} & \multicolumn{2}{c|}{Jumping Jacks} \\
     \hline
-    D-NeRF & \textbf{24.646} & \textbf{0.975}
+    D-NeRF & \textbf{26.139} & \textbf{0.974}
            & 33.314 & 0.968
            & 27.954 & 0.978
            & 27.610 & 0.979 \\
     \hline
-    $C^0$-NeRF & 24.251 & 0.971
+    Spline-NeRF & 25.139 & 0.967
                & \textbf{33.504} & 0.968
                & \textbf{28.104} & \textbf{0.979}
                & \textbf{27.756} & \textbf{0.981} \\
     \hline
     & \multicolumn{2}{c|}{Lego} & \multicolumn{2}{c|}{Mutant} & \multicolumn{2}{c|}{Standup} & \multicolumn{2}{c|}{T-Rex} \\
     \hline
-    D-NeRF & \textbf{23.232} & \textbf{0.940}
-           & 28.693 & 0.981
+    D-NeRF & \textbf{23.409} & \textbf{0.934}
+           & 28.833 & 0.979
            & 31.307 & 0.989
-           & \textbf{25.525} & \textbf{0.975} \\
+           & \textbf{25.734} & \textbf{0.978} \\
     \hline
-    $C^0$-NeRF & 23.148 & 0.938
-               & \textbf{28.979} & \textbf{0.983}
+    Spline-NeRF & 23.302 & 0.933
+               & \textbf{29.222} & 0.979
                & \textbf{31.349} & \textbf{0.990}
                & 25.421 & 0.973 \\
     \hline
     \end{tabular}
+    \vspace{3pt}
     \caption{
-        Bezier splines are able to recover movement with slightly improved accuracy in dynamic scenes as compared to D-NeRF~\cite{pumarola2020dnerf}. Despite, or maybe because of, the forced prior of continuous movement, we are able to learn a smooth interpolation through each frame. We randomly samples all frames from the start of training, as opposed to D-NeRF which requires slowly introducing new frames, but we also remove the constraint that at time 0 D-NeRF must have no movement. Here, we parametrize $C^0$-NeRF with 6 control points.
+        \textbf{Metric comparison of Spline-NeRF to D-NeRF.}
+        Bezier splines are able to recover movement with slightly improved accuracy in dynamic scenes as compared to D-NeRF~\cite{pumarola2020dnerf}. Despite, or maybe because of, the forced prior of continuous movement, we are able to learn a smooth interpolation through each frame. We randomly samples all frames from the start of training, as opposed to D-NeRF which requires slowly introducing new frames, but we also remove the constraint that at time 0 D-NeRF must have no movement. Here, we parametrize Spline-NeRF with 6 control points.
     }
 \end{table*}
 
@@ -51,6 +55,7 @@ The difference between the two is also more clearly seen in videos of reconstruc
     \includegraphics[width=\textwidth]{dnerf_compare}
     \caption{
         \label{fig:dnerf_cmp}
+        \textbf{Visual comparison of Spline-NeRF to D-NeRF.}
         Results comparing movement in D-NeRF~\cite{pumarola2020dnerf} versus Bezier-splines for a small timestep. There is substantial difference in the predicted flow, since D-NeRF cannot guarantee the initial frame has no movement. There is also a significant difference in rigidity, which is not easily explained. We believe it may be significantly easier to model low movement with splines, thus there is less of a need for rigidity.
     }
 \end{figure*}

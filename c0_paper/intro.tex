@@ -25,5 +25,26 @@ In summary, our contributions are as follows:
 \begin{enumerate}
     \item A general architecture for $C^0, C^1$ continuity over a continuous domain.
     \item An application of this architecture combined with D-NeRF to enforce continuity of movement, a canonical NeRF, and an analytic form at no additional cost, while slightly outperforming the original.
-    \item An evaluation of our architecture against an implementation of D-NeRF which performs comparably to the original.
+    \item An evaluation of our architecture against an implementation of D-NeRF, which demonstrates Spline-NeRF performs approximately the same as D-NeRF.
 \end{enumerate}
+
+
+\begin{figure*}
+    \centering
+    \begin{minipage}[b]{0.45\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{spline_nerf_diagram.png}
+    \caption{
+        \textbf{Spline-based Dynamic NeRF}. Instead of using an MLP to directly predict ray-bending ($\delta(x,y,z)$)  at a given time, we predict a set of Bezier spline control points. Then, we use the Bezier function to interpolate position based on time.
+    }
+    \label{fig:arch_diagram}
+    \end{minipage}\hfill
+    \begin{minipage}[b]{0.45\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{c0_paper/voxel_spline.png}
+    \caption{
+        \label{fig:voxel_diagram}
+        \textbf{Voxelized spline-based Dynamic-NeRF}. At each voxel coordinate, we store an additional set of control points which are used for ray-bending. This allows us to efficiently and sparsely bend rays, without needing to query an MLP. Our implementation shares much of the same code as the MLP-based approach, but has better memory usage.
+    }
+    \end{minipage}
+\end{figure*}

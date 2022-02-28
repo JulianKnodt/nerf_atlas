@@ -1,27 +1,25 @@
-\documentclass[10pt,twocolumn,letterpaper]{article}
+\documentclass[runningheads]{llncs}
 
-\usepackage{cvpr}
 \usepackage[colorlinks=true,linkcolor = blue,urlcolor = blue]{hyperref}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{graphicx}
 \usepackage{siunitx}
+\usepackage[accsupp]{axessibility}
 \usepackage[table]{xcolor}
 
-
-%\cvprfinalcopy
+% comment out for final submission
+\usepackage{ruler}
+\usepackage[width=122mm,left=12mm,paperwidth=146mm,height=193mm,top=12mm,paperheight=217mm]{geometry}
 
 \begin{document}
+\pagestyle{headings}
+\mainmatter
+\def\ECCVSubNumber{TODO}
 
-
-\title{$C^0$-Continuous Learned Time-Series Reconstruction for Dynamic NeRF}
-\author{Julian Knodt}
-\affiliation{
-  \institution{Princeton University}
-  \city{Princeton}
-  \state{New Jersey}
-  \country{USA}
-}
+\title{Spline-NeRF: $C^0$-Continuous Dynamic NeRF}
+\author{Anonymous ECCV Submission}
+\institute{Paper ID \ECCVSubNumber}
 
 \maketitle
 
@@ -29,11 +27,10 @@
 The problem of reconstructing continuous functions over time is important for problems such as reconstructing moving scenes, music generation, and plausible interpolation.
 Previous approaches that use deep-learning rely on regularization to ensure that reconstructions are approximately continuous, which works well on short sequences. As sequence length grows, though, it becomes more difficult to regularize, and it becomes less feasible to learn only through regularization.
 
-We propose a new architecture for function reconstruction based on classical Bezier splines, which ensures $C^0, C^1$-continuity. What is meant by $C^0$ continuity is that $\forall c:\lim\limits_{x\to c} f(x) = f(c)$, or more intuitively there are no breaks at any point in the function. In order to demonstrate our architecture, we reconstruct dynamic scenes using Neural Radiance Fields, but hope it is clear that our approach is more general and can be applied to a large
-variety of problems. We demonstrate that we can recover a function $B_(\beta, t\in[0,1])$, where $B$ is a Bezier spline
-parametrized by the control points $\beta$. This allows for $C^0$ and $C^1$ continuity, allowing for guaranteed interpolation over time. We reconstruct $\beta$ with an MLP, blending machine learning with classical animation techniques. All code is available at \url{https://github.com/JulianKnodt/nerf_atlas}.
+We propose a new architecture for function reconstruction based on classical Bezier splines, which ensures $C^0, C^1$-continuity, where $C^0$ continuity is that $\forall c:\lim\limits_{x\to c} f(x) = f(c)$, or more intuitively, there are no breaks at any point in the function. In order to demonstrate our architecture, we reconstruct dynamic scenes using Neural Radiance Fields, but hope it is clear that our approach is general and can be applied to a variety of problems. We recover a function $B_(\beta, t\in[0,1])$, where $B$ is a Bezier spline
+parametrized by the control points $\beta$. Using Bezier splines, reconstructions ensures $C^0$ and $C^1$ continuity, allowing for guaranteed interpolation over time. We reconstruct $\beta$ with an MLP, blending machine learning with classical animation techniques. All code is available at
+\iffalse \url{https://github.com/JulianKnodt/nerf_atlas} \fi OMITTED, and datasets are from prior work.
 
-I am publishing this earlier than when I'd like to do so, and my reasoning for doing so is at \url{TODO}.
 \end{abstract}
 
 \begin{figure*}
