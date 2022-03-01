@@ -396,7 +396,7 @@ class NeRFVoxel(nn.Module):
     out_features: int = 3,
     resolution:int = 64,
     alpha_init:float = 0.1,
-    grid_radius:float=1.5,
+    grid_radius:float=1.3,
     t_near: float = 0.2,
     t_far: float = 2,
     # For now we still raymarch, and do not perform explicit intersection.
@@ -513,7 +513,7 @@ class NeRFVoxel(nn.Module):
     densities = (trilin_weights * neighbor_sigma).sum(dim=-2)
     rgb = self.brdf(params=(trilin_weights * neighbor_params).sum(dim=-2), view=r_d)
     self.alpha, self.weights = alpha_from_density(densities.squeeze(-1), ts.squeeze(-1), r_d)
-    return volumetric_integrate(self.weights, rgb) + self.sky_color(r_d, weights)
+    return volumetric_integrate(self.weights, rgb) + self.sky_color(r_d, self.weights)
 
 class CoarseFineNeRF(CommonNeRF):
   def __init__(
@@ -1418,8 +1418,10 @@ class DynamicNeRFVoxel(nn.Module):
     # if self.training: self.seen[nx,ny,nz] = True # Assign all seen points to be true in training.
     t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1)
     self.dp = dp = self.spline_fn(ctrl_pts, t, self.spline)
-    self.rigidity = (trilin_weights * grid_lookup(nx,ny,nz,self.rigidity_grid.sigmoid().squeeze(0)))\
-      .sum(dim=-2)
+
+    self.rigidity = (trilin_weights * grid_lookup(nx,ny,nz,self.rigidity_grid))\
+      .sum(dim=-2)\
+      .sigmoid()
     self.rigid_dp = dp * self.rigidity
     return self.canonical.from_pts(self.pts + self.rigid_dp, self.ts, r_o, r_d)
 
