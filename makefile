@@ -37,7 +37,7 @@ dyn_voxel: clean
 	--size 128 --epochs 50_000 --save models/dvoxel_${dnerf_dataset}.pt --loss-window 1000 --save-freq 2500 \
 	--near 2 --far 6 --batch-size 2 --crop-size 44 --model voxel --dyn-model voxel -lr 1e-2 \
 	--loss-fns l2 --test-crop-size 64 --depth-images --flow-map --spline 4 --steps 80 \
-  --voxel-tv-sigma 1e-4 --voxel-tv-rgb 1e-4 --voxel-tv-bezier 1e-4 --voxel-tv-rigidity 1e-4 \
+  --voxel-tv-sigma 1e-3 --voxel-tv-rgb 1e-4 --voxel-tv-bezier 1e-4 --voxel-tv-rigidity 1e-4 \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted --voxel-random-spline-len-decay 1e-5 --replace sigmoid \
   --notraintest --seed -1 --refl-kind pos-linear-view \

@@ -483,7 +483,7 @@ def cyclic_sigmoid(v, eps:float=-1e-2,period:int=5):
 
 # upshifted has a small epsilon increase, because it should be harder to represent completely
 # black colors if there's no background. Still has properties of fat sigmoid at 1.
-def upshifted_sigmoid(v, eps=1e-3): return v.sigmoid() + eps
+def upshifted_sigmoid(v, eps=1e-2): return v.sigmoid() + eps
 def upshifted_softplus(v, eps=1e-2): return F.softplus(v) + eps
 # a leaky softplus implementation
 def leaky_softplus(v, alpha=0.01):

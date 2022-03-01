@@ -236,11 +236,10 @@ class Positional(Reflectance):
     )
   # Each voxel just requires the out_features which is usually RGB,
   # and does not need to do any special modifications.
+  def voxel_forward(self, params, view): return self.act(params)
   def to_voxel(self):
-    act = self.act
-    # This hopefully will remove the need to keep self around (i.e. GC the Refl
-    # that created this.
-    return self.out_features, lambda params, view: act(params)
+    del self.mlp
+    return self.out_features, self.voxel_forward
   def forward(self, x, view, normal=None, light=None, latent=None):
     return self.act(self.mlp(x, latent))
 
