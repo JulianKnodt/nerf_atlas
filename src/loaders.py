@@ -128,7 +128,8 @@ def dnerf(
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)
     if is_gibson: tf_mat = tf_mat.inverse()
     cam_to_worlds.append(tf_mat[:3, :3])
-    time = getattr(frame, 'time', getattr(frame, "timestep", float(t) / (n_frames-1)))
+    fallback = float(t) / (n_frames-1)
+    time = getattr(frame, 'time', getattr(frame, "timestep", fallback))
     times.append(time)
 
   assert(sorted(times) == times), "Internal: assume times are sorted"

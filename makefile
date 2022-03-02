@@ -115,7 +115,7 @@ dnerf: clean
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
 	--epochs 50_000 --save models/dyn_n_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 20 --near 1e-3 --far 8 -lr 1e-3 --valid-freq 500 \
+	--crop-size 20 --near 2 --far 6 -lr 1e-3 --valid-freq 500 \
   --sigmoid-kind fat --loss-window 2000 --loss-fns l2 \
   --render-over-time 8 --notraintest --test-crop-size 64 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos \
@@ -134,10 +134,10 @@ dnerf_volsdf: clean
 
 gibson: clean
 	python3 runner.py -d data/gibson_dataset/ --data-kind dnerf --size 32 \
-	--epochs 50_000  --save models/gibson.pt --model plain  \
-  --batch-size 1 --crop-size 28 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
+	--epochs 50_000  --save models/gibson.pt --model plain --spline 12 \
+  --batch-size 1 --crop-size 28 --near 1e-3 --far 8 -lr 3e-4 --valid-freq 500 \
   --refl-kind pos-linear-view --sigmoid-kind fat --loss-window 1000 --dyn-model plain \
-  --notraintest --render-over-time 12 --loss-fns fft l2 --save-freq 2500 \
+  --notraintest --render-over-time 12 --loss-fns l2 --save-freq 2500 \
   --offset-decay 30 --ffjord-div-decay 0.3 \
   --depth-images --rigidity-map --flow-map \
   --load models/gibson.pt

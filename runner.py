@@ -577,10 +577,15 @@ def train(model, cam, labels, opt, args, sched=None):
   should_end = lambda: False
   if args.duration_sec > 0: should_end = lambda: time.time() - start > args.duration_sec
 
+  train_percent = 1/args.epochs
   for i in iters:
     if should_end():
       print("Training timed out")
       break
+
+    curr_percent = train_percent * i
+    # goes from 1/100 -> 1 gradually over epochs
+    exp_ratio = (1/100) ** (1-curr_percent)
 
     opt.zero_grad()
 
@@ -627,7 +632,7 @@ def train(model, cam, labels, opt, args, sched=None):
     # approximation of divergence using ffjord algorithm as in NR-NeRF
     if args.ffjord_div_decay:
       div_approx = utils.div_approx(model.pts, model.rigid_dp).abs().square()
-      loss = loss+args.ffjord_div_decay * (model.canonical.alpha.detach() * div_approx).mean()
+      loss = loss + exp_ratio * args.ffjord_div_decay * (model.canonical.alpha.detach() * div_approx).mean()
     if args.view_variance_decay > 0:
       pts = pts if pts is not None else get_pts()
       views = torch.randn(2, *pts.shape, device=device)
@@ -708,7 +713,7 @@ def train(model, cam, labels, opt, args, sched=None):
       norm_dp = torch.linalg.vector_norm(model.dp, dim=-1, keepdim=True)\
         .pow(2 - model.rigidity)
       reg = model.canonical.weights.detach()[None,...,None] * (norm_dp + 3e-3 * model.rigidity)
-      loss = loss + args.offset_decay * reg.mean()
+      loss = loss + exp_ratio * args.offset_decay * reg.mean()
     # apply regularization on spline length, to get smallest spline that fits.
     # only apply this to visible points though
     if args.spline_len_decay > 0:
