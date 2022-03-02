@@ -39,12 +39,7 @@ def arguments():
   ST="store_true"
   a.add_argument("-d", "--data", help="path to data", required=True)
   a.add_argument(
-    "--data-kind", help="Kind of data to load", default="original",
-    choices=[
-      "original", "single_video", "dnerf", "dtu", "pixel-single", "nerv_point",
-      # shiny is WIP
-      "shiny"
-    ],
+    "--data-kind", help="Kind of data to load", default="original", choices=list(loaders.kinds)
   )
   a.add_argument(
     "--derive-kind", help="Attempt to derive the kind if a single file is given", action="store_false",

@@ -110,13 +110,12 @@ dnerf: clean
   --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
-  --sigmoid-kind upshifted --random-spline-len-decay 1e-5 \
-  --notraintest \
+  --sigmoid-kind upshifted --notraintest \
   --load models/dyn_${dnerf_dataset}.pt
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
 	--epochs 50_000 --save models/dyn_n_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 20 --near 2 --far 6 -lr 1e-3 --valid-freq 500 \
+	--crop-size 20 --near 1e-3 --far 8 -lr 1e-3 --valid-freq 500 \
   --sigmoid-kind fat --loss-window 2000 --loss-fns l2 \
   --render-over-time 8 --notraintest --test-crop-size 64 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos \
@@ -132,6 +131,16 @@ dnerf_volsdf: clean
   --notraintest --render-over-time 12 --loss-fns l2 --save-freq 1000 \
   --offset-decay 30 --ffjord-div-decay 0.3 \
   --load models/dvs_$(dnerf_dataset).pt --sdf-eikonal 1e-5
+
+gibson: clean
+	python3 runner.py -d data/gibson_dataset/ --data-kind dnerf --size 32 \
+	--epochs 50_000  --save models/gibson.pt --model plain  \
+  --batch-size 1 --crop-size 28 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
+  --refl-kind pos-linear-view --sigmoid-kind fat --loss-window 1000 --dyn-model plain \
+  --notraintest --render-over-time 12 --loss-fns fft l2 --save-freq 2500 \
+  --offset-decay 30 --ffjord-div-decay 0.3 \
+  --depth-images --rigidity-map --flow-map \
+  --load models/gibson.pt
 
 long_dnerf: clean
 	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
@@ -444,7 +453,7 @@ rnn_nerf: clean
 	--loss-fns l2 --valid-freq 499 --load models/rnn_lego.pt
 
 monsune: clean
-	python3 runner.py -d data/video/monsune_outta_my_mind.mp4 --data-kind single_video \
+	python3 runner.py -d data/video/monsune_outta_my_mind.mp4 --data-kind single-video \
 	--size 64 --epochs 30_000 --save models/monsune.pt --steps 32 \
   --dyn-model long --spline 4 --start-sec 46 --end-sec 48 --video-frames 100 \
 	--near 0.01 --far 3 --batch-size 2 --crop-size 20 --model plain -lr 3e-4 --segments 8 \
@@ -453,7 +462,7 @@ monsune: clean
   --load models/monsune.pt
 
 fencing: clean
-	python3 runner.py -d data/video/fencing.mp4 --data-kind single_video \
+	python3 runner.py -d data/video/fencing.mp4 --data-kind single-video \
 	--size 100 --epochs 0 --save models/fencing_video.pt --steps 32 \
   --dyn-model long --spline 4 --start-sec 47 --end-sec 49 --video-frames 100 \
 	--near 0.01 --far 2 --batch-size 2 --crop-size 20 --model plain -lr 8e-5 --segments 10 \

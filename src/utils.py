@@ -205,8 +205,12 @@ def gamma_correct_loss(prev_loss_fn, coeff:float):
 
 def count_parameters(params): return sum(p.numel() for p in params)
 
+did_log = False
 def load_image(src, resize=None):
+  global did_log
   img = Image.open(src)
+  if not did_log: print(f"[info]: Original image size is {img.width}w x {img.height}h")
+  did_log = True
   if resize is not None: img = img.resize(resize)
   return torch.from_numpy(np.array(img, dtype=float)/255).float()
 

@@ -17,6 +17,15 @@ from . import cameras
 from .utils import load_image
 import src.lights as lights
 
+kinds = {
+  "original",
+  "nerv_point",
+  "dtu",
+  "dnerf",
+  "single-video",
+  "pixel-single"
+}
+
 # loads the dataset
 def load(args, training=True, device="cuda"):
   assert(args.data is not None)
@@ -53,7 +62,7 @@ def load(args, training=True, device="cuda"):
       args.data, training=training, size=size, time_gamma=args.time_gamma,
       white_bg=args.bg=="white", device=device,
     )
-  elif kind == "single_video":
+  elif kind == "single-video":
     return single_video(args, args.data, size=args.size, device=device)
   elif kind == "pixel-single":
     img, cam = single_image(args.data)
@@ -99,25 +108,27 @@ def original(
 def dnerf(
   dir=".", normalize=False, training=True,
   size=256, time_gamma=True, white_bg=False,
-  device="cuda"
+  device="cuda",
 ):
   kind = "train" if training else "test"
   tfs = json.load(open(dir + f"transforms_{kind}.json"))
   exp_imgs = []
   cam_to_worlds = []
   times = []
+  is_gibson = "gibson" in dir
 
-  focal = 0.5 * size / np.tan(0.5 * float(tfs['camera_angle_x']))
+  cam_angle_x = float(tfs['camera_angle_x'])
+  if is_gibson: cam_angle_x *= np.pi/180
+  focal = 0.5 * size / np.tan(0.5 * cam_angle_x)
   n_frames = len(tfs["frames"])
   for t, frame in enumerate(tfs["frames"]):
-    img = load_image(os.path.join(dir, frame['file_path'] + '.png'), resize=(size, size))
+    img = load_image(os.path.join(dir, frame['file_path'].rstrip(".png") + ".png"), resize=(size, size))
     if white_bg: img = img[..., :3] * img[..., -1:] + (1-img[..., -1:])
     exp_imgs.append(img[..., :3])
-    tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)[:3, :4]
-    if normalize:
-      tf_mat[:3, 3] = F.normalize(tf_mat[:3, 3], dim=-1)
-    cam_to_worlds.append(tf_mat)
-    time = getattr(frame, 'time', float(t) / (n_frames-1))
+    tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)
+    if is_gibson: tf_mat = tf_mat.inverse()
+    cam_to_worlds.append(tf_mat[:3, :3])
+    time = getattr(frame, 'time', getattr(frame, "timestep", float(t) / (n_frames-1)))
     times.append(time)
 
   assert(sorted(times) == times), "Internal: assume times are sorted"
@@ -128,8 +139,7 @@ def dnerf(
   times = torch.tensor(times, device=device)
 
   # This is for testing out DNeRFAE, apply a gamma transform based on the time.
-  if time_gamma:
-    exp_imgs = exp_imgs.pow((2 * times[:, None, None, None] - 1).exp())
+  if time_gamma: exp_imgs = exp_imgs.pow((2 * times[:, None, None, None] - 1).exp())
 
   return (exp_imgs, times), cameras.NeRFCamera(cam_to_worlds, focal), None
 
@@ -234,7 +244,6 @@ def nerv_point(
   light = lights.Point(center=light_locs, intensity=light_weights)
   assert(exp_imgs.isfinite().all())
   return exp_imgs, cameras.NeRFCamera(cam_to_worlds, focal), light.to(device)
-
 
 # taken from https://github.com/nex-mpi/nex-code/blob/main/utils/load_llff.py#L59
 # holy balls their code is illegible, I don't know how to reproduce it.
