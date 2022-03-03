@@ -134,7 +134,7 @@ dnerf_volsdf: clean
 gibson: clean
 	python3 runner.py -d data/gibson_dataset/ --data-kind dnerf --size 64 \
 	--epochs 25_000  --save models/gibson.pt --model plain --spline 6 \
-  --batch-size 1 --crop-size 28 --near 0.5 --far 8 -lr 1e-4 --valid-freq 500 \
+  --batch-size 1 --crop-size 28 --near 0.5 --far 8 -lr 1e-3 --valid-freq 500 \
   --refl-kind pos --sigmoid-kind fat --loss-window 1000 --dyn-model plain \
   --loss-fns l2 --save-freq 2500 --bg white \
   --depth-images --rigidity-map --flow-map --opt-step 5 \

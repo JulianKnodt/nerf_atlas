@@ -1167,14 +1167,14 @@ class DynamicNeRF(nn.Module):
   def direct_predict(self, x, t):
     enc = getattr(self.canonical, "encoding_size", 0)
     dp, rigidity, encoding = self.delta_estim(torch.cat([x, t], dim=-1)).split([3, 1, enc], dim=-1)
-    self.rigidity = rigidity.sigmoid()
+    self.rigidity = (rigidity/2).sigmoid()
     self.dp = torch.where(t.abs() < 1e-6, torch.zeros_like(x), dp)
     self.rigid_dp = self.dp * self.rigidity
     return torch.cat([self.rigid_dp, encoding], dim=-1)
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
     rigidity, ps = self.delta_estim(x).split([1, 3 * (self.spline_n-1)], dim=-1)
-    self.rigidity = rigidity.sigmoid()
+    self.rigidity = (rigidity/2).sigmoid()
     ps = torch.stack([
         torch.zeros_like(ps[..., :3]),
         *ps.split([3] * (self.spline_n-1), dim=-1)
