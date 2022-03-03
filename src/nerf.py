@@ -148,6 +148,7 @@ class CommonNeRF(nn.Module):
     r = None,
 
     steps: int = 64,
+    fine_steps: int = 32,
 
     #out_features: int = 3, # 3 is for RGB
     t_near: float = 0,
@@ -172,6 +173,8 @@ class CommonNeRF(nn.Module):
     self.t_near = t_near
     self.t_far = t_far
     self.steps = steps
+    self.fine_steps = fine_steps
+
     self.mip = mip
 
     self.per_pixel_latent_size = per_pixel_latent_size

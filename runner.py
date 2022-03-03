@@ -372,6 +372,7 @@ def arguments():
     "--higher-end-chance", type=int, default=0,
     help="Increase chance of training on either the start or the end",
   )
+  meta.add_argument("--opt-step", type=int, default=1, help="Number of steps take before optimizing")
 
   ae = a.add_argument_group("auto encoder parameters")
   # TODO are these two items still used?
@@ -578,6 +579,7 @@ def train(model, cam, labels, opt, args, sched=None):
   if args.duration_sec > 0: should_end = lambda: time.time() - start > args.duration_sec
 
   train_percent = 1/args.epochs
+  opt.zero_grad()
   for i in iters:
     if should_end():
       print("Training timed out")
@@ -587,7 +589,6 @@ def train(model, cam, labels, opt, args, sched=None):
     # goes from 1/100 -> 1 gradually over epochs
     exp_ratio = (1/100) ** (1-curr_percent)
 
-    opt.zero_grad()
 
     idxs = next_idxs(i)
 
@@ -751,9 +752,12 @@ def train(model, cam, labels, opt, args, sched=None):
     losses.append(l2_loss)
 
     assert(loss.isfinite().item()), "Got NaN loss"
+    if args.opt_step != 1: loss = loss / args.opt_step
     loss.backward()
     if args.clip_gradients > 0: nn.utils.clip_grad_norm_(model.parameters(), args.clip_gradients)
-    opt.step()
+    if i % args.opt_step == 0:
+      opt.step()
+      opt.zero_grad()
     if sched is not None: sched.step()
     if args.inc_fourier_freqs:
       for module in model.modules():
