@@ -128,16 +128,27 @@ def dnerf(
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)
     if is_gibson: tf_mat = tf_mat.inverse()
     cam_to_worlds.append(tf_mat[:3, :4])
-    fallback = float(t) / (n_frames-1)
-    time = getattr(frame, 'time', getattr(frame, "timestep", fallback))
+    time = getattr(frame, 'time', None)
+    if time is None: time=frame["timestep"]
     times.append(time)
 
+  if not (sorted(times) == times):
+    times, cam_to_worlds, exp_imgs = [
+      list(t) for t
+      in zip(*sorted(zip(times, cam_to_worlds, exp_imgs), key=lambda x: x[0]))
+    ]
   assert(sorted(times) == times), "Internal: assume times are sorted"
-  # TODO sort by time if not already sorted.
 
   cam_to_worlds = torch.stack(cam_to_worlds, dim=0).to(device)
   exp_imgs = torch.stack(exp_imgs, dim=0).to(device)
   times = torch.tensor(times, device=device)
+
+  min_time = times.min()
+  max_time = times.max()
+  if min_time < 0 or max_time > 1:
+    time_range = max_time-min_time
+    times = (times - min_time)/time_range
+    times.clamp_(min=0,max=1)
 
   # This is for testing out DNeRFAE, apply a gamma transform based on the time.
   if time_gamma: exp_imgs = exp_imgs.pow((2 * times[:, None, None, None] - 1).exp())

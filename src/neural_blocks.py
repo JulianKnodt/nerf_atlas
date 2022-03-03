@@ -579,3 +579,74 @@ class StyleTransfer(nn.Module):
     for sl in self.style_losses: sl_loss += sl.loss
     for cl in self.content_losses: cl_loss += cl.loss
     return sl_loss, cl_loss
+
+# Taken from https://github.com/piEsposito/blitz-bayesian-deep-learning
+class BayesianLinear(nn.Module):
+  def __init__(self, in_features, out_features, bias=True):
+    self.weight_sampler = TrainableDistribution(
+      mu=torch.empty(in_features, out_features).normal_(0, 0.1),
+      rho=nn.Parameter(torch.empty(in_features, out_features).normal_(0,0.1)),
+    )
+    if bias:
+      self.bias_sampler = TrainableDistribution(
+        mu=torch.empty(out_features).normal_(0, 0.1),
+        rho=nn.Parameter(torch.empty(out_features).normal_(0, 0.1)),
+      )
+    else:
+      self.zero_bias = self.register_buffer("zero", torch.zeros(1))
+  def forward(self, x):
+    w, w_sigma = self.weight_sampler.sample()
+    b = self.zero_bias
+    b_log_posterior, b_log_prior = 0, 0
+    if hasattr(self, "bias_sampler"):
+      b, sigma = self.bias_sampler.sample()
+      b_log_posterior = self.log_posterior(b, sigma)
+      b_log_prior = TODO
+    self.log_posterior = self.weight_sampler.log_posterior(w, w_sigma) + b_log_posterior
+    self.log_prior = self.weight_prior_dist.log_prior(w, w_sigma) + b_log_prior
+    return F.linear(x, w, b)
+
+log_sqrt2pi = math.log(math.sqrt(math.tau))
+class TrainableDistribution(nn.Module):
+  def __init__(self, mu, rho):
+    self.mu = nn.Parameter(mu)
+    self.rho = nn.Parameter(rho)
+    self.eps_w = self.register_buffer("eps_w", torch.empty_like(mu))
+  def sample(self):
+    # sample from normal distribution
+    self.eps_w.data.normal_()
+    sigma = torch.log1p(torch.exp(self.rho))
+    w = self.mu + sigma * self.eps_w
+    return w, sigma
+  def log_posterior(self, w, sigma):
+    log_posteriors = -log_sqrt2pi - sigma.log() - \
+      (w - self.mu).square()/(2 * self.sigma.square()) - 0.5
+    return log_posteriors.sum()
+
+class PriorDistribution(nn.Module):
+  def __init__(
+    self,
+    mix=0,
+    dist1=None,
+    dist2=None,
+  ):
+    self.mix = nn.Parameter(torch.tensor(mix))
+    self.dist1 = dist1 or torch.distributions.Normal(0, 0.1)
+    self.dist2 = dist2 or torch.distributions.Normal(0, 0.001)
+
+    ...
+  def foward(self, w):
+    log_prob_n1 = self.dist1.log_prob()
+    log_prob_n2 = self.dist2.log_prob()
+
+    mix = self.mix.sigmoid()
+    prior_pdf = prob_n1 + torch.log(mix + (1-mix) * torch.exp(log_prob_n2 - log_prob_n1))
+    return (prior_pdf+1e-5).log().sum()
+
+
+
+
+
+
+
+
