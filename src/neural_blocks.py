@@ -191,6 +191,9 @@ class SkipConnMLP(nn.Module):
     adjusted = sample + noise * torch.rand_like(sample)
     adjusted = self(adjusted)
     return (values-adjusted).square().mean()
+  def zero_last_layer(self):
+    nn.init_zeros_(self.out.weights)
+    nn.init_zeros_(self.out.biases)
 
 class RecurrentUnit(nn.Module):
   def __init__(

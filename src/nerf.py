@@ -1153,6 +1153,7 @@ class DynamicNeRF(nn.Module):
       # x,y,z,t -> dx, dy, dz, rigidity
       in_size=4, out=3+1, num_layers = 5, hidden_size = 256, init="xavier",
     )
+    self.delta_estim.zero_last_layer()
     self.time_estim = self.direct_predict
   def set_spline_estim(self, spline_points):
     assert(spline_points > 1), "Must pass N > 1 spline"
@@ -1160,6 +1161,7 @@ class DynamicNeRF(nn.Module):
     self.delta_estim = SkipConnMLP(
       in_size=3, out=(spline_points-1)*3+1, num_layers=5, hidden_size=256, init="xavier",
     )
+    self.delta_estim.zero_last_layer()
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
     self.spline_n = spline_points
     self.time_estim = self.spline_interpolate
