@@ -369,7 +369,7 @@ def arguments():
   meta.add_argument("--clip-gradients", type=float, default=0, help="If > 0, clip gradients")
   meta.add_argument("--versioned-save", action=ST, help="Save with versions")
   meta.add_argument(
-    "--higher-end-chance", type=int, default=0,
+    "--higher-zero-chance", type=int, default=0,
     help="Increase chance of training on either the start or the end",
   )
   meta.add_argument("--opt-step", type=int, default=1, help="Number of steps take before optimizing")
@@ -565,10 +565,9 @@ def train(model, cam, labels, opt, args, sched=None):
       random.randint(0, args.render_size-cs), random.randint(0, args.render_size-cs), cs, cs,
     )
   train_choices = range(labels.shape[0])
-  if args.higher_end_chance > 0:
+  if args.higher_zero_chance > 0:
     train_choices = list(train_choices)
-    train_choices += [0] * args.higher_end_chance
-    train_choices += [labels.shape[0]-1] * args.higher_end_chance
+    train_choices += [0] * args.higher_zero_chance
   next_idxs = lambda _: random.sample(train_choices, batch_size)
   if args.serial_idxs: next_idxs = lambda i: [i%len(cam)] * batch_size
   #next_idxs = lambda i: [i%10] * batch_size # DEBUG

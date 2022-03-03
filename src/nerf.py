@@ -1182,7 +1182,13 @@ class DynamicNeRF(nn.Module):
     # keep the first point rigid, this allows for learning a canonical configuration
     # but gives more degrees of freedom to t=0.
     self.dp = self.spline_fn(ps, t, self.spline_n)
-    self.rigid_dp = self.dp * self.rigidity
+    # TODO this where is so that it should be able to propagate gradients directly to the
+    # underlying NeRF
+    self.rigid_dp = torch.where(
+      t==0,
+      torch.zeros_like(x),
+      self.dp * self.rigidity,
+    )
     return self.rigid_dp
 
   @property
