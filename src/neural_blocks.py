@@ -192,8 +192,8 @@ class SkipConnMLP(nn.Module):
     adjusted = self(adjusted)
     return (values-adjusted).square().mean()
   def zero_last_layer(self):
-    nn.init_zeros_(self.out.weights)
-    nn.init_zeros_(self.out.biases)
+    nn.init.zeros_(self.out.weight)
+    nn.init.zeros_(self.out.bias)
 
 class RecurrentUnit(nn.Module):
   def __init__(
