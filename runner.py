@@ -348,6 +348,10 @@ def arguments():
   rprt.add_argument("--flow-map", action=ST, help="Render a flow map for a dynamic nerf scene")
   rprt.add_argument("--rigidity-map", action=ST, help="Render a flow map for a dynamic nerf scene")
   rprt.add_argument(
+    "--visualize", type=str, nargs="*", default=[],
+    choices=["flow", "rigidity", "depth"],
+  )
+  rprt.add_argument(
     "--display-regularization", action=ST,
     help="Display regularization in addition to reconstruction loss",
   )
@@ -806,6 +810,7 @@ def test(model, cam, labels, args, training: bool = True):
 
   ls = []
   gots = []
+  loss_strings = []
 
   def render_test_set(model, cam, labels, offset=0):
     with torch.no_grad():
@@ -872,7 +877,9 @@ def test(model, cam, labels, args, training: bool = True):
         psnr = utils.mse2psnr(loss).item()
         ts = "" if ts is None else f",t={ts.item():.02f}"
         o = i + offset
-        print(f"[{o:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}")
+        loss_string = f"[{o:03}{ts}]: L2 {loss.item():.03f} PSNR {psnr:.03f}"
+        print(loss_string)
+        loss_strings.append(loss_string)
         name = f"train_{o:03}.png" if training else f"test_{o:03}.png"
         if args.gamma_correct:
           exp = exp.clamp(min=1e-10)**(1/2.2)
@@ -936,6 +943,9 @@ def test(model, cam, labels, args, training: bool = True):
   print(summary_string)
   with open(os.path.join(args.outdir, "results.txt"), 'w') as f:
     f.write(summary_string)
+    for ls in loss_strings:
+      f.write("\n")
+      f.write(ls)
 
 def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
