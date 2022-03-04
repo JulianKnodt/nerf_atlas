@@ -128,8 +128,8 @@ def dnerf(
     tf_mat = torch.tensor(frame['transform_matrix'], dtype=torch.float, device=device)
     if is_gibson: tf_mat = tf_mat.inverse()
     cam_to_worlds.append(tf_mat[:3, :4])
-    time = getattr(frame, 'time', None)
-    if time is None: time=frame["timestep"]
+    time = frame.get('time', time.get("timestep", None))
+    assert(time is not None), f"Missing time in frame {frame}"
     times.append(time)
 
   if not (sorted(times) == times):
