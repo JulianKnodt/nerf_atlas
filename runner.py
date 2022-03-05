@@ -359,6 +359,7 @@ def arguments():
     "--y-scale", choices=["linear", "log", "symlog", "logit"], type=str,
     default="linear", help="Scale kind for y-axis",
   )
+  rprt.add_argument("--with-alpha", action=ST, help="Render images with an alpha channel")
   # TODO add ability to show all decay factors and how they change over time.
 
   meta = a.add_argument_group("meta runner parameters")
@@ -949,12 +950,12 @@ def test(model, cam, labels, args, training: bool = True):
 
 def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
-  ts = torch.linspace(0, math.pi, steps=200, device=device)
+  ts = torch.linspace(0, math.pi, steps=100, device=device)
   ts = ts * ts
   ts = ((ts.sin()+1)/2)
   with torch.no_grad():
     for i, t in enumerate(tqdm(ts)):
-      got = torch.zeros(args.render_size, args.render_size, 3, device=device)
+      got = torch.zeros(args.render_size, args.render_size, 3+args.with_alpha, device=device)
       cs = args.test_crop_size
       N = math.ceil(args.render_size/cs)
       for x in range(N):
@@ -965,7 +966,9 @@ def render_over_time(args, model, cam):
             model, cam, (c0,c1,cs,cs), size=args.render_size,
             with_noise=False, times=t.unsqueeze(0), args=args,
           )
-          got[c0:c0+cs, c1:c1+cs, :] = out.squeeze(0)
+          got[c0:c0+cs, c1:c1+cs, :3] = out.squeeze(0)
+          if args.with_alpha:
+            got[c0:c0+cs, c1:c1+cs,3] = model.nerf.weights[:-1].sum(dim=0)
       save_image(os.path.join(args.outdir, f"time_{i:03}.png"), got)
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
