@@ -261,6 +261,9 @@ def arguments():
     "--render-over-time", default=-1, type=int,
     help="Fix camera to i, and render over a time frame. < 0 is no camera",
   )
+  dnerfa.add_argument(
+    "--render-over-time-steps", default=100, type=int, help="How many steps to render over time",
+  )
 
   cama = a.add_argument_group("camera parameters")
   cama.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -934,7 +937,7 @@ def test(model, cam, labels, args, training: bool = True):
     render_test_set(model, multi_cams, multi_labels, offset=100)
     labels =  torch.cat([labels, multi_labels], dim=0)
 
-  summary_string = f"""[Summary ({"training" if training else "test"}) @ {git_hash()}]:
+  summary_string = f"""[Summary {args.name} ({"training" if training else "test"}) @ {git_hash()}]:
 \tmean {np.mean(ls):.03f}
 \tmin {min(ls):.03f}
 \tmax {max(ls):.03f}
@@ -954,7 +957,7 @@ def test(model, cam, labels, args, training: bool = True):
 
 def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
-  ts = torch.linspace(0, math.pi, steps=100, device=device)
+  ts = torch.linspace(0, math.pi, steps=args.render_over_time_steps, device=device)
   ts = ts * ts
   ts = ((ts.sin()+1)/2)
   cs = args.test_crop_size
