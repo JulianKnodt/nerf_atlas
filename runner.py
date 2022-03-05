@@ -311,6 +311,10 @@ def arguments():
     "--offset-decay", type=float, default=0,
     help="Weight of total variation regularization for rigidity",
   )
+  vida.add_argument(
+    "--render-bezier-keyframes", action=ST,
+    help="Render bezier control points for reference",
+  )
 
   rprt = a.add_argument_group("reporting parameters")
   rprt.add_argument("--name", help="Display name for convenience in log file", type=str, default="")
@@ -953,11 +957,12 @@ def render_over_time(args, model, cam):
   ts = torch.linspace(0, math.pi, steps=100, device=device)
   ts = ts * ts
   ts = ((ts.sin()+1)/2)
+  cs = args.test_crop_size
+  N = math.ceil(args.render_size/cs)
+
   with torch.no_grad():
     for i, t in enumerate(tqdm(ts)):
       got = torch.zeros(args.render_size, args.render_size, 3+args.with_alpha, device=device)
-      cs = args.test_crop_size
-      N = math.ceil(args.render_size/cs)
       for x in range(N):
         for y in range(N):
           c0 = x * cs
@@ -967,9 +972,30 @@ def render_over_time(args, model, cam):
             with_noise=False, times=t.unsqueeze(0), args=args,
           )
           got[c0:c0+cs, c1:c1+cs, :3] = out.squeeze(0)
-          if args.with_alpha:
-            got[c0:c0+cs, c1:c1+cs,3] = model.nerf.weights[:-1].sum(dim=0)
+          if args.with_alpha: got[c0:c0+cs, c1:c1+cs,3] = model.nerf.weights[:-1].sum(dim=0)
       save_image(os.path.join(args.outdir, f"time_{i:03}.png"), got)
+    if not args.render_bezier_keyframes: return
+
+
+    keyframes = [torch.zeros_like(got) for _ in range(model.spline_n)]
+    def render_keyframes(model, cam, crop, size):
+      r = torch.arange(size, device=device, dtype=torch.float)
+      ii, jj = torch.meshgrid(r,r,indexing="ij")
+      positions = torch.stack([ii.transpose(-1, -2), jj.transpose(-1, -2)], dim=-1)
+      t,l,h,w = crop
+      positions = positions[t:t+h,l:l+w,:]
+
+      rays = cam.sample_positions(positions, size=size, with_noise=False)
+      return model.render_keyframes(rays)
+    for x in range(N):
+      for y in range(N):
+        c0 = x * cs
+        c1 = y * cs
+        ks = render_keyframes(model, cam, (c0,c1,cs,cs), size=args.render_size)
+        for k, out in zip(ks, keyframes):
+          out[c0:c0+cs,c1:c1+cs,:] = k
+    for i, k in enumerate(keyframes):
+      save_image(os.path.join(args.outdir, f"keyframe_{i:02}.png"), k)
 
 # Sets these parameters on the model on each run, regardless if loaded from previous state.
 def set_per_run(model, args, labels):

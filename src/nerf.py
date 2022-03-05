@@ -1119,7 +1119,6 @@ class AlternatingVolSDF(nn.Module):
     else:
       return direct(self.volsdf.sdf, self.volsdf.refl, self.volsdf.occ, rays, self.training)
 
-def one(*args, **kwargs): return 1
 # de_casteljau's algorithm for evaluating bezier splines without numerical instability..
 def de_casteljau(coeffs, t, N: int):
   betas = coeffs
@@ -1127,6 +1126,23 @@ def de_casteljau(coeffs, t, N: int):
   # TODO some way to vectorize this?
   for i in range(1, N): betas = betas[:-1] * m1t + betas[1:] * t
   return betas.squeeze(0)
+
+# Computes the weights that would be used in B'.
+def bezier_derivative(coeffs, t, N: int, deriv:int=1):
+  assert(deriv >= 0), "Must take a positive number of derivatives"
+  for _ in range(deriv):
+    coeffs = N * (coeffs[1:] - coeffs[:-1])
+    N -= 1
+  return de_casteljau(coeffs, t, N)
+
+def frenet_normal(coeffs, t, N):
+  # TODO this could be numerically unstable but shouldn't matter since we're not optimizing thru
+  # it.
+  a = F.normalize(bezier_derivative(coeffs, t, N), dim=-1)
+  b = F.normalize(a + bezier_derivative(coeffs, t, N, deriv=2), dim=-1)
+  # in theory we shouldn't need to normalize here but won't hurt
+  r = F.normalize(a.cross(b), dim=-1)
+  return F.normalize(a.cross(r), dim=-1)
 
 # de_moor's algorithm for evaluating bezier splines with a given knot vector
 def de_moors(coeffs, t, knots, N: int):
@@ -1184,13 +1200,7 @@ class DynamicNeRF(nn.Module):
     # keep the first point rigid, this allows for learning a canonical configuration
     # but gives more degrees of freedom to t=0.
     self.dp = self.spline_fn(ps, t, self.spline_n)
-    # TODO this where is so that it should be able to propagate gradients directly to the
-    # underlying NeRF
-    self.rigid_dp = torch.where(
-      t==0,
-      torch.zeros_like(x),
-      self.dp * self.rigidity,
-    )
+    self.rigid_dp = self.dp * self.rigidity
     return self.rigid_dp
 
   @property
@@ -1210,11 +1220,26 @@ class DynamicNeRF(nn.Module):
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
+    # TODO why did I make this require grad?
     self.pts = self.pts.requires_grad_() if self.training else self.pts
     self.canonical.ts = self.ts
     t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1)
     dp = self.time_estim(self.pts, t)
     return self.canonical.from_pts(self.pts + dp, self.ts, r_o, r_d)
+  def render_keyframes(self, rays):
+    assert(self.spline > 0)
+    rays = rays
+    self.pts, self.ts, r_o, r_d, _ = compute_pts_ts(
+      rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
+      perturb = 1 if self.training else 0,
+    )
+    self.canonical.ts = self.ts
+    rigidity, ps = self.delta_estim(self.pts).split([1, 3 * (self.spline_n-1)], dim=-1)
+    rigidity = (rigidity/2).sigmoid()
+    return [
+      self.canonical.from_pts(self.pts + p * rigidity, self.ts, r_o, r_d)
+      for p in ps.split([3] * (self.spline_n-1), dim=-1)
+    ]
 
 # Long Dynamic NeRF for computing arbitrary continuous sequences.
 class LongDynamicNeRF(nn.Module):
