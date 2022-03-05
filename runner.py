@@ -939,6 +939,7 @@ def test(model, cam, labels, args, training: bool = True):
 
   summary_string = f"""[Summary {args.name} ({"training" if training else "test"}) @ {git_hash()}]:
 \tmean {np.mean(ls):.03f}
+\tmedian {np.median(ls):.03f}
 \tmin {min(ls):.03f}
 \tmax {max(ls):.03f}
 \tvar {np.var(ls):.03f}"""
