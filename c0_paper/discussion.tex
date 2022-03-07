@@ -1,14 +1,7 @@
 \section*{Discussion}
 
-Learned Bezier splines produces coherent movement in objects without explicit regularization, and are able to
-converge with equal to speed as prior work. It also does not suffer deformations around the ends of the sequence ($t=0, t=1$) as compared to D-NeRF, since we are analytically able to guarantee that at time 0 there is no motion. 
+Learned Bezier splines produce coherent movement in objects without explicit regularization, and are able to converge with equal to speed as prior work. Our method demonstrates smooth interpolation, as enforced by the structure of our approach. We are thus able to super-sample between frames at arbitrary resolution while guaranteeing smoothness. In addition, because of the analytic nature of splines, we could perform interesting motion deformations, such as twisting the curves in order to construct novel motion.
 
-In addition, our method demonstrates extremely smooth interpolation, as enforced by the structure of our network.
-We are thus able to exaggerate movements significantly, while ensuring plausibility between frames. In addition, because of the analytic nature
-of splines, we are likely able to perform interesting motion deformations, such as diverging motion paths in order to construct novel motion.
+Another computational benefit of our approach is that for a given view, we only need to evaluate the deformation MLP \textit{once} to compute the Bezier spline at each point, then we can sample the Bezier spline at an arbitrary number of points. This should allow for efficient single view video reconstruction, but we leave future work for this.
 
-One issue with our approach is that because it is forced to learn continuous representations, it has some difficulty when surfaces collide and bounce apart, as it must separate each surface but the boundary between them may be very small and hard to distinguish. We expect that in the limit these issues would vanish, but they slow down training.
-
-Another issue is that we can occasionally observe wobbling of the entire scene, if there are too many spline points. This is because it may be difficult to zero out all predicted control points, but can be resolved by using a smaller number of control points or adding decay to the control points.
-
-Finally, our model runs faster than D-NeRF, but can be optimized further. We are currently unaware of a fully vectorized method for evaluating splines at a given point, requiring manual iteration in De Casteljau's algorithm for the number of points, and developing an algorithm that could compute this in one-pass would speed up the model.
+Finally, even without the above optimization, our model runs approximately as fast as NR-NeRF, but can be optimized further, either by introducing voxels, or using other learning approaches such as a different optimization scheme for splines.
