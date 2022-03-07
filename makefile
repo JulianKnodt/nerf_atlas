@@ -103,15 +103,16 @@ food: clean
 
 dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 128 \
-	--epochs 10_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 18 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
-  --loss-window 2000 --loss-fns l2 \
+	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
+	--epochs 0 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 18 --near 2 --far 6 -lr 6e-4 --valid-freq 500 --spline 4 \
+  --loss-window 2000 --loss-fns l2 --render-over-time 2 \
   --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
-  --sigmoid-kind upshifted --notraintest \
-  --load models/dyn_${dnerf_dataset}.pt
+  --sigmoid-kind upshifted --notraintest --opt-step 3 \
+  #--load models/dyn_${dnerf_dataset}.pt
+
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
 	--epochs 50_000 --save models/dyn_n_${dnerf_dataset}.pt --model plain --batch-size 2 \
@@ -133,11 +134,11 @@ dnerf_volsdf: clean
 
 gibson: clean
 	python3 runner.py -d data/gibson_dataset/ --data-kind dnerf --size 256 \
-	--epochs 50_000 --save models/gibson.pt --model plain --spline 12 \
+	--epochs 100_000 --save models/gibson.pt --model plain --spline 12 \
   --batch-size 1 --crop-size 24 --near 1e-3 --far 8 -lr 1e-4 --valid-freq 500 \
   --refl-kind pos-linear-view --sigmoid-kind fat --loss-window 1000 --dyn-model plain \
   --loss-fns l2 --save-freq 2500 --depth-images --rigidity-map --flow-map --opt-step 5 \
-  --offset-decay 30 --ffjord-div-decay 0.3 --notraintest --test-crop-size 64 \
+  --offset-decay 30 --ffjord-div-decay 0.3 --notraintest --test-crop-size 48 \
   --load models/gibson.pt
 
 long_dnerf: clean
@@ -150,7 +151,7 @@ long_dnerf: clean
   --load models/ldyn_${dnerf_dataset}.pt
 
 dnerf_gru: clean
-	python3 runner.py -d data/dynamic/bouncingballs/ --data-kind dnerf --size 64 \
+	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
 	--epochs 80_000  --save models/djj_gru_ae.pt --model ae --batch-size 2 \
 	--crop-size 24 --near 2 --far 6 -lr 1e-3 --no-sched --valid-freq 499 \
   --gru-flow #--load models/djj_gru_ae.pt
