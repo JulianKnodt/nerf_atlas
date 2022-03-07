@@ -1009,6 +1009,8 @@ def set_per_run(model, args, labels):
     times = labels[-1]
     labels = labels[0]
   model.nerf.steps = args.steps
+  model.nerf.t_near = args.near
+  model.nerf.t_far = args.far
   if not isinstance(model, nerf.VolSDF): args.volsdf_scale_decay = 0
 
   ls = model.intermediate_size # How many extra values the density model outputs
@@ -1028,9 +1030,11 @@ def set_per_run(model, args, labels):
     if args.refl_kind != "curr" and hasattr(model, "refl"):
       refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
       model.set_refl(refl_inst)
+
   if "bg" in args.replace: model.set_bg(args.args)
-  if "sigmoid" in args.replace and hasattr(model, "nerf"):
-    model.nerf.set_sigmoid(args.sigmoid_kind)
+
+  if "sigmoid" in args.replace and hasattr(model, "nerf"): model.nerf.set_sigmoid(args.sigmoid_kind)
+
 
   if "light" in args.replace:
     if isinstance(model.refl, refl.LightAndRefl):
