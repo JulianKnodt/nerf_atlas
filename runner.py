@@ -49,12 +49,12 @@ def arguments():
   a.add_argument("--timed-outdir", help="Create new output dir with date+time of run", action=ST)
 
   # various size arguments
-  a.add_argument("--size", help="post-upsampling size", type=int, default=32)
-  a.add_argument("--render-size", help="pre-upsampling size", type=int, default=16)
+  a.add_argument("--size", help="post-upsampling size of output", type=int, default=32)
+  a.add_argument("--render-size", help="pre-upsampling size of output image", type=int, default=16)
 
   a.add_argument("--epochs", help="number of epochs to train for", type=int, default=30000)
-  a.add_argument("--batch-size", help="# views for each training batch", type=int, default=8)
-  a.add_argument("--neural-upsample", help="add neural upsampling", action=ST)
+  a.add_argument("--batch-size", help="# views pet training batch", type=int, default=8)
+  a.add_argument("--neural-upsample", help="Add neural upsampling", action=ST)
   a.add_argument("--crop-size",help="what size to use while cropping",type=int, default=16)
   a.add_argument("--test-crop-size",help="what size to use while cropping at test time",type=int, default=0)
   a.add_argument("--steps", help="Number of depth steps", type=int, default=64)
@@ -71,11 +71,11 @@ def arguments():
     type=int, default=32,
   )
   a.add_argument(
-    "--model", help="which model to use?", type=str,
+    "--model", help="which shape model to use", type=str,
     choices=list(nerf.model_kinds.keys()) + ["sdf"], default="plain",
   )
   a.add_argument(
-    "--dyn-model", help="Which dynamic model to use?", type=str,
+    "--dyn-model", help="Which dynamic model to use", type=str,
     choices=list(nerf.dyn_model_kinds.keys()),
   )
   a.add_argument(
@@ -105,17 +105,14 @@ def arguments():
   a.add_argument(
     "--tone-map", help="Add tone mapping (1/(1+x)) before loss function", action=ST,
   )
-  a.add_argument("--bendy", help="Allow bendy rays!", action=ST)
+  a.add_argument("--bendy", help="[WIP] Allow bendy rays!", action=ST)
   a.add_argument(
     "--gamma-correct-loss", type=float, default=1., help="Gamma correct by x in training",
   )
   a.add_argument(
-    "--autogamma-correct-loss", action=ST,
-    help="Automatically infer a weight for gamma correction",
+    "--autogamma-correct-loss", action=ST, help="Automatically infer a weight for gamma correction",
   )
-  a.add_argument(
-    "--has-multi-light", help="For NeRV point if there is a multi point light dataset", action=ST,
-  )
+  a.add_argument("--has-multi-light", help="For NeRV, use multi point light dataset", action=ST)
   a.add_argument("--style-img", help="Image to use for style transfer", default=None)
   a.add_argument("--no-sched", help="Do not use a scheduler", action=ST)
   a.add_argument(
@@ -138,11 +135,6 @@ def arguments():
   )
   a.add_argument(
     "--volsdf-alternate", help="Use alternating volume rendering/SDF training volsdf", action=ST,
-  )
-  # TODO unify this with the flag below, since they do the same thing.
-  a.add_argument(
-    "--latent-size",type=int, default=32,
-    help="Latent-size to use in shape models. If not supported by the shape model, it will be ignored",
   )
   a.add_argument(
     "--shape-to-refl-size", type=int, default=64, help="Size of vector passed from density to reflectance model",
@@ -368,6 +360,7 @@ def arguments():
   rprt.add_argument("--test-white-bg", action=ST, help="Use white background while testing")
   rprt.add_argument("--flow-map", action=ST, help="Render a flow map for a dynamic nerf scene")
   rprt.add_argument("--rigidity-map", action=ST, help="Render a flow map for a dynamic nerf scene")
+  # TODO actually implement below
   rprt.add_argument(
     "--visualize", type=str, nargs="*", default=[],
     choices=["flow", "rigidity", "depth", "normals", "normals-at-depth"],
