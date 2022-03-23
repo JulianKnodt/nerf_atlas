@@ -272,11 +272,7 @@ def arguments():
 
   vida = a.add_argument_group("Video parameters")
   vida.add_argument("--start-sec", type=float, default=0, help="Start load time of video")
-  vida.add_argument("--end-sec", type=float, default=None, help="Start load time of video")
-  vida.add_argument("--video-frames", type=int, default=200, help="Use N frames of video.")
-  vida.add_argument(
-    "--segments", type=int, default=10, help="Decompose the input sequence into some # of frames",
-  )
+  vida.add_argument("--end-sec", type=float, default=None, help="End load time of video")
   vida.add_argument("--dyn-diverge-decay", type=float, default=0, help="Decay divergence of movement field")
   vida.add_argument("--ffjord-div-decay", type=float, default=0, help="FFJORD divergence of movement field")
   vida.add_argument(
@@ -315,8 +311,26 @@ def arguments():
     help="Weight of total variation regularization for rigidity",
   )
   vida.add_argument(
-    "--render-bezier-keyframes", action=ST,
-    help="Render bezier control points for reference",
+    "--dyn-refl-latent", type=int, default=0,
+    help="Size of latent vector to pass from the delta for reflectance",
+  )
+
+  vida.add_argument(
+    "--render-bezier-keyframes", action=ST, help="Render bezier control points for reference",
+  )
+
+  vida.add_argument(
+    "--cluster-movement", type=int, default=0,
+    help="attempts to visualize clusters of movement into k groups, 0 is off",
+  )
+  # Long videos
+  vida.add_argument(
+    "--long-vid-progressive-train", type=int, default=0,
+    help="After <N> iterations, train the next segment of a video",
+  )
+  vida.add_argument(
+    "--long-vid-chunk-len-sec", type=float, default=3,
+    help="For a long video, how long should each chunk be in seconds",
   )
 
   rprt = a.add_argument_group("reporting parameters")
@@ -356,7 +370,15 @@ def arguments():
   rprt.add_argument("--rigidity-map", action=ST, help="Render a flow map for a dynamic nerf scene")
   rprt.add_argument(
     "--visualize", type=str, nargs="*", default=[],
-    choices=["flow", "rigidity", "depth"],
+    choices=["flow", "rigidity", "depth", "normals", "normals-at-depth"],
+    help="""\
+Extra visualizations that can be rendered:
+flow: 3d movement, color visualizes direction, and intensity is how much movement
+rigidity: how rigid a given region is, higher-intensity is less rigid
+depth: how far something is from the camera, darker is closer
+normals: surface normals found by raymarching
+normals-at-depth: surface normals queried one time at the termination depth of a ray
+"""
   )
   rprt.add_argument(
     "--display-regularization", action=ST,
@@ -367,7 +389,7 @@ def arguments():
     default="linear", help="Scale kind for y-axis",
   )
   rprt.add_argument("--with-alpha", action=ST, help="Render images with an alpha channel")
-  # TODO add ability to show all decay factors and how they change over time.
+  # TODO add ability to show all regularization terms and how they change over time.
 
   meta = a.add_argument_group("meta runner parameters")
   # TODO when using torch jit has problems saving?
@@ -837,7 +859,7 @@ def test(model, cam, labels, args, training: bool = True):
         if getattr(model.refl, "light", None) is not None:
           model.refl.light.set_idx(torch.tensor([i], device=device))
 
-        if args.test_crop_size == 0: raise NotImplementedError("TODO implement no crop testing")
+        if args.test_crop_size <= 0: args.test_crop_size = args.render_size
 
         cs = args.test_crop_size
         N = math.ceil(args.render_size/cs)
@@ -1136,23 +1158,21 @@ def set_per_run(model, args, labels):
 
 def load_model(args, light, is_dyn=False):
   if args.model == "sdf": return sdf.load(args, with_integrator=True).to(device)
-  model = nerf.load_nerf(args).to(device)
+  model = nerf.load_nerf(args)
+  # have to load dyn model before loading refl since it may pass
+  # parameters to refl directly.
+  if is_dyn: model = nerf.load_dyn(args, model, device)
 
   # set reflectance kind for new models (but volsdf handles it differently)
-  if args.refl_kind != "curr":
-    ls = model.refl.latent_size
-    refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
-    model.set_refl(refl_inst)
-
-  if is_dyn: model = nerf.load_dyn(args, model, device).to(device)
+  ls = model.intermediate_size
+  model.set_refl(refl.load(args, args.refl_kind, args.space_kind, ls))
 
   if args.data_kind == "pixel-single":
-    encoder = SpatialEncoder().to(device)
     # args.img is populated in load (single_image)
-    model = nerf.SinglePixelNeRF(model, encoder=encoder, img=args.img, device=device).to(device)
+    model = nerf.SinglePixelNeRF(model, encoder=SpatialEncoder(), img=args.img, device=device)
 
   if (args.light_kind is not None) and (args.light_kind != "dataset") and (light is None):
-    light = lights.load(args).expand(args.num_labels).to(device)
+    light = lights.load(args).expand(args.num_labels)
     model.refl.light = light
 
   og_model = model
@@ -1175,7 +1195,7 @@ def load_model(args, light, is_dyn=False):
 
   if args.volsdf_alternate: model = nerf.AlternatingVolSDF(model)
   if args.torchjit: model = torch.jit.script(model)
-  return model
+  return model.to(device)
 
 def save(model, cam, args, opt, version=None):
   if args.nosave: return

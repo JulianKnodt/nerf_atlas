@@ -8,7 +8,7 @@ clean:
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
 	--size 64 --epochs 80_000 --save models/lego.pt \
-	--near 2 --far 6 --batch-size 4 --crop-size 20 --model plain -lr 5e-4 \
+	--near 2 --far 6 --batch-size 4 --crop-size 16 --model plain -lr 5e-4 \
 	--loss-fns l2 --refl-kind pos #--load models/lego.pt #--omit-bg
 
 coarse_fine: clean
@@ -104,13 +104,13 @@ food: clean
 dnerf_dataset = bouncingballs
 dnerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
-	--epochs 0 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 18 --near 2 --far 6 -lr 6e-4 --valid-freq 500 --spline 4 \
+	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 18 --near 2 --far 6 -lr 3e-4 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 --render-over-time 2 \
   --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
-  --sigmoid-kind upshifted --notraintest --opt-step 3 \
+  --sigmoid-kind upshifted --notraintest --opt-step 3 --dyn-refl-latent 2 \
   #--load models/dyn_${dnerf_dataset}.pt
 
 dnerf_original: clean
@@ -175,17 +175,17 @@ dtu: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
 	--size 192 --epochs 50000 --save models/dtu$(scan_number).pt --save-freq 5000 \
 	--near 0.3 --far 1.8 --batch-size 3 --crop-size 26 --model volsdf -lr 3e-4 \
-	--loss-fns l2 --valid-freq 499 --sdf-kind mlp \
+	--loss-fns l2 --valid-freq 499 --sdf-kind siren --opt-step 5 \
 	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat #--load models/dtu$(scan_number).pt
 
 dtu_diffuse: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
-	--size 256 --epochs 10_000 --save models/dtu_diffuse_$(scan_number).pt \
-	--near 0.4 --far 2 --batch-size 2 --crop-size 16 --test-crop-size 38 \
+	--size 128 --epochs 10_000 --save models/dtu_diffuse_$(scan_number).pt \
+	--near 0.4 --far 2 --batch-size 2 --crop-size 12 --test-crop-size 32 \
   --model volsdf -lr 3e-4 --light-kind field \
-	--valid-freq 500 --sdf-kind mlp --refl-kind diffuse --occ-kind all-learned \
+	--valid-freq 500 --sdf-kind siren --refl-kind diffuse --occ-kind all-learned \
   --depth-images --depth-query-normal --normals-from-depth --msssim-loss \
-  --save-freq 2500 --notraintest --loss-window 1000 --sdf-eikonal 1e-5 --loss-fns l2 fft \
+  --save-freq 2500 --notraintest --loss-window 1000 --sdf-eikonal 1e-5 --loss-fns l2 \
   --sigmoid-kind upshifted_softplus \
   --load models/dtu_diffuse_$(scan_number).pt
 

@@ -103,7 +103,7 @@ class Reflectance(nn.Module):
     act="thin",
     latent_size:int = 0,
     out_features:int = 3,
-    bidirectional: bool = False,
+    bidirectional: bool = True,
 
     # These exist to delete unused parameters, but don't use kwargs so if anything falls through
     # it will be easy to spot.
@@ -316,7 +316,7 @@ class Diffuse(Reflectance):
     att = (normal * light).sum(dim=-1, keepdim=True)
     assert(((att <= 1.001) & (att >= -1.001)).all()), \
       f"{att.min().item()}, {att.max().item()}"
-    if getattr(self, "bidirectional", False): att = att.maximum((-normal * light).sum(dim=-1, keepdim=True))
+    if getattr(self, "bidirectional", True): att = att.maximum((-normal * light).sum(dim=-1, keepdim=True))
     # When clamping to 0, it only learns when directly illuminated which seems to be alright.
     return rgb * att
 
@@ -440,8 +440,6 @@ class CookTorrance(Reflectance):
     rgb = spec_frac * r_s + (1 - spec_frac) * r_d
 
     return rgb * n_dot_l
-
-#def schlicks_approx(
 
 def cos_D_phi(wo, wi):
   wox,woy,woz = wo.split([1,1,1], dim=-1)

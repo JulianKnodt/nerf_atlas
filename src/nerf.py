@@ -105,6 +105,7 @@ sky_kinds = {
   "mlp": "MLP_MARKER",
   "random": random_color,
 }
+
 def load_nerf(args):
   from .sdf import load as load_sdf
   if args.model != "ae": args.latent_l2_weight = 0
@@ -120,6 +121,7 @@ def load_nerf(args):
     "per_pixel_latent_size": per_pixel_latent_size,
     "per_point_latent_size": 0,
     "instance_latent_size": 0,
+    # pass from either density model, dyn model, or other?
     "intermediate_size": args.shape_to_refl_size,
     "sigmoid_kind": args.sigmoid_kind,
     "bg": args.bg,
@@ -291,16 +293,16 @@ class TinyNeRF(CommonNeRF):
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
 
-  def from_pts(self, pts, ts, r_o, r_d):
-    latent = self.curr_latent(pts.shape)
-    mip_enc = self.mip_encoding(r_o, r_d, ts)
-    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
+    latent = cat_not_none(self.curr_latent(pts.shape), self.mip_encoding(r_o, r_d, ts), dim=-1)
 
     density, feats = self.estim(pts, latent).split([1, 3], dim=-1)
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, self.feat_act(feats)) + \
       self.sky_color(None, self.weights)
+
+def cat_not_none(a, b, dim=-1): return a if b is None else torch.cat([a,b],dim=dim)
 
 # A plain old nerf
 class PlainNeRF(CommonNeRF):
@@ -333,12 +335,9 @@ class PlainNeRF(CommonNeRF):
       normals = autograd(pts, density)
     return density, normals, intermediate
 
-  def from_pts(self, pts, ts, r_o, r_d):
-    latent = self.curr_latent(pts.shape)
-
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
     # If there is a mip encoding, stack it with the latent encoding.
-    mip_enc = self.mip_encoding(r_o, r_d, ts)
-    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+    latent = cat_not_none(self.curr_latent(pts.shape), self.mip_encoding(r_o, r_d, ts))
 
     first_out = self.first(pts, latent)
 
@@ -350,7 +349,11 @@ class PlainNeRF(CommonNeRF):
 
     while len(r_d.shape) < len(pts.shape): r_d = r_d.unsqueeze(0)
     view = r_d.expand_as(pts)
-    rgb = self.refl(x=pts, view=view, latent=torch.cat([latent, intermediate], dim=-1))
+    rgb = self.refl(
+      x=pts,
+      view=view,
+      latent=torch.cat([latent, cat_not_none(intermediate, refl_latent)], dim=-1),
+    )
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
@@ -508,7 +511,7 @@ class NeRFVoxel(nn.Module):
       torch.zeros_like(weights), weights,
     )
     return neighbor_ids.clamp(min=0, max=reso-1), weights
-  def from_pts(self, pts, ts, r_o, r_d):
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
     neighbor_ids, trilin_weights = self.grid_coords_trilin_weights(pts)
     nx,ny,nz = [ni.squeeze(-1) for ni in neighbor_ids.split([1,1,1],dim=-1)]
     neighbor_sigma = grid_lookup(nx, ny, nz, self.densities)
@@ -545,7 +548,7 @@ class CoarseFineNeRF(CommonNeRF):
     )
     self.from_pts(pts, self.ts, r_o, r_d, mids=mids)
 
-  def from_pts(self, pts, ts, r_o, r_d, mids=None):
+  def from_pts(self, pts, ts, r_o, r_d, mids=None, refl_latent=None):
     #latent = self.curr_latent(pts.shape)
 
     # If there is a mip encoding, stack it with the latent encoding.
@@ -616,7 +619,7 @@ class HistogramNeRF(CommonNeRF):
     pts, self.ts, r_o, r_d = histogram_pts_ts(rays, self.t_near, self.t_far, self.ray_query)
     return self.from_pts(pts, self.ts, r_o, r_d)
 
-  def from_pts(self, pts, ts, r_o, r_d):
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
     latent = self.curr_latent(pts.shape)
     mip_enc = self.mip_encoding(r_o, r_d, ts)
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
@@ -628,7 +631,11 @@ class HistogramNeRF(CommonNeRF):
     intermediate = first_out[..., 1:]
 
     view = r_d[None, ...].expand_as(pts)
-    rgb = self.refl(x=pts, view=view, latent=torch.cat([latent, intermediate], dim=-1))
+    rgb = self.refl(
+      x=pts,
+      view=view,
+      latent=torch.cat([latent, cat_not_none(intermediate, refl_latent)], dim=-1),
+    )
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
@@ -740,7 +747,7 @@ class SplineNeRF(CommonNeRF):
     # TODO need to reshape this to be same size as el
     grid_az = torch.stack(de_casteljau(ps, el, N).chunk(N, dim=-1), dim=0)
     return self.first(rad, de_casteljau(grid_az, az, N))
-  def from_pts(self, pts, ts, r_o, r_d):
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
     first_out = self.compute_density_intermediate(pts)
     density = first_out[..., 0]
     if self.training and self.noise_std > 0:
@@ -748,7 +755,7 @@ class SplineNeRF(CommonNeRF):
     intermediate = first_out[..., 1:]
 
     view = r_d[None, ...].expand_as(pts)
-    rgb = self.refl(x=pts, view=view, latent=intermediate)
+    rgb = self.refl(x=pts, view=view, latent=cat_not_none(intermediate, refl_latent))
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
     return volumetric_integrate(self.weights, rgb) + self.sky_color(view, self.weights)
@@ -796,11 +803,11 @@ class NeRFAE(CommonNeRF):
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
 
-  def from_pts(self, pts, ts, r_o, r_d):
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
     encoded = self.compute_encoded(pts, ts, r_o, r_d)
     if self.regularize_latent:
       self.latent_l2_loss = torch.linalg.norm(encoded, dim=-1).square().mean()
-    return self.from_encoded(encoded, ts, r_d, pts)
+    return self.from_encoded(encoded, ts, r_d, pts, refl_latent)
 
   def compute_encoded(self, pts, ts, r_o, r_d):
     latent = self.curr_latent(pts.shape)
@@ -811,7 +818,7 @@ class NeRFAE(CommonNeRF):
     if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
 
     return self.encode(pts, latent)
-  def from_encoded(self, encoded, ts, r_d, pts):
+  def from_encoded(self, encoded, ts, r_d, pts, refl_latent=None):
     if self.normalize_latent: encoded = F.normalize(encoded, dim=-1)
 
     first_out = self.density_tform(encoded)
@@ -821,7 +828,9 @@ class NeRFAE(CommonNeRF):
       density = density + torch.randn_like(density) * self.noise_std
 
     rgb = self.refl(
-      x=pts, view=r_d[None,...].expand_as(pts), latent=torch.cat([encoded, intermediate],dim=-1),
+      x=pts,
+      view=r_d[None,...].expand_as(pts),
+      latent=torch.cat([encoded, cat_not_none(intermediate, refl_latent)],dim=-1),
     )
 
     self.alpha, self.weights = alpha_from_density(density, ts, r_d)
@@ -941,10 +950,9 @@ class VolSDF(CommonNeRF):
   @property
   def refl(self): return self.sdf.refl
 
-  def from_pts(self, pts, ts, r_o, r_d):
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
     latent = self.curr_latent(pts.shape)
-    mip_enc = self.mip_encoding(r_o, r_d, ts)
-    if mip_enc is not None: latent = torch.cat([latent, mip_enc], dim=-1)
+    latent = cat_not_none(latent, self.mip_encoding(r_o, r_d, ts), dim=-1)
 
     sdf_vals, latent = self.sdf.from_pts(pts)
     scale = self.scale_act(self.scale)
@@ -998,7 +1006,7 @@ class RigNeRF(CommonNeRF):
 
   def get_masses(self):
     return 1 + self.masses.square()
-  def from_pts(self, pts, ts, r_o, r_d, rigs=None):
+  def from_pts(self, pts, ts, r_o, r_d, rigs=None, refl_latent=None):
     # assume there is no implicit latent component for now (self.curr_latent() not called)
     if rigs is None: rigs=self.points
     if self.training: rigs = rigs + torch.randn_like(self.points) * 1e-2
@@ -1055,7 +1063,7 @@ class RecurrentNeRF(CommonNeRF):
     )
     return self.from_pts(pts, self.ts, r_o, r_d)
 
-  def from_pts(self, pts, ts, r_o, r_d):
+  def from_pts(self, pts, ts, r_o, r_d, refl_latent=None):
     latent = self.curr_latent(pts.shape)
 
     densities, intermediate = self.first(pts, latent)
@@ -1157,25 +1165,50 @@ def cubic_bezier(coeffs, t, N: int):
 
 # Dynamic NeRF for multiple frams
 class DynamicNeRF(nn.Module):
-  def __init__(self, canonical: CommonNeRF, spline:int=0):
+  def __init__(
+    self,
+    canonical: CommonNeRF,
+    # How many spline points to include
+    spline:int=0,
+    # how many parameters to send to the reflectance model.
+    refl_latent:int=0,
+  ):
     super().__init__()
     self.canonical = canonical
     self.spline = spline
-
+    self.refl_latent = max(refl_latent, 0)
     if spline > 0: self.set_spline_estim(spline)
     else: self.set_delta_estim()
   def set_delta_estim(self):
+    out_dims = 3 + 1
+
+    enc_layout = [0,0]
+    if self.refl_latent > 0:
+      out_dims += self.refl_latent + 1
+      enc_layout = [1, self.refl_latent]
+    self.mlp_out_layout = [1,3] + enc_layout
+
+
     self.delta_estim = SkipConnMLP(
       # x,y,z,t -> dx, dy, dz, rigidity
-      in_size=4, out=3+1, num_layers = 5, hidden_size = 256, init="xavier",
+      in_size=4, out=out_dims, num_layers = 5, hidden_size = 256, init="xavier",
     )
+
     self.delta_estim.zero_last_layer()
     self.time_estim = self.direct_predict
   def set_spline_estim(self, spline_points):
     assert(spline_points > 1), "Must pass N > 1 spline"
+    out_dims = spline_points * 3 + 1
+
+    enc_layout = [0,0]
+    if self.refl_latent > 0:
+      out_dims += spline_points * self.refl_latent + 1
+      enc_layout = [1, self.refl_latent * spline_points]
+    self.mlp_out_layout = [1, 3 * spline_points] + enc_layout
+
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
-      in_size=3, out=spline_points*3+1, num_layers=5, hidden_size=256, init="xavier",
+      in_size=3, out=out_dims, num_layers=5, hidden_size=256, init="xavier",
     )
     self.delta_estim.zero_last_layer()
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau
@@ -1183,20 +1216,23 @@ class DynamicNeRF(nn.Module):
     self.time_estim = self.spline_interpolate
 
   def direct_predict(self, x, t):
-    enc = getattr(self.canonical, "encoding_size", 0)
-    dp, rigidity, encoding = self.delta_estim(torch.cat([x, t], dim=-1)).split([3, 1, enc], dim=-1)
+    xt = torch.cat([x,t], dim=-1)
+    dp, rigidity, enc_rigidity, enc = self.delta_estim(xt).split(self.mlp_out_layout, dim=-1)
     self.rigidity = (rigidity/2).sigmoid()
     self.rigid_dp = self.dp * self.rigidity
-    return torch.cat([self.rigid_dp, encoding], dim=-1)
+    return self.rigid_dp, enc * enc_rigidity.sigmoid()
   def spline_interpolate(self, x, t):
     # t is mostly expected to be between 0 and 1, but can be outside for fun.
-    rigidity, ps = self.delta_estim(x).split([1, 3 * self.spline_n], dim=-1)
+    rigidity, ps, enc_rigidity, enc = self.delta_estim(x).split(self.mlp_out_layout, dim=-1)
     self.rigidity = (rigidity/2).sigmoid()
     ps = torch.stack(ps.split([3] * self.spline_n, dim=-1), dim=0)
+    enc = torch.stack(enc.split([self.refl_latent] * self.spline_n, dim=-1), dim=0)
 
-    self.dp = self.spline_fn(ps, t, self.spline_n)
+    psenc = torch.cat([ps, enc], dim=-1)
+    self.dp, enc = self.spline_fn(psenc, t, self.spline_n)\
+      .split([ps.shape[-1], enc.shape[-1]], dim=-1)
     self.rigid_dp = self.dp * self.rigidity
-    return self.rigid_dp
+    return self.rigid_dp, enc * enc_rigidity.sigmoid()
 
   @property
   def nerf(self): return self.canonical
@@ -1205,10 +1241,11 @@ class DynamicNeRF(nn.Module):
   @property
   def sdf(self): return getattr(self.canonical, "sdf", None)
   @property
-  def intermediate_size(self): return self.canonical.intermediate_size
+  def intermediate_size(self): return self.canonical.intermediate_size + self.refl_latent
   def total_latent_size(self): return self.canonical.total_latent_size()
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def set_bg(self, bg): self.canonical.set_bg(bg)
+
   def forward(self, rays_t):
     rays, t = rays_t
     self.pts, self.ts, r_o, r_d, _ = compute_pts_ts(
@@ -1219,8 +1256,10 @@ class DynamicNeRF(nn.Module):
     self.pts = self.pts.requires_grad_() if self.training else self.pts
     self.canonical.ts = self.ts
     t = t[None, :, None, None, None].expand(*self.pts.shape[:-1], 1)
-    dp = self.time_estim(self.pts, t)
-    return self.canonical.from_pts(self.pts + dp, self.ts, r_o, r_d)
+    dp, enc = self.time_estim(self.pts, t)
+    return self.canonical.from_pts(self.pts + dp, self.ts, r_o, r_d, enc)
+
+  # post-processing tool, can visualize each keyframe for a bezier spline.
   def render_keyframes(self, rays):
     assert(self.spline > 0)
     rays = rays
@@ -1229,7 +1268,7 @@ class DynamicNeRF(nn.Module):
       perturb = 1 if self.training else 0,
     )
     self.canonical.ts = self.ts
-    rigidity, ps = self.delta_estim(self.pts).split([1, 3 * (self.spline_n-1)], dim=-1)
+    rigidity, ps, enc_rigidity, enc = self.delta_estim(self.pts).split(self.mlp_out_layout, dim=-1)
     rigidity = (rigidity/2).sigmoid()
     return [
       self.canonical.from_pts(self.pts + p * rigidity, self.ts, r_o, r_d)
@@ -1240,43 +1279,39 @@ class DynamicNeRF(nn.Module):
 class LongDynamicNeRF(nn.Module):
   def __init__(
     self,
-    canonical: CommonNeRF,
-    segments: int = 32,
+    canonical:CommonNeRF,
+    total_len:float,
+    len_per_segment:float=4.,
     spline:int=4,
-    segment_embedding_size:int=128,
-    # intermediate size from the anchors to the points estimator
-    anchor_interim:int=128,
   ):
     super().__init__()
 
+    # Canonical NeRF
     self.canonical = canonical
-    self.spline_n = spline
-    self.ses = ses = segment_embedding_size
-    self.segments = segments
 
-    n_points = segments * spline
-    # keep an embedding for each segment # TODO is there an off by 1 error
-    self.seg_emb = nn.Embedding(segments+1, ses)
-    self.interim_size = anchor_interim
     assert(spline > 2), "Must pass N > 2 spline"
-    # the anchor points of each spline
-    self.anchors = SkipConnMLP(
-      in_size=3, out=3+anchor_interim,
-      num_layers=5, hidden_size=512, latent_size=ses, init="xavier",
-    )
-    # the interior of each spline, will get passed latent values from the anchors.
-    self.point_estim = SkipConnMLP(
-      in_size=3, out=(spline-2) * 3,
-      num_layers=6, hidden_size=512,
-      latent_size=ses+2*anchor_interim, init="xavier",
-    )
     self.spline_n = spline
+    self.total_len = total_len
+    assert(len_per_segment > 0)
+    self.len_per_segment = len_per_segment
+
+    self.seg_num = seg_num = np.ceil(total_len/len_per_segment)
+
+    self.segs = nn.ModuleList([
+      # Local and global rigidity
+      SkipConnMLP(
+        in_size=3,
+        out=(self.spline - int(i!=0))*3 + 1,
+        latent_size=0 if i == 0 else pass_fwd_latent,
+        init="xavier"
+      )
+      for i in seg_num
+    ])
+
+    # Also have a component for global rigidity
     self.global_rigidity = SkipConnMLP(
       in_size=3, out=1, init="xavier", num_layers=5, hidden_size=256,
     )
-    # Parameters in SE3, except 0 which is always 0
-    self.global_spline = nn.Parameter(torch.randn(n_points, 6))
-    self.spline_fn = de_casteljau if self.spline_n != 4 else cubic_bezier
 
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def total_latent_size(self): return self.canonical.total_latent_size()
@@ -1288,6 +1323,42 @@ class LongDynamicNeRF(nn.Module):
   def sdf(self): return getattr(self.canonical, "sdf", None)
   @property
   def intermediate_size(self): return self.canonical.intermediate_size
+
+  # evaluate the first spline segment
+  def eval_first(self, x, t):
+    seg = self.segs[0].to(x.device)
+
+    r, ps = seg(x).split([1, 3 * (self.spline_n+1)], dim=-1)
+    ps = torch.stack(ps.split(3, dim=-1), dim=0)
+
+    dp = de_casteljau(ps, t, self.spline_n)
+    g_r = self.global_rigidity.to(device)(x)
+    return dp * r.sigmoid() * g_r.sigmoid()
+
+  # evaluate a spline segment, given by `seg`. This is not vectorized over `seg`,
+  # so that each MLP can be loaded separately.
+  def eval_at(self, x, seg:int, t):
+    if seg == 0: return self.eval_first(x, t)
+
+    seg_mlp = self.segs[seg].to(x.device)
+    prev = self.segs[seg].to(x.device)
+
+    # Since this one MLP may output a ton of things, track its structure
+    mlp_out_layout = [1, 3 * self.spline_n]
+    with torch.no_grad():
+      # extract the last control point from the previous segment.
+      r, ps = seg(x).split(mlp_out_layout, dim=-1)
+      first_control_point = ps[-3:] * r.sigmoid()
+
+    rigidity, ps = seg(x).split(mlp_out_layout, dim=-1)
+    ps = ps * rigidity.sigmoid()
+    ps = torch.stack([first_control_point, *ps.split(3, dim=-1)], dim=0)
+
+    dp = de_casteljau(ps, t, self.spline_n)
+
+    g_r = self.global_rigidity.to(device)(x)
+    return ps * g_r.sigmoid()
+
   def forward(self, rays_t):
     rays, t = rays_t
     rays = rays.expand(t.shape[0], *rays.shape[1:])
@@ -1297,23 +1368,15 @@ class LongDynamicNeRF(nn.Module):
     )
     self.pts = pts
     self.canonical.ts = self.ts
-    t = t[None, :, None, None, None].expand(*pts.shape[:-1], 1)
-    seg = t.floor().int().clamp(min=0)
+    seg = (t/self.len_per_segment).floor().int()
+    t_in_seg = t.mod(self.len_per_segment)/self.len_per_segment
     assert((seg >= 0).all()), "must have all positive segments"
+    # Now iterate over unique elements of tensor to sparsely compute things:
+    for i in seg.unique():
+      # TODO stitch these back together
+      v = self.eval_at(pts, seg, t_in_seg[seg==i])
+      raise NotImplementedError
 
-    embs = self.seg_emb(torch.cat([seg, seg+1], dim=-1))
-    anchors, anchor_latent = self.anchors(
-      pts[..., None, :].expand(*pts.shape[:-1], 2, pts.shape[-1]), embs,
-    ).split([3, self.interim_size], dim=-1)
-    starting, end = [a.squeeze(-2).unsqueeze(0) for a in anchors.split([1,1], dim=-2)]
-    seg_emb = embs[..., 0, :]
-
-    point_estim_latent = torch.cat([seg_emb, anchor_latent.flatten(start_dim=-2)], dim=-1)
-    inner_points = torch.stack(self.point_estim(pts, point_estim_latent).split(3, dim=-1), dim=0)
-
-    control_pts = torch.cat([starting, inner_points, end], dim=0)
-    self.rigidity = rigidity = upshifted_sigmoid(self.global_rigidity(pts)/2)
-    self.dp = dp = self.spline_fn(control_pts, t.frac(), self.spline_n) * rigidity
     return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
 
 # Dynamic NeRFAE for multiple frames with changing materials
@@ -1556,8 +1619,14 @@ def load_dyn(args, model, device):
     model = torch.load(args.with_canon, map_location=device)
     assert(isinstance(model, CommonNeRF)), f"Can only use NeRF subtype, got {type(model)}"
     # TODO if dynae need to check that model is NeRFAE
-  kwargs = { "canonical": model, "spline": args.spline }
-  if dyn_cons == LongDynamicNeRF: kwargs["segments"] = args.segments
+  kwargs = {
+    "canonical": model,
+    "spline": args.spline,
+    "refl_latent": args.dyn_refl_latent,
+  }
+  if dyn_cons == LongDynamicNeRF:
+    kwargs["total_len"] = args.end_sec - args.start_sec
+    kwargs["len_per_segment"] = args.long_vid_chunk_len_sec
   return dyn_cons(**kwargs)
 
 dyn_model_kinds = {

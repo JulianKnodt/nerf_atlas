@@ -275,23 +275,18 @@ class CurlMLP(SDFModel):
       field = torch.linalg.norm(autograd(x, field), dim=-1, keepdim=True) * field.tanh()
       return torch.cat([field, latent], dim=-1)
 
-#def siren_act(v): return (30*v).sin()
 class SIREN(SDFModel):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.siren = SkipConnMLP(
-      in_size=3, out=1+self.intermediate_size, enc=None,
+      in_size=3, out=1+self.intermediate_size,
       num_layers=5, hidden_size=256,
       activation=torch.sin,
-      # Do not have skip conns
-      skip=1000, init="siren",
+      skip=3, init="siren",
     )
-  def forward(self, x):
-    out = self.siren((30*x).sin())
-    assert(out.isfinite().all())
-    return out
+  def forward(self, x): return self.siren(x)
 
-# TODO better verify this works? Haven't tried it out a ton on a lot of methods
+# TODO verify this works? Haven't tried it out a ton on a lot of methods
 class Local(SDFModel):
   def __init__(
     self,
