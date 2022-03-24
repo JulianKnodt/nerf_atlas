@@ -197,6 +197,9 @@ class SkipConnMLP(nn.Module):
   def zero_last_layer(self):
     nn.init.zeros_(self.out.weight)
     nn.init.zeros_(self.out.bias)
+  def uniform_last_layer(self, a=1e-4):
+    nn.init.uniform_(self.out.weight, -a, a)
+    nn.init.uniform_(self.out.bias, -a, a)
   # add an additional method for capt
   def variance(self, shape=None):
     return torch.stack([l.var(shape) for l in self.layers], dim=0)

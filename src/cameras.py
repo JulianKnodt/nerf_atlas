@@ -2,7 +2,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dataclasses import dataclass
 from .utils import rotate_vector
 from .neural_blocks import ( SkipConnMLP )
 import random
@@ -14,28 +13,34 @@ class Camera(nn.Module):
   def sample_positions(self, positions): raise NotImplementedError()
 
 # A camera made specifically for generating rays from NeRF models
-@dataclass
 class NeRFCamera(Camera):
-  cam_to_world:torch.tensor = None
-  focal: float=None
-  device:str ="cuda"
-  near: float = None
-  far: float = None
+  def __init__(
+    self,
+    cam_to_world:torch.tensor = None,
+    focal: float=None,
+    near: float = None,
+    far: float = None,
+  ):
+    super().__init__()
+    self.cam_to_world = nn.Parameter(cam_to_world, requires_grad=False)
+    self.focal = focal
+    self.near = near
+    self.far = far
 
   def __len__(self): return self.cam_to_world.shape[0]
 
   @classmethod
-  def identity(cls, batch_size: int, device="cuda"):
+  def identity(cls, batch_size: int):
     c2w = torch.tensor([
       [1,0,0, 0],
       [0,1,0, 0],
       [0,0,1, 0],
-    ], device=device).unsqueeze(0).expand(batch_size, 3, 4)
-    return cls(cam_to_world=c2w, focal=0.5, device=device)
+    ]).unsqueeze(0).expand(batch_size, 3, 4)
+    return cls(cam_to_world=c2w, focal=0.5)
 
   # support indexing to get sub components of a camera
   def __getitem__(self, v):
-    return NeRFCamera(cam_to_world=self.cam_to_world[v], focal=self.focal, device=self.device)
+    return NeRFCamera(cam_to_world=self.cam_to_world[v], focal=self.focal)
 
   def sample_positions(
     self,
@@ -43,7 +48,7 @@ class NeRFCamera(Camera):
     size: int,
     with_noise=False,
   ):
-    device=self.device
+    device=position_samples.device
     u,v = position_samples.split([1,1], dim=-1)
     # u,v each in range [0, size]
     if with_noise:
@@ -119,95 +124,37 @@ class OrthogonalCamera(Camera):
     r_d = self.dir.expand_as(r_o)
     return torch.cat([r_o, r_d], dim=-1)
 
-# The camera described in the NeRF-- paper
-@dataclass
-class NeRFMMCamera(Camera):
-  # position
-  t: torch.tensor = None
-  # angle of rotation about axis
-  r: torch.tensor = None
-  # intrinsic focal positions
-  focals: torch.tensor = None
-  device:str ="cuda"
-
-  def __len__(self): return self.t.shape[0]
-
-  @classmethod
-  def identity(cls, batch_size: int, device="cuda"):
-    t = torch.zeros(batch_size, 3, dtype=torch.float, device=device, requires_grad=True)
-    r = torch.zeros_like(t, requires_grad=True)
-    # focals are for all the cameras and thus don't have batch dim
-    focals = torch.tensor([0.7, 0.7], dtype=torch.float, device=device, requires_grad=True)
-    return cls(t=t, r=r, focals=focals, device=device)
-
-  def parameters(self): return [self.r, self.t, self.focals]
-
-  def __getitem__(self, v):
-    return NeRFMMCamera(t=self.t[v],r=self.r[v],focals=self.focals)
-
-  def sample_positions(self, position_samples, size:int, with_noise=False):
-    device=self.device
-    u,v = position_samples.split(1, dim=-1)
-    # u,v each in range [0, size]
+# StaticCamera sits at the origin and has no rotations.
+# Should be used when predicting videos with no ground truth camera positions,
+# And also allows for the focal parameters to be optimized over
+class StaticCamera(Camera):
+  def __init__(
+    self,
+    focal: float=300,
+  ):
+    super().__init__()
+    self.focal = focal
+  def __len__(self): return 1
+  def __getitem__(self, _v): return self
+  def sample_positions(
+    self,
+    position_samples,
+    size:int=512,
+    with_noise: bool = False,
+  ):
+    u,v = position_samples.split([1,1], dim=-1)
     if with_noise:
       u = u + (torch.rand_like(u)-0.5)*with_noise
       v = v + (torch.rand_like(v)-0.5)*with_noise
 
-    d = torch.stack(
-      [
-        (u - size * 0.5) / self.focals[..., 0],
-        -(v - size * 0.5) / self.focals[..., 1],
+    r_d = torch.stack([
+        (u - size * 0.5) / self.focal,
+        -(v - size * 0.5) / self.focal,
         -torch.ones_like(u),
-      ],
-      dim=-1,
-    )
-    R = exp(self.r)
-    r_d = torch.sum(d[..., None, :] * R, dim=-1)
-    # normalize direction and exchange [W,H,B,3] -> [B,W,H,3]
+    ], dim=-1)
     r_d = F.normalize(r_d, dim=-1).permute(2,0,1,3)
-    r_o = self.t[:, None, None, :].expand_as(r_d)
-    return torch.cat([r_o, r_d], dim=-1)
-
-# learned time varying camera
-class NeRFMMTimeCamera(Camera):
-  def __init__(
-    self,
-    batch_size,
-    # position
-    translate: torch.tensor,
-    # angle of rotation about axis
-    rot: torch.tensor,
-    # intrinsic focal positions
-    focals: torch.tensor,
-    delta_params: SkipConnMLP = None,
-    device:str ="cuda"
-  ):
-    ...
-    if delta_params is None:
-      delta_params = SkipConnMLP(
-        in_size=1, out=6,
-        zero_init=True,
-      )
-    self.delta_params = delta_params
-    self.focals = nn.Parameter(focals.requires_grad_())
-    self.rot = nn.Parameter(translate.requires_grad_())
-    self.translate = nn.Parameter(translate.requires_grad_())
-  def __len__(self): return self.t.shape[0]
-  def __getitem__(self, v):
-    raise NotImplementedError()
-    return NeRFMMTimeCamera(
-      translate=self.translate[v], rot=self.rot[v], focal=self.focal,
-      delta_params=self.delta_params, device=self.device
-    )
-  def sample_positions(
-    self,
-    position_samples,
-    t,
-    size:int,
-    with_noise=False,
-  ):
-    raise NotImplementedError()
-    ...
+    r_o = torch.zeros_like(r_d)
+    return torch.cat([torch.zeros_like(r_o), r_d], dim=-1)
 
 def lift(x,y,z,intrinsics, size):
     total_shape = x.shape
@@ -226,58 +173,26 @@ def lift(x,y,z,intrinsics, size):
     # homogeneous
     return torch.stack([x_lift, y_lift, z, torch.ones_like(z)], dim=-1)
 
-# StaticCamera sits at the origin and has no rotations.
-# Should be used when predicting videos with no ground truth camera positions,
-# And also allows for the focal parameters to be optimized over
-class StaticCamera(Camera):
+# A camera specifically for rendering DTU scenes as described in IDR.
+class DTUCamera(Camera):
   def __init__(
     self,
-    # TODO should these have some kind of unit on them?
-    focal_x: float=5., focal_y: float=5.,
-    train_focal: bool=True,
-    #same_focals: bool=False,
+    pose: torch.Tensor = None,
+    intrinsic: torch.Tensor = None,
   ):
     super().__init__()
-    self.focal_x = nn.Parameter(torch.tensor(focal_x, dtype=torch.float, requires_grad=train_focal))
-    self.focal_y = nn.Parameter(torch.tensor(focal_y, dtype=torch.float, requires_grad=train_focal))
-  def __len__(self): return 1
-  def __getitem__(self, _v): return self
-  def sample_positions(
-    self,
-    position_samples,
-    size:int=512,
-    with_noise: bool = False,
-  ):
-    u,v = position_samples.split([1,1], dim=-1)
-    if with_noise:
-      u = u + (torch.rand_like(u)-0.5)*with_noise
-      v = v + (torch.rand_like(v)-0.5)*with_noise
+    self.pose = nn.Parameter(pose, requires_grad=False)
+    self.intrinsic = nn.Parameter(intrinsic, requires_grad=False)
 
-    r_d = torch.stack([
-        (u - size * 0.5) / self.focal_x,
-        -(v - size * 0.5) / self.focal_y,
-        -torch.ones_like(u),
-    ], dim=-1)
-    r_d = F.normalize(r_d, dim=-1).permute(2,0,1,3)
-    r_o = torch.zeros_like(r_d)
-    return torch.cat([torch.zeros_like(r_o), r_d], dim=-1)
-
-# A camera specifically for rendering DTU scenes as described in IDR.
-@dataclass
-class DTUCamera(Camera):
-  pose: torch.Tensor = None
-  intrinsic: torch.Tensor = None
-  device: str = "cuda"
   def __len__(self): return self.pose.shape[0]
-  def __getitem__(self, v):
-    return DTUCamera(pose=self.pose[v], intrinsic=self.intrinsic[v], device=self.device)
+  def __getitem__(self, v): return DTUCamera(pose=self.pose[v], intrinsic=self.intrinsic[v])
   def sample_positions(
     self,
     position_samples,
     size:int=512,
     with_noise:bool=False,
   ):
-    device = self.device
+    device = position_samples.device
     pose = self.pose
     intrinsic = self.intrinsic
     # copied directly from https://github.com/lioryariv/idr/blob/main/code/utils/rend_util.py#L48

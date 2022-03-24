@@ -106,11 +106,10 @@ dnerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
 	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
 	--crop-size 18 --near 2 --far 6 -lr 1e-3 --valid-freq 500 --spline 6 \
-  --loss-window 2000 --loss-fns l2 --render-over-time 2 \
-  --test-crop-size 48 --depth-images --save-freq 2500 \
+  --loss-window 2000 --loss-fns l2 --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
-  --sigmoid-kind upshifted --notraintest --opt-step 3 \
+  --sigmoid-kind upshifted --notraintest --opt-step 3 --dyn-refl-latent 3 \
   #--load models/dyn_${dnerf_dataset}.pt
 
 dnerf_original: clean
@@ -174,7 +173,7 @@ scan_number := 83
 dtu: clean
 	python3 runner.py -d data/DTU/scan$(scan_number)/ --data-kind dtu \
 	--size 192 --epochs 50000 --save models/dtu$(scan_number).pt --save-freq 5000 \
-	--near 0.3 --far 1.8 --batch-size 3 --crop-size 26 --model volsdf -lr 3e-4 \
+	--near 0.3 --far 1.8 --batch-size 3 --crop-size 18 --model volsdf -lr 3e-4 \
 	--loss-fns l2 --valid-freq 499 --sdf-kind siren --opt-step 5 \
 	--loss-window 1000 --sdf-eikonal 0.1 --sigmoid-kind fat #--load models/dtu$(scan_number).pt
 
@@ -470,6 +469,17 @@ fencing: clean
   --depth-images --loss-window 1000 --train-imgs 40 --notest --train-parts camera all \
   --load models/fencing_video.pt --cam-save-load models/fencing_cam.pt --render-over-time 0 \
   --no-sched --seed -1
+
+dance_off: clean
+	python3 -O runner.py -d data/video/shoichi_chris_small.mp4 --data-kind single-video --size 256 \
+	--epochs 25_000 --save models/dance_off.pt --model plain --batch-size 2 \
+	--crop-size 18 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 6 \
+  --loss-window 2000 --loss-fns l2 fft --test-crop-size 48 --depth-images --save-freq 2500 \
+  --flow-map --dyn-model long --rigidity-map --refl-kind pos --static-vid-cam-angle-deg 60 \
+  --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
+  --sigmoid-kind fat --notraintest --opt-step 3 --long-vid-progressive-train 5 \
+  --end-sec 15 --notraintest --load models/dance_off.pt --notest
+
 
 spline: clean
 	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \

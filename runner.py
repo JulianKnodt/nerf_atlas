@@ -318,11 +318,15 @@ def arguments():
   # Long videos
   vida.add_argument(
     "--long-vid-progressive-train", type=int, default=0,
-    help="After <N> iterations, train the next segment of a video",
+    help="Divide dataset into <N> chunks based on time, train each segment separately",
   )
   vida.add_argument(
     "--long-vid-chunk-len-sec", type=float, default=3,
     help="For a long video, how long should each chunk be in seconds",
+  )
+  vida.add_argument(
+    "--static-vid-cam-angle-deg", type=float, default=40,
+    help="Camera angle FOV in degrees, needed for static camera",
   )
 
   rprt = a.add_argument_group("reporting parameters")
@@ -579,10 +583,12 @@ def train(model, cam, labels, opt, args, sched=None):
   iters = range(args.epochs) if args.quiet else trange(args.epochs)
   update = lambda kwargs: iters.set_postfix(**kwargs)
   if args.quiet: update = lambda _: None
-  times=None
+
+  times = None
   if type(labels) is tuple:
-    times = labels[-1]
+    times = labels[-1].to(device) # oops maybe pass this down from somewhere?
     labels = labels[0]
+
   batch_size = min(args.batch_size, labels.shape[0])
 
   get_crop = lambda: (0,0, args.size, args.size)
@@ -621,7 +627,7 @@ def train(model, cam, labels, opt, args, sched=None):
 
     ts = None if times is None else times[idxs]
     c0,c1,c2,c3 = crop = get_crop()
-    ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :3]
+    ref = labels[idxs][:, c0:c0+c2,c1:c1+c3, :3].to(device)
 
     if getattr(model.refl, "light", None) is not None:
       model.refl.light.set_idx(torch.tensor(idxs, device=device))
@@ -1215,8 +1221,12 @@ def main():
   args = arguments()
   seed(args.seed)
 
-  labels, cam, light = loaders.load(args, training=True, device=device)
+  labels, cam, light = loaders.load(args, training=True)
+  cam = cam.to(device)
+  if light is not None: light = light.to(device)
+
   setattr(args, "num_labels", len(labels))
+
   is_dyn = type(labels) == tuple
 
   model = None
@@ -1262,11 +1272,30 @@ def main():
 
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.sched_min)
   if args.no_sched: sched = None
-  train(model, cam, labels, opt, args, sched=sched)
+
+  if args.long_vid_progressive_train <= 0: train(model, cam, labels, opt, args, sched=sched)
+  else:
+    assert(is_dyn), "Can only perform progressive long video training on dynamic datasets"
+    segments = args.long_vid_progressive_train
+    args.long_vid_progressive_train = 0 # indicate that we saw it already
+    assert(args.end_sec is not None), "Must pass a specific end time for progressive training"
+    step = (args.end_sec - args.start_sec)/segments
+    for i, start_sec in enumerate(np.linspace(args.start_sec, args.end_sec-step, segments)):
+      # explicitly put dyn model on CPU, only load certain parts of the model each iter.
+      model = model.cpu()
+      # but leave canonical on CUDA, since we always need it.
+      model.canonical.to(device)
+      args.start_sec = start_sec
+      args.end_sec = start_sec + step
+      print(f"[info]: starting progressive section {i}")
+      labels, _, _ = loaders.load(args, training=True)
+      train(model, cam, labels, opt, args, sched=sched)
 
   if not args.notraintest: test(model, cam, labels, args, training=True)
 
-  test_labels, test_cam, test_light = loaders.load(args, training=False, device=device)
+  test_labels, test_cam, test_light = loaders.load(args, training=False)
+  test_cam = test_cam.to(device)
+  if light is not None: test_light = test_light.to(device)
 
   if test_light is not None: model.refl.light = test_light
   if args.test_white_bg: model.set_bg("white")

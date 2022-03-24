@@ -1283,6 +1283,9 @@ class LongDynamicNeRF(nn.Module):
     total_len:float,
     len_per_segment:float=4.,
     spline:int=4,
+
+    # TODO impl refl latent
+    refl_latent:int=0,
   ):
     super().__init__()
 
@@ -1295,18 +1298,17 @@ class LongDynamicNeRF(nn.Module):
     assert(len_per_segment > 0)
     self.len_per_segment = len_per_segment
 
-    self.seg_num = seg_num = np.ceil(total_len/len_per_segment)
+    self.seg_num = seg_num = math.ceil(total_len/len_per_segment)
 
     self.segs = nn.ModuleList([
-      # Local and global rigidity
       SkipConnMLP(
-        in_size=3,
-        out=(self.spline - int(i!=0))*3 + 1,
-        latent_size=0 if i == 0 else pass_fwd_latent,
-        init="xavier"
+        hidden_size=128, num_layers=3, init="xavier",
+        in_size=3, latent_size=0,
+        out=(self.spline_n - int(i!=0))*3 + 1,
       )
-      for i in seg_num
+      for i in range(seg_num)
     ])
+    for seg in self.segs: seg.uniform_last_layer()
 
     # Also have a component for global rigidity
     self.global_rigidity = SkipConnMLP(
@@ -1328,36 +1330,40 @@ class LongDynamicNeRF(nn.Module):
   def eval_first(self, x, t):
     seg = self.segs[0].to(x.device)
 
-    r, ps = seg(x).split([1, 3 * (self.spline_n+1)], dim=-1)
+    r, ps = seg(x).split(self.mlp_out_layout(0), dim=-1)
     ps = torch.stack(ps.split(3, dim=-1), dim=0)
 
     dp = de_casteljau(ps, t, self.spline_n)
-    g_r = self.global_rigidity.to(device)(x)
-    return dp * r.sigmoid() * g_r.sigmoid()
+    g_r = self.global_rigidity.to(x.device)(x)
+    return dp, r.sigmoid() * g_r.sigmoid()
+
+  # Since this one MLP may output a ton of things, track its structure
+  def mlp_out_layout(self, seg):
+    return [1, 3 * self.spline_n] if seg == 0 else [1, 3 * (self.spline_n - 1)]
 
   # evaluate a spline segment, given by `seg`. This is not vectorized over `seg`,
   # so that each MLP can be loaded separately.
   def eval_at(self, x, seg:int, t):
+    t = t[None, :, None, None, None].expand(*x.shape[:-1], 1)
     if seg == 0: return self.eval_first(x, t)
 
     seg_mlp = self.segs[seg].to(x.device)
     prev = self.segs[seg].to(x.device)
 
-    # Since this one MLP may output a ton of things, track its structure
-    mlp_out_layout = [1, 3 * self.spline_n]
     with torch.no_grad():
       # extract the last control point from the previous segment.
-      r, ps = seg(x).split(mlp_out_layout, dim=-1)
-      first_control_point = ps[-3:] * r.sigmoid()
+      r, ps = self.segs[seg-1](x).split(self.mlp_out_layout(seg-1), dim=-1)
+      # TODO is it necessary to apply the rigidity from the previous segment
+      # onto this one?
+      first_control_point = ps[..., -3:]
 
-    rigidity, ps = seg(x).split(mlp_out_layout, dim=-1)
-    ps = ps * rigidity.sigmoid()
+    r, ps = self.segs[seg](x).split(self.mlp_out_layout(seg), dim=-1)
     ps = torch.stack([first_control_point, *ps.split(3, dim=-1)], dim=0)
 
     dp = de_casteljau(ps, t, self.spline_n)
 
-    g_r = self.global_rigidity.to(device)(x)
-    return ps * g_r.sigmoid()
+    g_r = self.global_rigidity.to(x.device)(x)
+    return dp, r.sigmoid() * g_r.sigmoid()
 
   def forward(self, rays_t):
     rays, t = rays_t
@@ -1366,18 +1372,21 @@ class LongDynamicNeRF(nn.Module):
       rays, self.canonical.t_near, self.canonical.t_far, self.canonical.steps,
       perturb = 1 if self.training else 0,
     )
-    self.pts = pts
+    # require grad for divergence regularization
+    self.pts = pts.requires_grad_() if self.training else pts
     self.canonical.ts = self.ts
     seg = (t/self.len_per_segment).floor().int()
-    t_in_seg = t.mod(self.len_per_segment)/self.len_per_segment
+    assert(seg.max().item() < len(self.segs))
+    t_in_seg = t.remainder(self.len_per_segment)/self.len_per_segment
     assert((seg >= 0).all()), "must have all positive segments"
+    dp, rigidity = torch.zeros_like(pts), torch.zeros_like(pts[..., :1])
     # Now iterate over unique elements of tensor to sparsely compute things:
     for i in seg.unique():
-      # TODO stitch these back together
-      v = self.eval_at(pts, seg, t_in_seg[seg==i])
-      raise NotImplementedError
+      dp[:, seg==i], rigidity[:, seg==i] = self.eval_at(pts[:, seg==i], i, t_in_seg[seg==i])
 
-    return self.canonical.from_pts(pts + dp, self.ts, r_o, r_d)
+    self.rigid_dp = dp * rigidity
+    self.dp, self.rigidity = dp, rigidity
+    return self.canonical.from_pts(pts + self.rigid_dp, self.ts, r_o, r_d)
 
 # Dynamic NeRFAE for multiple frames with changing materials
 class DynamicNeRFAE(DynamicNeRF):
