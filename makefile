@@ -471,14 +471,16 @@ fencing: clean
   --no-sched --seed -1
 
 dance_off: clean
-	python3 -O runner.py -d data/video/shoichi_chris_small.mp4 --data-kind single-video --size 256 \
-	--epochs 25_000 --save models/dance_off.pt --model plain --batch-size 2 \
-	--crop-size 18 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 6 \
+	python3 -O runner.py -d data/video/shoichi_chris_small.mp4 --data-kind single-video --size 512 \
+	--epochs 10_000 --save models/dance_off.pt --model plain --batch-size 2 \
+	--crop-size 20 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 6 --seed -1 \
   --loss-window 2000 --loss-fns l2 fft --test-crop-size 48 --depth-images --save-freq 2500 \
-  --flow-map --dyn-model long --rigidity-map --refl-kind pos --static-vid-cam-angle-deg 60 \
-  --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
+  --flow-map --dyn-model long --rigidity-map --refl-kind pos-linear-view \
+  --static-vid-cam-angle-deg 75 --render-over-time-end-sec 15 --render-over-time 0 \
+  --higher-end-chance 2 --offset-decay 0 --ffjord-div-decay 0 \
   --sigmoid-kind fat --notraintest --opt-step 3 --long-vid-progressive-train 5 \
-  --end-sec 15 --notraintest --load models/dance_off.pt --notest
+  --dyn-refl-latent 32 \
+  --end-sec 15 --notraintest --notest --load models/dance_off.pt
 
 
 spline: clean

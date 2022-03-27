@@ -256,6 +256,9 @@ def arguments():
   dnerfa.add_argument(
     "--render-over-time-steps", default=100, type=int, help="How many steps to render over time",
   )
+  dnerfa.add_argument(
+    "--render-over-time-end-sec", default=1, type=float, help="Second to stop rendering"
+  )
 
   cama = a.add_argument_group("camera parameters")
   cama.add_argument("--near", help="near plane for camera", type=float, default=2)
@@ -575,7 +578,6 @@ def sqr(x): return x * x
 # train the model with a given camera and some labels (imgs or imgs+times)
 # light is a per instance light.
 def train(model, cam, labels, opt, args, sched=None):
-  print(f"[info]: git commit {git_hash()}")
   if args.epochs == 0: return
 
   loss_fn = load_loss_fn(args, model)
@@ -979,9 +981,7 @@ def test(model, cam, labels, args, training: bool = True):
 
 def render_over_time(args, model, cam):
   cam = cam[args.render_over_time:args.render_over_time+1]
-  ts = torch.linspace(0, math.pi, steps=args.render_over_time_steps, device=device)
-  ts = ts * ts
-  ts = ((ts.sin()+1)/2)
+  ts = torch.linspace(0, args.render_over_time_end_sec, steps=args.render_over_time_steps, device=device)
   cs = args.test_crop_size
   N = math.ceil(args.render_size/cs)
 
@@ -999,8 +999,8 @@ def render_over_time(args, model, cam):
           got[c0:c0+cs, c1:c1+cs, :3] = out.squeeze(0)
           if args.with_alpha: got[c0:c0+cs, c1:c1+cs,3] = model.nerf.weights[:-1].sum(dim=0)
       save_image(os.path.join(args.outdir, f"time_{i:03}.png"), got)
-    if not args.render_bezier_keyframes: return
 
+    if not args.render_bezier_keyframes: return
 
     keyframes = [torch.zeros_like(got) for _ in range(model.spline_n)]
     def render_keyframes(model, cam, crop, size):
@@ -1273,6 +1273,7 @@ def main():
   sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.sched_min)
   if args.no_sched: sched = None
 
+  print(f"[info]: git commit {git_hash()}")
   if args.long_vid_progressive_train <= 0: train(model, cam, labels, opt, args, sched=sched)
   else:
     assert(is_dyn), "Can only perform progressive long video training on dynamic datasets"
@@ -1282,9 +1283,9 @@ def main():
     step = (args.end_sec - args.start_sec)/segments
     for i, start_sec in enumerate(np.linspace(args.start_sec, args.end_sec-step, segments)):
       # explicitly put dyn model on CPU, only load certain parts of the model each iter.
-      model = model.cpu()
+      #model = model.cpu()
       # but leave canonical on CUDA, since we always need it.
-      model.canonical.to(device)
+      #model.canonical.to(device)
       args.start_sec = start_sec
       args.end_sec = start_sec + step
       print(f"[info]: starting progressive section {i}")

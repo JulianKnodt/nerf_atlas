@@ -1300,20 +1300,25 @@ class LongDynamicNeRF(nn.Module):
 
     self.seg_num = seg_num = math.ceil(total_len/len_per_segment)
 
+    self.refl_latent = refl_latent
+    self.refl_rigid = int(refl_latent > 0)
+
+    out_size_0 = 1 + 3 * self.spline_n
+    out_size_n = 1 + 3 * (self.spline_n-1)
+    if refl_latent > 0:
+      out_size_0 += 1 + self.refl_latent * self.spline_n
+      out_size_n += 1 + self.refl_latent * (self.spline_n-1)
+
     self.segs = nn.ModuleList([
       SkipConnMLP(
         hidden_size=128, num_layers=3, init="xavier",
         in_size=3, latent_size=0,
-        out=(self.spline_n - int(i!=0))*3 + 1,
+        out=out_size_0 if i == 0 else out_size_n,
       )
-      for i in range(seg_num)
+      # Why does there need to be a +1?
+      for i in range(seg_num+1)
     ])
     for seg in self.segs: seg.uniform_last_layer()
-
-    # Also have a component for global rigidity
-    self.global_rigidity = SkipConnMLP(
-      in_size=3, out=1, init="xavier", num_layers=5, hidden_size=256,
-    )
 
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def total_latent_size(self): return self.canonical.total_latent_size()
@@ -1324,22 +1329,28 @@ class LongDynamicNeRF(nn.Module):
   @property
   def sdf(self): return getattr(self.canonical, "sdf", None)
   @property
-  def intermediate_size(self): return self.canonical.intermediate_size
+  def intermediate_size(self): return self.canonical.intermediate_size + self.refl_latent
 
   # evaluate the first spline segment
   def eval_first(self, x, t):
     seg = self.segs[0].to(x.device)
 
-    r, ps = seg(x).split(self.mlp_out_layout(0), dim=-1)
-    ps = torch.stack(ps.split(3, dim=-1), dim=0)
+    r, ps, enc_r, enc = seg(x).split(self.mlp_out_layout(0), dim=-1)
+    psenc = torch.cat([
+      torch.stack(ps.split(3, dim=-1), dim=0),
+      torch.stack(enc.split(self.refl_latent, dim=-1), dim=0),
+    ], dim=-1)
 
-    dp = de_casteljau(ps, t, self.spline_n)
-    g_r = self.global_rigidity.to(x.device)(x)
-    return dp, r.sigmoid() * g_r.sigmoid()
+    dp,enc = de_casteljau(psenc, t, self.spline_n).split([3, self.refl_latent], dim=-1)
+    return dp, r.sigmoid(), enc * enc_r.sigmoid()
 
   # Since this one MLP may output a ton of things, track its structure
   def mlp_out_layout(self, seg):
-    return [1, 3 * self.spline_n] if seg == 0 else [1, 3 * (self.spline_n - 1)]
+    not_0 = int(seg!=0)
+    return [
+      1, 3 * (self.spline_n - not_0),
+      self.refl_rigid, self.refl_latent * (self.spline_n-not_0)
+    ]
 
   # evaluate a spline segment, given by `seg`. This is not vectorized over `seg`,
   # so that each MLP can be loaded separately.
@@ -1347,23 +1358,23 @@ class LongDynamicNeRF(nn.Module):
     t = t[None, :, None, None, None].expand(*x.shape[:-1], 1)
     if seg == 0: return self.eval_first(x, t)
 
-    seg_mlp = self.segs[seg].to(x.device)
-    prev = self.segs[seg].to(x.device)
-
     with torch.no_grad():
       # extract the last control point from the previous segment.
-      r, ps = self.segs[seg-1](x).split(self.mlp_out_layout(seg-1), dim=-1)
+      r, ps, enc_r, enc = self.segs[seg-1].to(x.device)(x).split(self.mlp_out_layout(seg-1), dim=-1)
       # TODO is it necessary to apply the rigidity from the previous segment
       # onto this one?
       first_control_point = ps[..., -3:]
+      first_enc = enc[..., -self.refl_latent:]
 
-    r, ps = self.segs[seg](x).split(self.mlp_out_layout(seg), dim=-1)
-    ps = torch.stack([first_control_point, *ps.split(3, dim=-1)], dim=0)
+    r, ps, enc_r, enc = self.segs[seg].to(x.device)(x).split(self.mlp_out_layout(seg), dim=-1)
+    psenc = torch.cat([
+      torch.stack([first_control_point, *ps.split(3, dim=-1)], dim=0),
+      torch.stack([first_enc, *enc.split(self.refl_latent, dim=-1)], dim=0),
+    ], dim=-1)
 
-    dp = de_casteljau(ps, t, self.spline_n)
+    dp, enc = de_casteljau(psenc, t, self.spline_n).split([3, self.refl_latent], dim=-1)
 
-    g_r = self.global_rigidity.to(x.device)(x)
-    return dp, r.sigmoid() * g_r.sigmoid()
+    return dp, r.sigmoid(), enc * enc_r.sigmoid()
 
   def forward(self, rays_t):
     rays, t = rays_t
@@ -1375,18 +1386,21 @@ class LongDynamicNeRF(nn.Module):
     # require grad for divergence regularization
     self.pts = pts.requires_grad_() if self.training else pts
     self.canonical.ts = self.ts
-    seg = (t/self.len_per_segment).floor().int()
+    seg = (t/self.len_per_segment).sub(1e-3).floor().clamp(min=1e-10).int()
     assert(seg.max().item() < len(self.segs))
-    t_in_seg = t.remainder(self.len_per_segment)/self.len_per_segment
+    # linearly scale within a segment
+    t_in_seg = (t - seg * self.len_per_segment)/self.len_per_segment
     assert((seg >= 0).all()), "must have all positive segments"
     dp, rigidity = torch.zeros_like(pts), torch.zeros_like(pts[..., :1])
+    enc = torch.zeros(*pts.shape[:-1], self.refl_latent, device=pts.device)
     # Now iterate over unique elements of tensor to sparsely compute things:
     for i in seg.unique():
-      dp[:, seg==i], rigidity[:, seg==i] = self.eval_at(pts[:, seg==i], i, t_in_seg[seg==i])
+      m = seg == i
+      dp[:,m],rigidity[:,m],enc[:,m] = self.eval_at(pts[:,m],i,t_in_seg[m])
 
     self.rigid_dp = dp * rigidity
     self.dp, self.rigidity = dp, rigidity
-    return self.canonical.from_pts(pts + self.rigid_dp, self.ts, r_o, r_d)
+    return self.canonical.from_pts(pts + self.rigid_dp, self.ts, r_o, r_d, enc)
 
 # Dynamic NeRFAE for multiple frames with changing materials
 class DynamicNeRFAE(DynamicNeRF):
@@ -1431,7 +1445,7 @@ class DynamicRigNeRF(nn.Module):
   @property
   def sdf(self): return getattr(self.canonical, "sdf", None)
   @property
-  def intermediate_size(self): return self.canonical.intermediate_size
+  def intermediate_size(self): return self.canonical.intermediate_size + self.refl_latent
   def total_latent_size(self): return self.canonical.total_latent_size()
   def set_refl(self, refl): self.canonical.set_refl(refl)
   def forward(self, rays_t):
