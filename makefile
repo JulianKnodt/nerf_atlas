@@ -149,6 +149,12 @@ long_dnerf: clean
   --dyn-model long --clip-gradients 1 \
   --load models/ldyn_${dnerf_dataset}.pt
 
+dex: clean
+	python3 -O runner.py -d data/dex_nerf/dex_nerf_simulated_clutter_light_array/ \
+  --data-kind original --size 128 --epochs 80_000 --save models/clutter.pt \
+	--near 2 --far 6 --batch-size 4 --crop-size 16 --model plain -lr 5e-4 --save-freq 2500 \
+	--loss-fns l2 --refl-kind pos-linear-view #--load models/clutter.pt #--omit-bg
+
 dnerf_gru: clean
 	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
 	--epochs 80_000  --save models/djj_gru_ae.pt --model ae --batch-size 2 \

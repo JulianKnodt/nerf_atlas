@@ -839,15 +839,38 @@ class NeRFAE(CommonNeRF):
 
 def identity(x): return x
 
+# Should normalize before passing it in
+def reflect(v, n): return v - 2.0 * (n * v).sum(keepdim=True, dim=-1) * n
+
+def snells_law(w_i, n, eta_i, eta_o) -> "w_o":
+  w_i = F.normalize(w_i, dim=-1)
+  n = F.normalize(n, dim=-1)
+  cos_theta = - (n * w_i).sum(dim=-1, keepdim=True)
+  # TODO cos_theta should be negative here assuming that the orientations are correct
+  w_i_reflect = w_i - 2 * cos_theta * n
+  ratio = eta_i/eta_o
+  sin_theta_2 = ratio * (1-cos_theta.square()).clamp(min=1e-6).sqrt()
+  # TODO if sin_theta_2 < 0, do something different for total internal refraction?
+  cos_theta_2 = (1-sin_theta_2.square()).clamp(min=1e-6).sqrt()
+  w_o = ratio * w_i + (ratio * cos_theta - cos_theta_2) * n
+  return w_o
+
 # https://arxiv.org/pdf/2106.12052.pdf
 class VolSDF(CommonNeRF):
   def __init__(
     self, sdf,
     # how many features to pass from density to RGB
     out_features: int = 3,
+
+    # occ_kind
     occ_kind=None,
+
     integrator_kind="direct",
-    scale_softplus=False,
+
+    w_transmission:bool=False,
+
+    scale_softplus:bool=False,
+
     **kwargs,
   ):
     super().__init__(**kwargs)
@@ -857,6 +880,7 @@ class VolSDF(CommonNeRF):
     self.secondary = None
     self.out_features = out_features
     self.scale_act = identity if not scale_softplus else nn.Softplus()
+
     if occ_kind is not None:
       assert(isinstance(self.sdf.refl, refl.LightAndRefl)), \
         f"Must have light w/ volsdf integration {type(self.sdf.refl)}"
@@ -865,6 +889,14 @@ class VolSDF(CommonNeRF):
       if integrator_kind == "direct": self.secondary = self.direct
       elif integrator_kind == "path": self.convert_to_path()
       else: raise NotImplementedError(f"unknown integrator kind {integrator_kind}")
+
+    if with_transmission:
+      self.ior = SkipConnMLP(
+        in_size=3, latent_size=sdf.intermediate_size, out=1,
+        num_Layers=2,
+        hidden_size=128,
+      )
+
   def convert_to_path(self):
     if self.secondary == self.path: return False
     self.secondary = self.path
@@ -879,6 +911,13 @@ class VolSDF(CommonNeRF):
       hidden_size=512,
     )
     return True
+  # given a set of pts, and viewing directions, outputs a transmittance direction based on ior
+  # at those points.
+  def transmission_direction(self, r_o, pts, view, n, latent, prev_ior=None):
+    curr_ior = self.ior(pts, latent)
+    if prev_ior is None: prev_ior = torch.ones_like(curr_ior)
+    return snells_law(view, n, prev_ior, curr_ior), curr_ior
+
   def direct(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
     for light in self.sdf.refl.light.iter():
@@ -886,6 +925,7 @@ class VolSDF(CommonNeRF):
       bsdf_val = self.sdf.refl(x=pts, view=view, normal=n, light=light_dir, latent=latent)
       out = out + bsdf_val * light_val
     return out
+
   # Single bounce path tracing. In theory could be extended to an arbitrary # of bounces.
   def path(self, r_o, weights, pts, view, n, latent):
     out = torch.zeros_like(pts)
@@ -1664,6 +1704,7 @@ model_kinds = {
   "tiny": TinyNeRF,
   "plain": PlainNeRF,
   "ae": NeRFAE,
+
   "volsdf": VolSDF,
 
   "coarse_fine": CoarseFineNeRF,
