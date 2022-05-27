@@ -365,12 +365,22 @@ class FourierBasis(Reflectance):
     rgb = (fourier_coeffs * cos_k_phis.unsqueeze(-2)).sum(dim=-1)
     return rgb
 
+
+def ggx(v,n,roughness):
+  a = roughness * roughness
+  vdotn = (v * n).sum(dim=-1,keepdim=True)
+  vdotn_sq = vdotn.square()
+  numer = a * vdotn.sign().clamp(min=0)
+  denom = math.pi * (vdotn_sq * (a + (1-vdotn_sq)/vdotn_sq.clamp(min=1e-5))).square()
+  return numer/denom.clamp(min=1e-5)
+
 # https://graphicscompendium.com/gamedev/15-pbr
 # https://link.springer.com/referenceworkentry/10.1007%2F978-0-387-31439-6_531
 class CookTorrance(Reflectance):
   def __init__(
     self,
     space=None,
+    facet_slope_dist=ggx,
     **kwargs,
   ):
     super().__init__(**kwargs)
@@ -390,12 +400,20 @@ class CookTorrance(Reflectance):
       enc=FourierEncoder(input_dims=in_size),
       num_layers=5, hidden_size=128, init="xavier",
     )
-    self.facet_slope_dist = SkipConnMLP(
+    self.roughness = SkipConnMLP(
       in_size=in_size + 1, out=1,
       latent_size=self.latent_size,
       enc=FourierEncoder(input_dims=in_size),
       num_layers=5, hidden_size=128, init="xavier",
     )
+
+    #self.facet_slope_dist = SkipConnMLP(
+    #  in_size=in_size + 1, out=1,
+    #  latent_size=self.latent_size,
+    #  enc=FourierEncoder(input_dims=in_size),
+    #  num_layers=5, hidden_size=128, init="xavier",
+    #)
+
     self.diffuse_color = SkipConnMLP(
       in_size=in_size, out=3,
       latent_size=self.latent_size,
@@ -424,14 +442,15 @@ class CookTorrance(Reflectance):
     # TODO is below numerically stable?
     F = 0.5 * \
       g_minus_c.square()/g_plus_c.square().clamp(min=1e-8) * \
-      (1 + (c * g_plus_c + 1).square()/(c * g_minus_c + 1).square().clamp(min=1e-8))
+      (1 + (c * g_plus_c + 1).square() / \
+      (c * g_minus_c + 1).square().clamp(min=1e-8)).clamp(min=1e-5)
 
     G = torch.minimum(
       2 * n_dot_h * n_dot_v/c,
       2 * n_dot_h * n_dot_l/c,
     ).clamp(max=1)
     # TODO this should be normalized to 1 over the hemisphere?
-    D = self.facet_slope_dist(torch.cat([x, n_dot_h], dim=-1), latent).sigmoid()
+    D = ggx(h, n, self.roughness(x, latent))
     r_s = F * D * G / (4 * n_dot_l * n_dot_v)
 
     r_d = self.diffuse_color(x, latent)
@@ -716,6 +735,8 @@ refl_kinds = {
   "view-light": ViewLight,
   "basic": Basic,
   "diffuse": Diffuse,
+  "cook-torrance": CookTorrance,
+
   "rusin": Rusin,
   "rusin-helmholtz": RusinHelmholtz,
   # classical models with some order mechanism

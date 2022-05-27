@@ -103,14 +103,14 @@ food: clean
 
 dnerf_dataset = bouncingballs
 dnerf: clean
-	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \
-	--epochs 50_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 256 \
+	--epochs 100_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
 	--crop-size 18 --near 2 --far 6 -lr 1e-3 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
   --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
   --sigmoid-kind upshifted --notraintest --opt-step 3 --dyn-refl-latent 3 \
-  #--load models/dyn_${dnerf_dataset}.pt
+  --load models/dyn_${dnerf_dataset}.pt
 
 dnerf_original: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 32 \
@@ -151,9 +151,10 @@ long_dnerf: clean
 
 dex: clean
 	python3 -O runner.py -d data/dex_nerf/dex_nerf_simulated_clutter_light_array/ \
-  --data-kind original --size 128 --epochs 80_000 --save models/clutter.pt \
-	--near 2 --far 6 --batch-size 4 --crop-size 16 --model plain -lr 5e-4 --save-freq 2500 \
-	--loss-fns l2 --refl-kind pos-linear-view #--load models/clutter.pt #--omit-bg
+  --data-kind original --size 64 --epochs 80_000 --save models/clutter.pt \
+	--near 2 --far 10 --batch-size 4 --crop-size 16 --model plain -lr 5e-4 --save-freq 2500 \
+  --visualize depth \
+	--loss-fns l2 --refl-kind view --load models/clutter.pt #--omit-bg
 
 dnerf_gru: clean
 	python3 runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 64 \

@@ -370,7 +370,8 @@ def arguments():
   # TODO actually implement below
   rprt.add_argument(
     "--visualize", type=str, nargs="*", default=[],
-    choices=["flow", "rigidity", "depth", "normals", "normals-at-depth"],
+    choices=list(visualizations.keys()),
+    #["flow", "rigidity", "depth", "normals", "normals-at-depth"],
     help="""\
 Extra visualizations that can be rendered:
 flow: 3d movement, color visualizes direction, and intensity is how much movement
@@ -507,6 +508,34 @@ def render(
   elif args.data_kind == "pixel-single": return model((rays, positions)), rays
   return model(rays), rays
 
+def depth_vis(model, args):
+  if not hasattr(model, "nerf"): return []
+  raw_depth = nerf.volumetric_integrate(model.nerf.weights, model.nerf.ts[:, None, None, None, None])
+  depth = (raw_depth[0]-args.near)/(args.far - args.near).clamp(min=0, max=1)
+  items = [depth]
+  if args.normals_from_depth:
+    depth_normal = (50*utils.depth_to_normals(depth)+1)/2
+    items.append(depth_normal.clamp(min=0, max=1))
+  return items
+
+def flow_vis(model, args):
+  if not hasattr(model, "rigid_dp"): return []
+  flow_map = nerf.volumetric_integrate(model.nerf.weights, model.rigid_dp)[0]
+  flow_map /= flow_map.norm(dim=-1).max()
+  flow_map = flow_map.abs().sqrt().copysign(flow_map)
+  return [(flow_map +1)/2]
+
+def rigidity_vis(model, args):
+  if not hasattr(model, "rigidity"): return []
+  rigidity_map = nerf.volumetric_integrate(model.nerf.weights, model.rigidity)[0]
+  return [rigidity_map]
+
+# list of possible visualization
+visualizations = {
+  "depth": depth_vis,
+  "flow": flow_vis,
+  "rigidity": rigidity_vis,
+}
 
 def save_losses(args, losses):
   outdir = args.outdir
@@ -808,21 +837,8 @@ def train(model, cam, labels, opt, args, sched=None):
           items.append(ref[0,...,-1,None].expand_as(ref0))
           items.append(out[0,...,-1,None].expand_as(ref0).sigmoid())
 
-        if args.depth_images and hasattr(model, "nerf"):
-          raw_depth = nerf.volumetric_integrate(model.nerf.weights, model.nerf.ts[:, None, None, None, None])
-          depth = (raw_depth[0]-args.near)/(args.far - args.near)
-          items.append(depth.clamp(min=0, max=1))
-          if args.normals_from_depth:
-            depth_normal = (50*utils.depth_to_normals(depth)+1)/2
-            items.append(depth_normal.clamp(min=0, max=1))
-        if args.flow_map and hasattr(model, "rigid_dp"):
-          flow_map = nerf.volumetric_integrate(model.nerf.weights, model.rigid_dp)[0]
-          flow_map /= flow_map.norm(dim=-1).max()
-          flow_map = flow_map.abs().sqrt().copysign(flow_map)
-          items.append(flow_map.add(1).div(2))
-        if args.rigidity_map and hasattr(model, "rigidity"):
-          rigidity_map = nerf.volumetric_integrate(model.nerf.weights, model.rigidity)[0]
-          items.append(rigidity_map)
+        items = items + [img for vis in args.visualize for img in visualizations[vis](model, args)]
+
         save_plot(os.path.join(args.outdir, f"valid_{i:05}.png"), *items)
 
     if i % args.save_freq == 0 and i != 0:
@@ -836,7 +852,7 @@ def train(model, cam, labels, opt, args, sched=None):
 def test(model, cam, labels, args, training: bool = True):
   times = None
   if type(labels) == tuple:
-    times = labels[-1]
+    times = labels[-1].to(device)
     labels = labels[0]
 
   ls = []
@@ -1052,7 +1068,7 @@ def set_per_run(model, args, labels):
       refl_inst = refl.load(args, args.refl_kind, args.space_kind, ls).to(device)
       model.set_refl(refl_inst)
 
-  if "bg" in args.replace: model.set_bg(args.args)
+  if "bg" in args.replace: model.set_bg(args.bg)
 
   if "sigmoid" in args.replace and hasattr(model, "nerf"): model.nerf.set_sigmoid(args.sigmoid_kind)
 
