@@ -5,7 +5,9 @@ import random
 import math
 
 from .neural_blocks import (
-  SkipConnMLP, UpdateOperator, FourierEncoder, PositionalEncoder, NNEncoder, EncodedGRU,
+  SkipConnMLP, UpdateOperator,
+  FourierEncoder, PositionalEncoder, NNEncoder, EncodedGRU,
+  HashEncoder,
 )
 import src.utils as utils
 from .utils import (
@@ -317,8 +319,8 @@ class PlainNeRF(CommonNeRF):
 
     self.first = SkipConnMLP(
       in_size=3, out=1 + self.intermediate_size, latent_size=self.total_latent_size(),
-      enc=FourierEncoder(input_dims=3), activation=torch.sin,
-      num_layers = 5, hidden_size = 128, init="siren",
+      enc=HashEncoder(),
+      num_layers = 4, hidden_size = 256,
     )
 
   def forward(self, rays):

@@ -86,6 +86,112 @@ class NNEncoder(nn.Module):
     assert(x.shape[-1] == self.fwd.in_features)
     return torch.sin(30 * self.fwd(x))
 
+# primes:
+# https://github.com/ashawkey/torch-ngp/blob/93b08a0d4ec1cc6e69d85df7f0acdfb99603b628/gridencoder/src/gridencoder.cu#L41
+
+class HashEncoder(nn.Module):
+  def __init__(
+    self,
+    input_dims: int = 3,
+
+    emb_size: int = 1<<18,
+    feat_size: int = 2,
+
+    # TODO pick bigger primes
+    primes=[1,2654435761,805459861,3674653429,2097192037,1434869437,2165219737],
+
+    low_reso=16,
+    high_reso=512,
+    levels:int = 8,
+
+    include_input = False,
+  ):
+    super().__init__()
+    assert(input_dims == 3), "Only supports 3 inputs currently"
+
+    self.register_buffer(
+      "primes",
+      torch.tensor(primes),
+      persistent=True,
+    )
+
+    self.levels = levels
+    self.in_features = input_dims
+    self.include_input = include_input
+    self.emb_size = emb_size
+    self.feat_size = feat_size
+    self.embs = nn.ModuleList([
+      nn.Embedding(emb_size, feat_size) for _ in range(levels)
+    ])
+    self.scale = math.exp(
+      (math.log(high_reso) - math.log(low_reso))/levels-1
+    )
+    self.low_reso = low_reso
+    self.high_reso = high_reso
+
+  def output_dims(self):
+    return self.levels * self.feat_size + self.include_input * self.in_features
+  def hash_fn(self, x):
+    vs = (x * self.primes[:x.shape[-1]]).split(1, dim=-1)
+    out = vs[0]
+    for v in vs[1:]: out = out.bitwise_xor(v)
+    return out
+  def forward(self, x):
+    assert(x.shape[-1] == self.in_features)
+    out = []
+    cat = lambda x, y, z: torch.cat([x,y,z], dim=-1)
+    for i in range(self.levels):
+      emb = self.embs[i].cuda()
+
+      N_l = self.low_reso * (self.scale ** i)
+      v_l = x * N_l
+
+      l = v_l.floor().long()
+      lx, ly, lz = l.split([1,1,1], dim=-1)
+
+      h = (l+1)
+      hx, hy, hz = h.split([1,1,1], dim=-1)
+
+      vs = [
+        l,
+        cat(lx, ly, hz),
+        cat(lx, hy, lz),
+        cat(lx, hy, hz),
+
+        cat(hx, ly, lz),
+        cat(hx, ly, hz),
+        cat(hx, hy, lz),
+        h,
+      ]
+      embs = torch.stack([emb(self.hash_fn(v) % self.emb_size) for v in vs], dim=0)
+
+      # TODO maybe clamp here?
+      ws = (v_l - l)
+      assert((ws <= 1).all())
+      assert((ws >= 0).all())
+
+      wx, wy, wz = ws.split([1,1,1], dim=-1)
+
+      iws = 1 - ws
+      iwx, iwy, iwz = iws.split([1,1,1], dim=-1)
+
+      weights = torch.stack([
+        iwx * iwy * iwz,
+        iwx * iwy * wz,
+        iwx * wy * iwz,
+        iwx * wy * wz,
+
+        wx * iwy * iwz,
+        wx * iwy * wz,
+        wx * wy * iwz,
+        wx * wy * wz,
+      ], dim=0)
+      out.append((embs * weights.unsqueeze(-2)).sum(dim=0).squeeze(1))
+
+    out = torch.cat(out, dim=-1)
+    if self.include_input: out = torch.cat([x, out], dim=-1)
+    return out
+
 # how to initialize the MLP, otherwise defaults to torch
 mlp_init_kinds = {
   None,

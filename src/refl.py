@@ -5,7 +5,7 @@ import random
 import math
 from typing import Optional
 
-from .neural_blocks import ( SkipConnMLP, NNEncoder, FourierEncoder )
+from .neural_blocks import ( SkipConnMLP, FourierEncoder )
 from .utils import (
   coordinate_system,
   autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, load_sigmoid

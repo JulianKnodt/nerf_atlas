@@ -7,9 +7,10 @@ clean:
 
 original: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 64 --epochs 80_000 --save models/lego.pt \
-	--near 2 --far 6 --batch-size 4 --crop-size 16 --model plain -lr 5e-4 \
-	--loss-fns l2 --refl-kind pos #--load models/lego.pt #--omit-bg
+	--size 256 --epochs 80_000 --save models/lego.pt --save-freq 2500 \
+	--near 2 --far 6 --batch-size 2 --crop-size 24 --model plain -lr 5e-4 \
+	--loss-fns l2 --refl-kind pos-linear-view --sigmoid-kind fat \
+  --opt-step 3 --load models/lego.pt #--omit-bg
 
 coarse_fine: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
