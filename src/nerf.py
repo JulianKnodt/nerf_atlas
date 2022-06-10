@@ -1251,6 +1251,7 @@ class DynamicNeRF(nn.Module):
     # x,y,z -> n control points, rigidity
     self.delta_estim = SkipConnMLP(
       in_size=3, out=out_dims, num_layers=5, hidden_size=256, init="xavier",
+      enc=HashEncoder(),
     )
     self.delta_estim.zero_last_layer()
     self.spline_fn = cubic_bezier if spline_points == 4 else de_casteljau

@@ -94,17 +94,17 @@ class HashEncoder(nn.Module):
     self,
     input_dims: int = 3,
 
-    emb_size: int = 1<<18,
-    feat_size: int = 2,
+    emb_size: int = 1<<16,
+    feat_size: int = 4,
 
-    # TODO pick bigger primes
     primes=[1,2654435761,805459861,3674653429,2097192037,1434869437,2165219737],
 
-    low_reso=16,
-    high_reso=512,
+    low_reso=1<<4,
+    #a 1<<9 to 1<<18
+    high_reso=1<<14,
     levels:int = 8,
 
-    include_input = False,
+    include_input = True,
   ):
     super().__init__()
     assert(input_dims == 3), "Only supports 3 inputs currently"

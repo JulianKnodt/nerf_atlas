@@ -5,7 +5,7 @@ import random
 import math
 from typing import Optional
 
-from .neural_blocks import ( SkipConnMLP, FourierEncoder )
+from .neural_blocks import ( SkipConnMLP, FourierEncoder, HashEncoder, )
 from .utils import (
   coordinate_system,
   autograd, eikonal_loss, dir_to_elev_azim, rotate_vector, load_sigmoid
@@ -232,7 +232,8 @@ class Positional(Reflectance):
     super().__init__(**kwargs)
     self.mlp = SkipConnMLP(
       in_size=3, out=self.out_features, latent_size=self.latent_size,
-      num_layers=5, hidden_size=256, init="siren", activation=torch.sin,
+      enc=HashEncoder(),
+      num_layers=5, hidden_size=256,
     )
   # Each voxel just requires the out_features which is usually RGB,
   # and does not need to do any special modifications.
@@ -251,12 +252,13 @@ class PosLinearView(Reflectance):
     self.im = intermediate_size
     self.pos = SkipConnMLP(
       in_size=3, out=self.out_features+self.im, latent_size=self.latent_size,
-      num_layers=3, hidden_size=256, init="siren", activation=torch.sin,
+      enc=HashEncoder(input_dims=3),
+      num_layers=2, hidden_size=256,
     )
     self.view = SkipConnMLP(
       # linear shading, combined with specular highlight
       in_size=3+view_size, out=1, latent_size=self.latent_size + self.im,
-      num_layers=3, hidden_size=128, init="siren", activation=torch.sin,
+      num_layers=2, hidden_size=128, init="siren", activation=torch.sin,
     )
   # Each voxel just requires the out_features which is usually RGB,
   # and does not need to do any special modifications.

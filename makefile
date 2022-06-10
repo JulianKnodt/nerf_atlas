@@ -6,11 +6,11 @@ clean:
 	@-rm outputs/*.mp4
 
 original: clean
-	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
-	--size 256 --epochs 80_000 --save models/lego.pt --save-freq 2500 \
-	--near 2 --far 6 --batch-size 2 --crop-size 24 --model plain -lr 5e-4 \
-	--loss-fns l2 --refl-kind pos-linear-view --sigmoid-kind fat \
-  --opt-step 3 --load models/lego.pt #--omit-bg
+	python3 runner.py -d data/nerf_synthetic/lego/ --data-kind original \
+	--size 256 --epochs 15_000 --save models/lego.pt --save-freq 2500 \
+	--near 2 --far 6 --batch-size 2 --crop-size 24 --model plain -lr 2e-4 \
+	--loss-fns l2 --refl-kind pos --notraintest \
+  --load models/lego.pt #--omit-bg
 
 coarse_fine: clean
 	python3 -O runner.py -d data/nerf_synthetic/lego/ --data-kind original \
@@ -105,11 +105,11 @@ food: clean
 dnerf_dataset = bouncingballs
 dnerf: clean
 	python3 -O runner.py -d data/dynamic/${dnerf_dataset}/ --data-kind dnerf --size 256 \
-	--epochs 100_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
-	--crop-size 18 --near 2 --far 6 -lr 1e-3 --valid-freq 500 --spline 6 \
+	--epochs 25_000 --save models/dyn_${dnerf_dataset}.pt --model plain --batch-size 2 \
+	--crop-size 18 --near 2 --far 6 -lr 5e-4 --valid-freq 500 --spline 6 \
   --loss-window 2000 --loss-fns l2 --test-crop-size 48 --depth-images --save-freq 2500 \
   --flow-map --dyn-model plain --rigidity-map --refl-kind pos-linear-view \
-  --higher-end-chance 1 --offset-decay 30 --ffjord-div-decay 0.3 \
+  --higher-end-chance 1 --offset-decay 60 --ffjord-div-decay 0.5 \
   --sigmoid-kind upshifted --notraintest --opt-step 3 --dyn-refl-latent 3 \
   --load models/dyn_${dnerf_dataset}.pt
 
